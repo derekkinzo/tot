@@ -1,0 +1,19 @@
+{
+  "name": "tot-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/web-ui && npm run build -w packages/server",
+    "dev": "npm run dev -w packages/server",
+    "test": "npm run test -w packages/server",
+    "clean": "rm -rf packages/*/dist packages/server/static"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

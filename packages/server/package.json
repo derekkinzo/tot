@@ -1,0 +1,55 @@
+{
+  "name": "tot-mcp",
+  "version": "0.1.0",
+  "description": "Tree of Thoughts MCP Server — structured hypothesis reasoning with MECE decomposition and real-time visualization",
+  "type": "module",
+  "author": "Derek Kinzo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/derekkinzo/tot.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://github.com/derekkinzo/tot#readme",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "bin": {
+    "tot-mcp": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "static/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup && npm run copy-ui",
+    "copy-ui": "rm -rf static && cp -r ../web-ui/dist static 2>/dev/null || mkdir -p static",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "mcp",
+    "tree-of-thoughts",
+    "reasoning",
+    "mece",
+    "debugging",
+    "hypothesis",
+    "structured-thinking"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "sirv": "^3.0.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0"
+  }
+}

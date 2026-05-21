@@ -1,0 +1,11 @@
+node_modules/
+dist/
+static/
+.tot/
+.tot-repl/
+.claude/
+.playwright-mcp/
+eval/
+*.tgz
+.DS_Store
+docs/frames/
