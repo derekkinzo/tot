@@ -41,9 +41,18 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
 
   return JSON.stringify({ sessionId, rootId }) + '\n\n' +
     `✓ Tree created: "${truncate(problem, 70)}"\n\n` +
-    `── Next Step ──\n` +
-    `Decompose into 2-5 MECE hypotheses.\n` +
+    `── Domain Investigation ──\n` +
+    `BEFORE decomposing, investigate the problem domain:\n` +
+    `1. Gather context: What is the system architecture? What changed recently?\n` +
+    `2. Characterize symptoms: When did it start? Who/what is affected? What is the scope?\n` +
+    `3. Identify boundaries: What is IN scope vs OUT of scope for this investigation?\n` +
+    `Fan out subagents to research the domain from multiple angles simultaneously.\n\n` +
+    `── Decomposition ──\n` +
+    `Once you understand the domain, decompose into 2-5 MECE hypotheses.\n` +
     (domainHint ? domainHint : '') +
+    `MECE criteria:\n` +
+    `  ME (Mutually Exclusive): Each hypothesis covers a DISTINCT failure mode — no overlaps.\n` +
+    `  CE (Collectively Exhaustive): Together they cover ALL plausible explanations.\n` +
     `For EACH hypothesis, define what TEST would REFUTE it.\n` +
     `Execute the most discriminating test first (one that separates hypotheses).\n\n` +
     `── Tree ──\n` +
@@ -52,8 +61,16 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
 
 export function formatDecompose(children: Hypothesis[], check: StructuralCheck, tm: TreeManager): string {
   const ids = children.map((c) => c.id);
+  const isRootDecomposition = children[0]?.depth === 1;
   let result = JSON.stringify({ childIds: ids }) + '\n\n' +
     `✓ Decomposed into ${children.length} sub-hypotheses\n\n`;
+
+  if (isRootDecomposition) {
+    result += `── Initial Structure (Critical) ──\n`;
+    result += `This is the foundational decomposition. Its quality determines the entire investigation.\n`;
+    result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n`;
+    result += `Fan out subagents to verify this structure is truly MECE and covers the full problem space.\n\n`;
+  }
 
   // Structural checks
   result += `── Checks ──\n`;
@@ -94,10 +111,14 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     result += `\nDepth ${children[0].depth}: Deep decompositions risk fragmenting the problem. Consider whether the parent is specific enough to test directly.\n`;
   }
 
-  // Protocol guidance
+  // MECE review and protocol guidance
+  result += `\n── MECE Review ──\n`;
+  result += `STOP and review this decomposition before proceeding:\n`;
+  result += `  ME: Could a single root cause belong to TWO of these categories? If yes, refine the boundaries.\n`;
+  result += `  CE: Can you imagine a plausible cause NOT covered by ANY of these? If yes, add it.\n`;
+  result += `  Level: Are all hypotheses at the same level of abstraction?\n`;
+  result += `Fan out subagents to validate each hypothesis is distinct and the space is fully covered.\n`;
   result += `\n── Protocol ──\n`;
-  result += `ME check: Could a single cause belong to two of these?\n`;
-  result += `CE check: Can you imagine a cause NOT covered by any of these?\n`;
   result += `Crucial experiment: What SINGLE observation would yield DIFFERENT results depending on which sub-hypothesis is correct?\n`;
   result += `Prioritize this discriminating test before investigating each in isolation.\n`;
 
@@ -106,11 +127,23 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
 }
 
 export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): string {
-  return JSON.stringify({ hypothesisId: hypothesis.id }) + '\n\n' +
-    `✓ Added hypothesis: "${truncate(hypothesis.content, 60)}"\n\n` +
-    `── Protocol ──\n` +
-    `Siblings may need MECE re-validation. What test would REFUTE this new hypothesis?\n\n` +
-    formatTreeSummary(tm);
+  const siblings = tm.getSiblings(hypothesis.id);
+  const activeSiblings = siblings.filter((s) => s.status !== 'eliminated');
+
+  let result = JSON.stringify({ hypothesisId: hypothesis.id }) + '\n\n' +
+    `✓ Added hypothesis: "${truncate(hypothesis.content, 60)}"\n\n`;
+
+  result += `── MECE Validation ──\n`;
+  result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
+  result += `  ME: Does this new hypothesis overlap with any existing sibling?\n`;
+  result += `  CE: Does adding this close a gap, or is there still something missing?\n`;
+  result += `Fan out subagents to challenge whether this hypothesis is truly distinct from its siblings.\n\n`;
+
+  result += `── Protocol ──\n`;
+  result += `What is the fastest path to REFUTE this hypothesis? Define the test before investigating.\n`;
+
+  result += '\n' + formatTreeSummary(tm);
+  return result;
 }
 
 export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, tm: TreeManager): string {
@@ -226,11 +259,14 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   if (remaining.length === 1) {
     result += `\n→ Only 1 hypothesis remains. Before confirming, apply a SEVERE TEST:\n`;
     result += `  Can you REPRODUCE the issue by triggering this cause?\n`;
+    result += `  Fan out subagents to challenge this conclusion from different angles — what could you be missing?\n`;
   } else if (remaining.length === 0) {
-    result += `\n⚠ All siblings eliminated — hypothesis space may be incomplete. Add new hypotheses.\n`;
+    result += `\n⚠ All siblings eliminated — hypothesis space may be incomplete.\n`;
+    result += `Fan out subagents to investigate what was missed. Add new hypotheses from fresh perspectives.\n`;
   } else {
     result += `\n── Protocol ──\n`;
     result += `What is the most discriminating test to distinguish the remaining ${remaining.length} hypotheses?\n`;
+    result += `Fan out subagents to independently investigate each remaining hypothesis and challenge assumptions.\n`;
   }
 
   result += '\n' + formatTreeSummary(tm);

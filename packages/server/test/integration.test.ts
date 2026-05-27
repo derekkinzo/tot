@@ -87,7 +87,7 @@ describe('MCP Integration', () => {
         arguments: { problem: 'Memory leak in production' },
       });
       const text = getText(result);
-      expect(text).toContain('Decompose');
+      expect(text).toContain('MECE');
       expect(text).toContain('REFUTE');
     });
 
@@ -125,7 +125,7 @@ describe('MCP Integration', () => {
         arguments: { parentId: rootId, children: ['Network layer', 'Application layer'] },
       });
       const text = getText(result);
-      expect(text).toContain('ME check');
+      expect(text).toContain('MECE Review');
     });
 
     it('supports multi-level decomposition', async () => {
