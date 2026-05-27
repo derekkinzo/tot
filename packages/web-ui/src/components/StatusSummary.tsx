@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import type { Hypothesis, Session } from '../types';
 import ExportButton from './ExportButton';
+import { STATUS_COLORS } from '../theme';
 
 interface Props {
   hypotheses: Map<string, Hypothesis>;
@@ -7,18 +9,20 @@ interface Props {
 }
 
 export default function StatusSummary({ hypotheses, session }: Props) {
-  let pending = 0, exploring = 0, eliminated = 0, confirmed = 0;
-  for (const [, h] of hypotheses) {
-    switch (h.status) {
-      case 'pending': pending++; break;
-      case 'exploring': exploring++; break;
-      case 'eliminated': eliminated++; break;
-      case 'confirmed': confirmed++; break;
+  const counts = useMemo(() => {
+    let pending = 0, exploring = 0, eliminated = 0, confirmed = 0;
+    for (const [, h] of hypotheses) {
+      switch (h.status) {
+        case 'pending': pending++; break;
+        case 'exploring': exploring++; break;
+        case 'eliminated': eliminated++; break;
+        case 'confirmed': confirmed++; break;
+      }
     }
-  }
+    return { pending, exploring, eliminated, confirmed, total: hypotheses.size };
+  }, [hypotheses]);
 
-  const total = hypotheses.size;
-  if (total === 0) return null;
+  if (counts.total === 0) return null;
 
   return (
     <div className="overlay-widget" style={{
@@ -26,12 +30,12 @@ export default function StatusSummary({ hypotheses, session }: Props) {
       gap: 12,
       fontSize: 12,
     }}>
-      {pending > 0 && <Pill color="#3b82f6" label="Pending" count={pending} />}
-      {exploring > 0 && <Pill color="#eab308" label="Exploring" count={exploring} />}
-      {eliminated > 0 && <Pill color="#ef4444" label="Eliminated" count={eliminated} />}
-      {confirmed > 0 && <Pill color="#22c55e" label="Confirmed" count={confirmed} />}
+      {counts.pending > 0 && <Pill color={STATUS_COLORS.pending} label="Pending" count={counts.pending} />}
+      {counts.exploring > 0 && <Pill color={STATUS_COLORS.exploring} label="Exploring" count={counts.exploring} />}
+      {counts.eliminated > 0 && <Pill color={STATUS_COLORS.eliminated} label="Eliminated" count={counts.eliminated} />}
+      {counts.confirmed > 0 && <Pill color={STATUS_COLORS.confirmed} label="Confirmed" count={counts.confirmed} />}
       <span style={{ color: '#6b7280', borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
-        {total} total
+        {counts.total} total
       </span>
       <span style={{ borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
         <ExportButton session={session} hypotheses={hypotheses} />

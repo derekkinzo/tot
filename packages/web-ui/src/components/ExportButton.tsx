@@ -25,7 +25,9 @@ export default function ExportButton({ session, hypotheses }: Props) {
 
   const copyMarkdown = () => {
     const md = generateMarkdown(session, hypotheses);
-    navigator.clipboard.writeText(md);
+    try {
+      navigator.clipboard?.writeText(md);
+    } catch { /* clipboard unavailable */ }
     setShowMenu(false);
   };
 

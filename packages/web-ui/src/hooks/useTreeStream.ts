@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useReducer, useRef, useState } from 'react';
-import type { Hypothesis, Session, TreeEvent } from '../types';
+import type { Evidence, Hypothesis, Session, TreeEvent } from '../types';
 
 interface TreeState {
   session: Session | null;
@@ -16,7 +16,7 @@ type Action =
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'clear-recent' }
-  | { type: 'evidence-added'; hypothesisId: string; evidence: any }
+  | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
   | { type: 'session-created'; session: Session }
   | { type: 'session-completed'; sessionId: string };
 
@@ -82,6 +82,7 @@ export function useTreeStream(projectDir?: string) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [currentProject, setCurrentProject] = useState<string>(projectDir || '');
   const esRef = useRef<EventSource | null>(null);
+  const connectionGenRef = useRef(0);
 
   // Clear recently changed after animation duration
   useEffect(() => {
@@ -118,14 +119,22 @@ export function useTreeStream(projectDir?: string) {
       esRef.current = null;
     }
 
+    const gen = ++connectionGenRef.current;
     const sseUrl = currentProject ? `/sse?project=${encodeURIComponent(currentProject)}` : '/sse';
     const es = new EventSource(sseUrl);
     esRef.current = es;
 
-    es.onopen = () => dispatch({ type: 'connected' });
-    es.onerror = () => dispatch({ type: 'disconnected' });
+    es.onopen = () => {
+      if (connectionGenRef.current !== gen) return;
+      dispatch({ type: 'connected' });
+    };
+    es.onerror = () => {
+      if (connectionGenRef.current !== gen) return;
+      dispatch({ type: 'disconnected' });
+    };
 
     es.onmessage = (event) => {
+      if (connectionGenRef.current !== gen) return;
       try {
         const data: TreeEvent = JSON.parse(event.data);
         switch (data.type) {

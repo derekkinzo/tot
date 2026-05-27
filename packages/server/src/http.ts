@@ -235,6 +235,9 @@ function handleSSE(
     const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
     const snapshot: TreeEvent = { type: 'snapshot', session, hypotheses };
     res.write(`id: 0\ndata: ${JSON.stringify(snapshot)}\n\n`);
+  } else {
+    const empty: TreeEvent = { type: 'snapshot', session: null as any, hypotheses: [] };
+    res.write(`id: 0\ndata: ${JSON.stringify(empty)}\n\n`);
   }
 
   // Register client for this project
@@ -383,6 +386,7 @@ function handleInfoAPI(res: ServerResponse, ctx: MultiProjectContext): void {
       dir: p.projectDir,
       activeProblem: latestActive?.problem ?? null,
       sessionCount: p.sessionIndex.length || p.tm.getAllSessions().length,
+      persistenceHealthy: p.persistenceHealthy,
     };
   });
 

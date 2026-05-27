@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fork } from 'node:child_process';
 import { createConnection } from 'node:net';
+import { HTTP_PORT_DEFAULT, DAEMON_STARTUP_TIMEOUT_MS, DAEMON_POLL_INTERVAL_MS, TCP_PROBE_TIMEOUT_MS } from './defaults.js';
 
 export interface DaemonInfo {
   pid: number;
@@ -39,7 +40,7 @@ export function discoverDaemon(totDir: string): DaemonInfo | null {
     const ipcPort = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
     const httpPort = existsSync(join(totDir, 'daemon.http'))
       ? parseInt(readFileSync(join(totDir, 'daemon.http'), 'utf-8').trim(), 10)
-      : 6274;
+      : HTTP_PORT_DEFAULT;
 
     // Check if process is alive
     try {
@@ -116,20 +117,20 @@ export async function startDaemon(totDir: string): Promise<DaemonInfo> {
 
 async function pollForDaemon(totDir: string): Promise<DaemonInfo> {
   const portFile = join(totDir, 'daemon.port');
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + DAEMON_STARTUP_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    await sleep(50);
+    await sleep(DAEMON_POLL_INTERVAL_MS);
     if (existsSync(portFile)) {
       const info = discoverDaemon(totDir);
       if (info) {
-        const reachable = await tcpProbe(info.ipcPort, 1000);
+        const reachable = await tcpProbe(info.ipcPort, TCP_PROBE_TIMEOUT_MS);
         if (reachable) return info;
       }
     }
   }
 
-  throw new Error('Daemon failed to start within 5 seconds');
+  throw new Error(`Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS / 1000} seconds`);
 }
 
 export function stopDaemon(totDir: string): boolean {

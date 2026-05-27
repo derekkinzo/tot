@@ -1,25 +1,14 @@
 import type { Hypothesis } from '../types';
+import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
 
 interface Props {
   hypothesis: Hypothesis;
   onClose: () => void;
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  supports: '#22c55e',
-  refutes: '#ef4444',
-  neutral: '#8b949e',
-};
-
-const STATUS_STYLES: Record<string, { color: string; label: string }> = {
-  pending: { color: '#3b82f6', label: 'Pending' },
-  exploring: { color: '#eab308', label: 'Exploring' },
-  eliminated: { color: '#ef4444', label: 'Eliminated' },
-  confirmed: { color: '#22c55e', label: 'Confirmed' },
-};
-
 export default function DetailPanel({ hypothesis, onClose }: Props) {
-  const statusStyle = STATUS_STYLES[hypothesis.status] ?? STATUS_STYLES.pending;
+  const statusColor = STATUS_COLORS[hypothesis.status] ?? STATUS_COLORS.pending;
+  const statusLabel = STATUS_LABELS[hypothesis.status] ?? STATUS_LABELS.pending;
 
   return (
     <div style={{
@@ -41,10 +30,10 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
             borderRadius: 12,
             fontSize: 12,
             fontWeight: 600,
-            background: `${statusStyle.color}20`,
-            color: statusStyle.color,
-            border: `1px solid ${statusStyle.color}40`,
-          }}>{statusStyle.label}</span>
+            background: `${statusColor}20`,
+            color: statusColor,
+            border: `1px solid ${statusColor}40`,
+          }}>{statusLabel}</span>
           {hypothesis.score !== null && (
             <span style={{
               marginLeft: 10,
@@ -114,13 +103,13 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
                 padding: '12px 14px',
                 background: '#1c1f26',
                 borderRadius: 8,
-                borderLeft: `3px solid ${TYPE_COLORS[ev.type] ?? '#8b949e'}`,
+                borderLeft: `3px solid ${EVIDENCE_TYPE_COLORS[ev.type] ?? '#8b949e'}`,
               }}>
                 <div style={{
                   fontSize: 11,
                   fontWeight: 600,
                   textTransform: 'uppercase',
-                  color: TYPE_COLORS[ev.type],
+                  color: EVIDENCE_TYPE_COLORS[ev.type],
                   marginBottom: 6,
                 }}>
                   {ev.type}

@@ -9,6 +9,7 @@ import type {
   TreeEvent,
   TreeState,
 } from './types.js';
+import { STAGNATION_THRESHOLD_DEFAULT, MAX_DEPTH_DEFAULT, MAX_HYPOTHESES_DEFAULT } from './defaults.js';
 
 export class TreeManager extends EventEmitter {
   private sessions = new Map<string, Session>();
@@ -22,9 +23,9 @@ export class TreeManager extends EventEmitter {
 
   constructor(opts?: { stagnationThreshold?: number; maxDepth?: number; maxHypotheses?: number }) {
     super();
-    this.stagnationThreshold = opts?.stagnationThreshold ?? 4;
-    this.maxDepth = opts?.maxDepth ?? 20;
-    this.maxHypotheses = opts?.maxHypotheses ?? 500;
+    this.stagnationThreshold = opts?.stagnationThreshold ?? STAGNATION_THRESHOLD_DEFAULT;
+    this.maxDepth = opts?.maxDepth ?? MAX_DEPTH_DEFAULT;
+    this.maxHypotheses = opts?.maxHypotheses ?? MAX_HYPOTHESES_DEFAULT;
   }
 
   /**

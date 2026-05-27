@@ -14,7 +14,7 @@ import {
 import { flextree } from 'd3-flextree';
 import { hierarchy } from 'd3-hierarchy';
 import '@xyflow/react/dist/style.css';
-import HypothesisNode from './HypothesisNode';
+import HypothesisNode, { type HypothesisData } from './HypothesisNode';
 import StatusSummary from './StatusSummary';
 import Breadcrumb from './Breadcrumb';
 import Legend from './Legend';
@@ -23,9 +23,19 @@ import SessionSelector from './SessionSelector';
 import ProjectSelector from './ProjectSelector';
 import type { Hypothesis, Session } from '../types';
 import type { ProjectInfo } from '../hooks/useTreeStream';
+import { STATUS_COLORS, HIGHLIGHT_COLORS } from '../theme';
 
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 100;
+const FIT_MAX_ZOOM = 1.5;
+const FIT_PADDING_FOCUSED = 0.3;
+const FIT_PADDING_OVERVIEW = 0.12;
+const DURATION_INSTANT = 150;
+const DURATION_QUICK = 200;
+const DURATION_STANDARD = 250;
+const DURATION_DELIBERATE = 300;
+const GLOBAL_MIN_ZOOM = 0.05;
+const GLOBAL_MAX_ZOOM = 2;
 const nodeTypes = { hypothesis: HypothesisNode };
 
 interface Props {
@@ -62,7 +72,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
   const { fitView } = useReactFlow();
 
   // Track whether a viewport move was triggered programmatically (fitView)
-  const isProgrammaticMove = useRef(false);
+  const isProgrammaticMove = useRef(true);
 
   // Override fitView to mark moves as programmatic
   const fitViewTracked: typeof fitView = useCallback((...args) => {
@@ -79,8 +89,11 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
     onUserViewportInteraction?.();
   }, [onUserViewportInteraction]);
 
+  const hypothesesRef = useRef(hypotheses);
+  hypothesesRef.current = hypotheses;
+
   const toggleCollapse = useCallback((nodeId: string) => {
-    const h = hypotheses.get(nodeId);
+    const h = hypothesesRef.current.get(nodeId);
     if (h && h.children.length > 0) {
       setCollapsedIds((prev) => {
         const next = new Set(prev);
@@ -89,7 +102,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
         return next;
       });
     }
-  }, [hypotheses]);
+  }, []);
 
   const pathToRoot = useMemo(() => {
     if (!selectedId) return new Set<string>();
@@ -100,18 +113,17 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
     if (!rootId || hypotheses.size === 0) return { nodes: [], edges: [] };
     const result = computeLayout(hypotheses, rootId, selectedId, pathToRoot, collapsedIds);
     for (const node of result.nodes) {
-      const d = node.data as any;
       if (recentlyChanged.has(node.id)) {
         const h = hypotheses.get(node.id);
-        if (h) d.pulseClass = `node-pulse-${h.status}`;
+        if (h) node.data.pulseClass = `node-pulse-${h.status}`;
       }
       if (node.id === lastAddedId) {
-        d.pulseClass = (d.pulseClass || '') + ' node-new';
+        node.data.pulseClass = (node.data.pulseClass || '') + ' node-new';
       }
-      d.onToggleCollapse = toggleCollapse;
+      node.data.onToggleCollapse = toggleCollapse;
     }
     return result;
-  }, [hypotheses, rootId, selectedId, pathToRoot, collapsedIds, recentlyChanged, toggleCollapse]);
+  }, [hypotheses, rootId, selectedId, pathToRoot, collapsedIds, recentlyChanged]);
 
   // Zoom to selected node + its children, or fit all when deselected
   const prevSelectedId = useRef<string | null>(null);
@@ -125,11 +137,11 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
         ? [{ id: selectedId }, ...h.children.filter(c => !collapsedIds.has(selectedId)).map(id => ({ id }))]
         : [{ id: selectedId }];
       requestAnimationFrame(() => {
-        fitViewTracked({ nodes: nodeIds, duration: 250, padding: 0.3, maxZoom: 1.5 });
+        fitViewTracked({ nodes: nodeIds, duration: DURATION_STANDARD, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
       });
     } else {
       requestAnimationFrame(() => {
-        fitViewTracked({ duration: 200, padding: 0.12, maxZoom: 1.5 });
+        fitViewTracked({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
     }
   }, [selectedId, hypotheses, collapsedIds, fitViewTracked]);
@@ -145,9 +157,9 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
           const nodeIds = h
             ? [{ id: selectedId }, ...h.children.map(id => ({ id }))]
             : [{ id: selectedId }];
-          fitViewTracked({ nodes: nodeIds, duration: 150, padding: 0.3, maxZoom: 1.5 });
+          fitViewTracked({ nodes: nodeIds, duration: DURATION_INSTANT, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
         } else {
-          fitViewTracked({ duration: 150, padding: 0.12, maxZoom: 1.5 });
+          fitViewTracked({ duration: DURATION_INSTANT, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
         }
       }, 50);
     }
@@ -157,7 +169,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
   useEffect(() => {
     if (lastAddedId && !selectedId) {
       requestAnimationFrame(() => {
-        fitViewTracked({ duration: 250, padding: 0.12, maxZoom: 1.5 });
+        fitViewTracked({ duration: DURATION_STANDARD, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
     }
   }, [lastAddedId, selectedId, hypotheses, fitViewTracked]);
@@ -168,7 +180,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
     if (nodes.length !== prevNodeCount.current && !selectedId && !lastAddedId) {
       prevNodeCount.current = nodes.length;
       requestAnimationFrame(() => {
-        fitViewTracked({ duration: 200, padding: 0.12, maxZoom: 1.5 });
+        fitViewTracked({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
     }
     prevNodeCount.current = nodes.length;
@@ -247,7 +259,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
       case 'zoom': {
         const h = hypotheses.get(nodeId);
         const nodeIds = h ? [{ id: nodeId }, ...h.children.map(id => ({ id }))] : [{ id: nodeId }];
-        fitViewTracked({ nodes: nodeIds, duration: 300, padding: 0.3, maxZoom: 1.5 });
+        fitViewTracked({ nodes: nodeIds, duration: DURATION_DELIBERATE, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
         break;
       }
       case 'parent': {
@@ -257,7 +269,11 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
       }
       case 'copy': {
         const h = hypotheses.get(nodeId);
-        if (h) navigator.clipboard.writeText(h.content);
+        if (h) {
+          try {
+            navigator.clipboard?.writeText(h.content);
+          } catch { /* clipboard unavailable in this context */ }
+        }
         break;
       }
       case 'select': {
@@ -279,15 +295,15 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
         onPaneClick={onPaneClick}
         onMoveEnd={onMoveEnd}
         fitView
-        fitViewOptions={{ padding: 0.12, maxZoom: 1.5 }}
-        minZoom={0.05}
-        maxZoom={2}
+        fitViewOptions={{ padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM }}
+        minZoom={GLOBAL_MIN_ZOOM}
+        maxZoom={GLOBAL_MAX_ZOOM}
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#30363d" gap={20} />
         <Controls position="bottom-right" />
         <MiniMap
-          nodeColor={(n) => STATUS_COLORS[(n.data as any)?.status] ?? '#6b7280'}
+          nodeColor={(n) => STATUS_COLORS[(n.data as HypothesisData)?.status as keyof typeof STATUS_COLORS] ?? '#6b7280'}
           style={{ background: '#1c1f26', border: '1px solid #30363d' }}
         />
 
@@ -434,20 +450,13 @@ function getPathToRoot(nodeId: string, hypotheses: Map<string, Hypothesis>): Set
 
 // ─── Layout computation ───
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: '#3b82f6',
-  exploring: '#eab308',
-  eliminated: '#ef4444',
-  confirmed: '#22c55e',
-};
-
 function computeLayout(
   hypotheses: Map<string, Hypothesis>,
   rootId: string,
   selectedId: string | null,
   pathToRoot: Set<string>,
   collapsedIds: Set<string>,
-): { nodes: Node[]; edges: Edge[] } {
+): { nodes: Node<HypothesisData>[]; edges: Edge[] } {
   // Determine visible nodes
   const visibleIds = new Set<string>();
   const queue = [rootId];
@@ -480,7 +489,7 @@ function computeLayout(
   const tree = layout(root);
 
   // Convert to React Flow nodes + edges
-  const nodes: Node[] = [];
+  const nodes: Node<HypothesisData>[] = [];
   const edges: Edge[] = [];
 
   for (const treeNode of tree.descendants()) {
@@ -515,7 +524,7 @@ function computeLayout(
         source: h.parentId,
         target: id,
         style: {
-          stroke: isEdgeOnPath ? '#58a6ff' : h.status === 'eliminated' ? '#4b5563' : '#6b7280',
+          stroke: isEdgeOnPath ? HIGHLIGHT_COLORS.pathEdge : h.status === 'eliminated' ? HIGHLIGHT_COLORS.eliminatedEdge : HIGHLIGHT_COLORS.defaultEdge,
           strokeWidth: isEdgeOnPath ? 2.5 : 1.5,
         },
         animated: h.status === 'exploring',

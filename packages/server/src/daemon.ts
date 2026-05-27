@@ -17,9 +17,7 @@ import { startHttpServer } from './http.js';
 import { getToolHandlers, type ToolHandler } from './tools.js';
 import { getTotDir, writeDaemonFiles, cleanup } from './daemon-lifecycle.js';
 import { encode, createLineParser, type ShimToDaemon, type DaemonToShim } from './ipc-protocol.js';
-
-const IDLE_TIMEOUT_MS_DEFAULT = 1800000; // 30min
-const HTTP_PORT_DEFAULT = 6274;
+import { HTTP_PORT_DEFAULT, IDLE_TIMEOUT_MS_DEFAULT, MAX_LOADED_PROJECTS, SHUTDOWN_DEADLINE_MS } from './defaults.js';
 
 const parsedIdleTimeout = parseInt(process.env['TOT_IDLE_TIMEOUT'] || '', 10);
 const IDLE_TIMEOUT_MS = Number.isNaN(parsedIdleTimeout) ? IDLE_TIMEOUT_MS_DEFAULT : parsedIdleTimeout;
@@ -43,9 +41,20 @@ export interface ProjectState {
   sessionIndex: SessionIndex[];
   ensureSessionLoaded: (sessionId: string) => boolean;
   lastAccessTime: number;
+  persistenceHealthy: boolean;
 }
 
 const projectManagers = new Map<string, ProjectState>();
+
+const projectLocks = new Map<string, Promise<void>>();
+
+function withProjectLock<T>(projectDir: string, fn: () => Promise<T>): Promise<T> {
+  const prev = projectLocks.get(projectDir) ?? Promise.resolve();
+  let release: () => void;
+  const next = new Promise<void>((r) => { release = r; });
+  projectLocks.set(projectDir, next);
+  return prev.then(fn).finally(() => release!());
+}
 
 /** Most recently active project (used as default for HTTP/SSE when no project specified) */
 let lastActiveProject: string | null = null;
@@ -88,17 +97,21 @@ function getOrCreateProject(projectDir: string): ProjectState {
     return true;
   }
 
-  const handlers = getToolHandlers(tm, () => dataDir);
-
   const state: ProjectState = {
     projectDir,
     dataDir,
     tm,
-    handlers,
+    handlers: new Map(),
     sessionIndex,
     ensureSessionLoaded,
     lastAccessTime: Date.now(),
+    persistenceHealthy: true,
   };
+
+  const handlers = getToolHandlers(tm, () => dataDir, (err) => {
+    state.persistenceHealthy = false;
+  });
+  state.handlers = handlers;
 
   projectManagers.set(projectDir, state);
   console.error(`[tot-daemon] Registered project: ${projectDir}`);
@@ -211,8 +224,7 @@ export async function startDaemonProcess(): Promise<void> {
     cleanup(totDir);
     ipcServer.close(); // Stop accepting new connections
 
-    // Hard deadline: exit after 2s regardless of connection state
-    const deadline = setTimeout(() => process.exit(0), 2000);
+    const deadline = setTimeout(() => process.exit(0), SHUTDOWN_DEADLINE_MS);
     deadline.unref();
 
     // If all connections drain before the deadline, exit immediately
@@ -236,7 +248,6 @@ export async function startDaemonProcess(): Promise<void> {
 }
 
 const VALID_SHIM_TYPES = new Set(['handshake', 'tool-call', 'disconnect']);
-const MAX_LOADED_PROJECTS = 5;
 
 async function handleMessage(
   msg: ShimToDaemon,
@@ -276,52 +287,54 @@ async function handleMessage(
         return;
       }
 
-      lastActiveProject = projectDir;
-      const project = getOrCreateProject(projectDir);
-      project.lastAccessTime = Date.now();
-      const handler = project.handlers.get(msg.tool);
+      await withProjectLock(projectDir, async () => {
+        lastActiveProject = projectDir;
+        const project = getOrCreateProject(projectDir);
+        project.lastAccessTime = Date.now();
+        const handler = project.handlers.get(msg.tool);
 
-      if (!handler) {
-        safeWrite(socket, encode({
-          type: 'tool-result',
-          id: msg.id,
-          content: [{ type: 'text', text: `Unknown tool: ${msg.tool}` }],
-          isError: true,
-        } satisfies DaemonToShim));
-        return;
-      }
-      try {
-        const result = await handler(msg.args);
-        safeWrite(socket, encode({
-          type: 'tool-result',
-          id: msg.id,
-          content: result.content,
-          isError: result.isError,
-        } satisfies DaemonToShim));
-      } catch (e: any) {
-        safeWrite(socket, encode({
-          type: 'tool-result',
-          id: msg.id,
-          content: [{ type: 'text', text: `Internal error: ${e.message}` }],
-          isError: true,
-        } satisfies DaemonToShim));
-      }
+        if (!handler) {
+          safeWrite(socket, encode({
+            type: 'tool-result',
+            id: msg.id,
+            content: [{ type: 'text', text: `Unknown tool: ${msg.tool}` }],
+            isError: true,
+          } satisfies DaemonToShim));
+          return;
+        }
+        try {
+          const result = await handler(msg.args);
+          safeWrite(socket, encode({
+            type: 'tool-result',
+            id: msg.id,
+            content: result.content,
+            isError: result.isError,
+          } satisfies DaemonToShim));
+        } catch (e: any) {
+          safeWrite(socket, encode({
+            type: 'tool-result',
+            id: msg.id,
+            content: [{ type: 'text', text: `Internal error: ${e.message}` }],
+            isError: true,
+          } satisfies DaemonToShim));
+        }
 
-      // LRU eviction: if too many projects loaded, evict least recently accessed
-      if (projectManagers.size > MAX_LOADED_PROJECTS) {
-        let oldest: string | null = null;
-        let oldestTime = Infinity;
-        for (const [dir, state] of projectManagers) {
-          if (state.lastAccessTime < oldestTime) {
-            oldestTime = state.lastAccessTime;
-            oldest = dir;
+        // LRU eviction: if too many projects loaded, evict least recently accessed
+        if (projectManagers.size > MAX_LOADED_PROJECTS) {
+          let oldest: string | null = null;
+          let oldestTime = Infinity;
+          for (const [dir, state] of projectManagers) {
+            if (state.lastAccessTime < oldestTime) {
+              oldestTime = state.lastAccessTime;
+              oldest = dir;
+            }
+          }
+          if (oldest && oldest !== projectDir) {
+            projectManagers.delete(oldest);
+            console.error(`[tot-daemon] Evicted LRU project: ${oldest}`);
           }
         }
-        if (oldest && oldest !== projectDir) {
-          projectManagers.delete(oldest);
-          console.error(`[tot-daemon] Evicted LRU project: ${oldest}`);
-        }
-      }
+      });
       break;
     }
     case 'disconnect': {

@@ -26,50 +26,50 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   create_tree: {
     description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — especially debugging, root cause analysis, or multi-factor decisions.',
     schema: {
-      problem: z.string().max(10000).describe('The problem statement to investigate'),
+      problem: z.string().min(1).max(10000).describe('The problem statement to investigate'),
     },
   },
   decompose: {
     description: 'Decompose a hypothesis into mutually exclusive, collectively exhaustive sub-hypotheses. Use at any depth to drill deeper into a branch.',
     schema: {
-      parentId: z.string().describe('ID of the hypothesis to decompose'),
-      children: z.array(z.string()).min(2).max(20).describe('Array of sub-hypothesis content strings'),
+      parentId: z.string().min(1).describe('ID of the hypothesis to decompose'),
+      children: z.array(z.string().min(1)).min(2).max(20).describe('Array of sub-hypothesis content strings'),
     },
   },
   add_hypothesis: {
     description: 'Add a single hypothesis to the tree. Use when you realize a MECE decomposition is missing a possibility.',
     schema: {
-      parentId: z.string().describe('ID of the parent hypothesis'),
-      content: z.string().max(10000).describe('Description of the new hypothesis'),
+      parentId: z.string().min(1).describe('ID of the parent hypothesis'),
+      content: z.string().min(1).max(10000).describe('Description of the new hypothesis'),
     },
   },
   add_evidence: {
     description: 'Attach evidence to a hypothesis. After adding, consider whether this evidence also affects sibling hypotheses.',
     schema: {
-      hypothesisId: z.string().describe('ID of the hypothesis'),
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis'),
       type: z.enum(['supports', 'refutes', 'neutral']).describe('How this evidence relates to the hypothesis'),
-      content: z.string().max(10000).describe('Description of the evidence'),
+      content: z.string().min(1).max(10000).describe('Description of the evidence'),
       source: z.string().max(10000).optional().describe('Where this evidence came from (logs, tests, docs, etc.)'),
     },
   },
   eliminate_hypothesis: {
     description: 'Mark a hypothesis as eliminated (dead end). Provide the reason — this creates an audit trail.',
     schema: {
-      hypothesisId: z.string().describe('ID of the hypothesis to eliminate'),
-      reason: z.string().max(10000).describe('Why this hypothesis is being eliminated'),
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis to eliminate'),
+      reason: z.string().min(1).max(10000).describe('Why this hypothesis is being eliminated'),
     },
   },
   confirm_hypothesis: {
     description: 'Mark a hypothesis as confirmed (the answer/root cause). This completes the session.',
     schema: {
-      hypothesisId: z.string().describe('ID of the hypothesis to confirm'),
-      reason: z.string().max(10000).describe('Why this hypothesis is confirmed as the answer'),
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis to confirm'),
+      reason: z.string().min(1).max(10000).describe('Why this hypothesis is confirmed as the answer'),
     },
   },
   score_hypothesis: {
     description: 'Update the confidence score for a hypothesis (0-1). Use to track relative likelihood among competing hypotheses.',
     schema: {
-      hypothesisId: z.string().describe('ID of the hypothesis to score'),
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis to score'),
       score: z.number().min(0).max(1).describe('Confidence score between 0 and 1'),
       rationale: z.string().max(10000).optional().describe('Why this score was assigned'),
     },
@@ -87,9 +87,49 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   validate_decomposition: {
     description: 'Check structural properties of a decomposition (child count, overlaps, catch-all). For semantic MECE validation, reason about whether hypotheses truly don\'t overlap and cover all possibilities.',
     schema: {
-      parentId: z.string().describe('ID of the parent hypothesis whose children to validate'),
+      parentId: z.string().min(1).describe('ID of the parent hypothesis whose children to validate'),
     },
   },
+};
+
+const schemas = {
+  create_tree: z.object({
+    problem: z.string().min(1).max(10000),
+  }),
+  decompose: z.object({
+    parentId: z.string().min(1),
+    children: z.array(z.string().min(1)).min(2).max(20),
+  }),
+  add_hypothesis: z.object({
+    parentId: z.string().min(1),
+    content: z.string().min(1).max(10000),
+  }),
+  add_evidence: z.object({
+    hypothesisId: z.string().min(1),
+    type: z.enum(['supports', 'refutes', 'neutral']),
+    content: z.string().min(1).max(10000),
+    source: z.string().max(10000).optional(),
+  }),
+  eliminate_hypothesis: z.object({
+    hypothesisId: z.string().min(1),
+    reason: z.string().min(1).max(10000),
+  }),
+  confirm_hypothesis: z.object({
+    hypothesisId: z.string().min(1),
+    reason: z.string().min(1).max(10000),
+  }),
+  score_hypothesis: z.object({
+    hypothesisId: z.string().min(1),
+    score: z.number().min(0).max(1),
+    rationale: z.string().max(10000).optional(),
+  }),
+  get_tree: z.object({
+    format: z.enum(['full', 'compact', 'path']).optional().default('compact'),
+  }),
+  get_status: z.object({}),
+  validate_decomposition: z.object({
+    parentId: z.string().min(1),
+  }),
 };
 
 // ─── Tool Handlers (used by daemon directly) ───
@@ -102,13 +142,13 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
  * @param getDataDir - Thunk returning the data directory path (deferred for testability)
  * @returns Map of tool name to async handler
  */
-export function getToolHandlers(tm: TreeManager, getDataDir: () => string): Map<string, ToolHandler> {
+export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPersistenceError?: (err: Error) => void): Map<string, ToolHandler> {
   const persistenceMap = new Map<string, Persistence>();
 
   function getPersistence(sessionId: string): Persistence {
     let p = persistenceMap.get(sessionId);
     if (!p) {
-      p = new Persistence(getDataDir(), sessionId);
+      p = new Persistence(getDataDir(), sessionId, onPersistenceError);
       persistenceMap.set(sessionId, p);
     }
     return p;
@@ -121,22 +161,24 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string): Map<
   const handlers = new Map<string, ToolHandler>();
 
   handlers.set('create_tree', async (args) => {
-    const problem = args.problem as string;
     try {
+      const { problem } = schemas.create_tree.parse(args);
       const { session, root } = tm.createSession(problem);
       const p = getPersistence(session.id);
       await p.append('session-created', session);
       await p.append('hypothesis-added', root);
       return toolResult(fmt.formatCreateTree(session.id, root.id, problem));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
 
   handlers.set('decompose', async (args) => {
-    const parentId = args.parentId as string;
-    const childContents = args.children as string[];
     try {
+      const { parentId, children: childContents } = schemas.decompose.parse(args);
       const created = tm.decompose(parentId, childContents);
       const check = tm.validateDecomposition(parentId);
       const p = getPersistence(created[0].sessionId);
@@ -145,14 +187,16 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string): Map<
       await p.append('hypothesis-updated', parent);
       return toolResult(fmt.formatDecompose(created, check, tm));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
 
   handlers.set('add_hypothesis', async (args) => {
-    const parentId = args.parentId as string;
-    const content = args.content as string;
     try {
+      const { parentId, content } = schemas.add_hypothesis.parse(args);
       const hypothesis = tm.addHypothesis(parentId, content);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-added', hypothesis);
@@ -160,81 +204,95 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string): Map<
       await p.append('hypothesis-updated', parent);
       return toolResult(fmt.formatAddHypothesis(hypothesis, tm));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
 
   handlers.set('add_evidence', async (args) => {
-    const hypothesisId = args.hypothesisId as string;
-    const type = args.type as 'supports' | 'refutes' | 'neutral';
-    const content = args.content as string;
-    const source = args.source as string | undefined;
     try {
+      const { hypothesisId, type, content, source } = schemas.add_evidence.parse(args);
       const evidence = tm.addEvidence(hypothesisId, type, content, source);
       const hypothesis = tm.getHypothesis(hypothesisId)!;
       const p = getPersistence(hypothesis.sessionId);
-      // Only persist hypothesis-updated (contains full evidence array); evidence-added event still emitted via TreeManager for SSE
       await p.append('hypothesis-updated', hypothesis);
       return toolResult(fmt.formatAddEvidence(hypothesisId, hypothesis, tm));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
 
   handlers.set('eliminate_hypothesis', async (args) => {
-    const hypothesisId = args.hypothesisId as string;
-    const reason = args.reason as string;
     try {
+      const { hypothesisId, reason } = schemas.eliminate_hypothesis.parse(args);
       const hypothesis = tm.eliminateHypothesis(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
       return toolResult(fmt.formatEliminate(hypothesis, tm));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
 
   handlers.set('confirm_hypothesis', async (args) => {
-    const hypothesisId = args.hypothesisId as string;
-    const reason = args.reason as string;
     try {
+      const { hypothesisId, reason } = schemas.confirm_hypothesis.parse(args);
       const hypothesis = tm.confirmHypothesis(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
       await p.append('session-completed', { sessionId: hypothesis.sessionId });
       return toolResult(fmt.formatConfirm(hypothesis, tm));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
 
   handlers.set('score_hypothesis', async (args) => {
-    const hypothesisId = args.hypothesisId as string;
-    const score = args.score as number;
-    const rationale = args.rationale as string | undefined;
     try {
+      const { hypothesisId, score, rationale } = schemas.score_hypothesis.parse(args);
       const hypothesis = tm.scoreHypothesis(hypothesisId, score, rationale);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
       return toolResult(fmt.formatScore(hypothesis, tm));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
 
   handlers.set('get_tree', async (args) => {
-    const format = (args.format as string) || 'compact';
-    const state = tm.getTree();
-    if (!state) return toolResult('No active session. Call create_tree to start.');
+    try {
+      const { format } = schemas.get_tree.parse(args);
+      const state = tm.getTree();
+      if (!state) return toolResult('No active session. Call create_tree to start.');
 
-    if (format === 'full') {
-      const hypotheses = Object.fromEntries(state.hypotheses);
-      return toolResult(JSON.stringify({ session: state.session, hypotheses }, null, 2));
+      if (format === 'full') {
+        const hypotheses = Object.fromEntries(state.hypotheses);
+        return toolResult(JSON.stringify({ session: state.session, hypotheses }, null, 2));
+      }
+
+      let result = `Problem: "${state.session.problem}"\n\n`;
+      result += renderCompactTree(state.hypotheses, state.session.rootNodeId, '');
+      return toolResult(result);
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
+      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
-
-    let result = `Problem: "${state.session.problem}"\n\n`;
-    result += renderCompactTree(state.hypotheses, state.session.rootNodeId, '');
-    return toolResult(result);
   });
 
   handlers.set('get_status', async () => {
@@ -242,11 +300,14 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string): Map<
   });
 
   handlers.set('validate_decomposition', async (args) => {
-    const parentId = args.parentId as string;
     try {
+      const { parentId } = schemas.validate_decomposition.parse(args);
       const check = tm.validateDecomposition(parentId);
       return toolResult(fmt.formatValidateDecomposition(parentId, check));
     } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
       return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
     }
   });
