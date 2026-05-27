@@ -1,25 +1,28 @@
 /**
- * Response formatting with embedded cognitive-bias detection.
+ * Adaptive response formatters for tool results.
+ *
+ * Signals are grounded in established reasoning methodologies:
+ * - Strong Inference (Platt 1964): crucial experiment design, recycling discipline
+ * - Analysis of Competing Hypotheses (Heuer 1999): diagnosticity, red team, sensitivity
+ * - Falsificationism (Popper 1959): severity of tests, asymmetry of refutation
+ * - Causal Inference (Hill 1965): temporality, specificity, reproducibility
+ * - Scientific Debugging (Zeller 2009): hypothesize-test-eliminate cycle
+ * - Expert Debugging Studies (Ko & Myers 2004, Parnin & Orso 2011): depth limits
+ *
+ * Design principles:
+ * - Signals fire conditionally based on tree state (avoid prompt fatigue)
+ * - Advisory, never blocking (agents retain autonomy)
+ * - Grounded in quantitative signals (evidence counts, scores, depths)
  *
  * Threshold rationale:
- *
- * - Confirmation bias: 3+ supporting evidence with 0 refuting triggers a warning.
- *   Based on Analysis of Competing Hypotheses (ACH): unidirectional evidence is
- *   a reliable signal that the agent is only seeking confirming data.
- *
- * - Staleness: 120s (2 minutes) between interactions suggests the agent "forgot"
- *   the tree exists. The response re-states context (problem + current hypothesis)
- *   to re-anchor the agent without requiring a separate get_tree call.
- *
- * - Elimination nudge: 2+ refuting evidence with 0 supporting suggests the
- *   hypothesis should be eliminated. The prompt nudges rather than auto-eliminates
- *   because the agent may have unstated context.
- *
- * - Tie detection: 0.15 gap between top-2 scored hypotheses means insufficient
- *   discrimination. The agent is prompted to find a differentiating test.
- *
- * - Domain hints: keyword-based (error/slow/intermittent) for decomposition frame
- *   suggestions. These are heuristic starting points, not prescriptive frameworks.
+ * - Confirmation bias: 3+ supporting with 0 refuting (ACH unidirectional evidence)
+ * - Staleness: 120s between interactions (re-anchor context)
+ * - Elimination nudge: 2+ refuting with 0 supporting
+ * - Tie detection: top-2 within 0.15 gap
+ * - Diagnosticity: supports added with no siblings refuted (non-discriminating)
+ * - Premature decomposition: parent has 0 evidence items
+ * - Depth caution: children at depth >= 3 (Parnin & Orso 2011)
+ * - Inference detection: 2+ keywords (suggests/implies/could/might/possibly/likely)
  */
 
 import type { Hypothesis, StructuralCheck } from './types.js';
@@ -71,11 +74,32 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     result += `No structural issues detected.\n`;
   }
 
+  // Premature decomposition guard: parent had no evidence
+  const parent = tm.getHypothesis(children[0]?.parentId ?? '');
+  if (parent && parent.evidence.length === 0 && parent.depth > 0) {
+    result += `\n⚠ Parent has no evidence yet. A single observation at this level might eliminate it entirely, saving sub-investigation effort.\n`;
+  }
+
+  // Uninvestigated siblings warning
+  if (parent) {
+    const parentSiblings = tm.getSiblings(parent.id);
+    const uninvestigated = parentSiblings.filter((s) => s.status === 'pending' && s.evidence.length === 0);
+    if (uninvestigated.length > 0) {
+      result += `\nNote: ${uninvestigated.length} sibling(s) at this level have no evidence. Testing broadly before drilling deep often reveals the answer faster.\n`;
+    }
+  }
+
+  // Depth warning (Parnin & Orso 2011)
+  if (children[0] && children[0].depth >= 3) {
+    result += `\nDepth ${children[0].depth}: Deep decompositions risk fragmenting the problem. Consider whether the parent is specific enough to test directly.\n`;
+  }
+
   // Protocol guidance
   result += `\n── Protocol ──\n`;
   result += `ME check: Could a single cause belong to two of these?\n`;
   result += `CE check: Can you imagine a cause NOT covered by any of these?\n`;
-  result += `Next: For each hypothesis, what test would REFUTE it? Start with the most discriminating test.\n`;
+  result += `Crucial experiment: What SINGLE observation would yield DIFFERENT results depending on which sub-hypothesis is correct?\n`;
+  result += `Prioritize this discriminating test before investigating each in isolation.\n`;
 
   result += '\n' + formatTreeSummary(tm);
   return result;
@@ -109,9 +133,33 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     result += `  ${truncate(h.content, 30)}: +${s} -${r}${marker}\n`;
   }
 
-  // Confirmation bias detection
+  // Baseline prompt: first evidence on this hypothesis
+  const lastEvidence = hypothesis.evidence[hypothesis.evidence.length - 1];
+  if (hypothesis.evidence.length === 1 && lastEvidence && lastEvidence.type !== 'refutes') {
+    result += `\nHave you established the baseline? Knowing what 'normal' looks like before the problem makes this observation more diagnostic.\n`;
+  }
+
+  // Directness detection: inference-language in evidence content
+  if (lastEvidence && (lastEvidence.type === 'supports' || lastEvidence.type === 'neutral')) {
+    const inferenceKeywords = /\b(suggests?|impl(y|ies)|could|might|possibly|consistent with|indicates?|likely|appears?)\b/gi;
+    const matches = lastEvidence.content.match(inferenceKeywords);
+    if (matches && matches.length >= 2) {
+      result += `\nThis reads as inference rather than direct observation. What specific command, log entry, or metric would DIRECTLY show the state you're inferring?\n`;
+    }
+  }
+
+  // Confirmation bias detection + confounder check (Fisher 1935)
   if (supporting >= 3 && refuting === 0 && activeSiblings.length > 0) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
+    result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
+  }
+
+  // Source diversity check: all evidence from same source
+  if (hypothesis.evidence.length >= 3) {
+    const sources = hypothesis.evidence.filter((e) => e.source).map((e) => e.source);
+    if (sources.length >= 2 && new Set(sources).size === 1) {
+      result += `\nAll evidence cites the same source. Independent corroboration from a different data source would strengthen this.\n`;
+    }
   }
 
   // Unexplored siblings warning
@@ -125,12 +173,17 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     result += `\n→ ${refuting} refuting, 0 supporting — consider elimination.\n`;
   }
 
-  // Diagnosticity warning: evidence that doesn't discriminate between hypotheses
-  const lastEvidence = hypothesis.evidence[hypothesis.evidence.length - 1];
-  if (lastEvidence && lastEvidence.type !== 'refutes' && activeSiblings.length > 0) {
-    const allConsistent = activeSiblings.every((s) => s.evidence.filter((e) => e.type === 'refutes').length === 0);
-    if (allConsistent && hypothesis.evidence.length >= 2) {
-      result += `\nNote: No hypothesis has been refuted yet. Seek a test that would ELIMINATE at least one.\n`;
+  // Diagnosticity: evidence that doesn't discriminate (Heuer 1999, Popper 1959)
+  if (lastEvidence && lastEvidence.type === 'supports' && activeSiblings.length > 0) {
+    const noSiblingsRefuted = activeSiblings.every((s) => s.evidence.filter((e) => e.type === 'refutes').length === 0);
+    if (noSiblingsRefuted && hypothesis.evidence.length >= 2) {
+      // Diagnosticity amplification: name the top sibling
+      const topSibling = activeSiblings.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+      if (topSibling) {
+        result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
+      } else {
+        result += `\nNo hypothesis has been refuted yet. A strong test is one whose outcome is predicted by THIS hypothesis but NOT by its siblings.\n`;
+      }
     }
   }
 
@@ -196,6 +249,8 @@ export function formatConfirm(hypothesis: Hypothesis, tm: TreeManager): string {
   result += `1. Does this explain ALL observed symptoms?\n`;
   result += `2. Can you REPRODUCE the issue by triggering this cause?\n`;
   result += `3. Were competing hypotheses eliminated with evidence (not just ignored)?\n`;
+  result += `4. TEMPORALITY: Did this cause precede the failure in time?\n`;
+  result += `5. SPECIFICITY: Does this explain THIS failure pattern specifically, not just failures in general?\n`;
 
   if (eliminated.length < siblings.length) {
     const unresolved = siblings.filter((s) => s.status !== 'eliminated' && s.id !== hypothesis.id);
@@ -237,6 +292,16 @@ export function formatScore(hypothesis: Hypothesis, tm: TreeManager): string {
   if (ranked.length >= 2 && (ranked[0].score! - ranked[1].score!) < 0.15) {
     result += `\n⚠ Near-tie: "${truncate(ranked[0].content, 25)}" and "${truncate(ranked[1].content, 25)}" are within 0.15.\n`;
     result += `What test would SEPARATE them?\n`;
+  }
+
+  // Ready-for-confirmation signal
+  if (hypothesis.score !== null && hypothesis.score >= 0.85) {
+    const siblings = tm.getSiblings(hypothesis.id);
+    const allSiblingsWeak = siblings.every((s) => s.status === 'eliminated' || (s.score !== null && s.score < 0.3));
+    const someRefutationAttempted = siblings.some((s) => s.evidence.some((e) => e.type === 'refutes'));
+    if (allSiblingsWeak && someRefutationAttempted) {
+      result += `\n→ Evidence appears sufficient: strong support, alternatives eliminated, refutation attempted. Consider confirmation.\n`;
+    }
   }
 
   result += '\n' + formatTreeSummary(tm);
@@ -291,7 +356,8 @@ export function formatStatus(tm: TreeManager): string {
   }
   if (stagnant) {
     result += `\n⚠ STAGNATION: Multiple mutations without progress.\n`;
-    result += `  Consider: Is evidence discriminating? Should you restructure?\n`;
+    result += `  Devil's advocate: Assume your LOWEST-scored active hypothesis is correct. What evidence would you expect to find?\n`;
+    result += `  This reframing often reveals overlooked tests.\n`;
   }
 
   const activeSessions = tm.getAllSessions().filter((s) => s.status === 'active');
@@ -314,7 +380,7 @@ function formatTreeSummary(tm: TreeManager): string {
   if (counts.exploring > 0) summary += ` | Investigating: ${counts.exploring}`;
   if (unexplored.length > 0) summary += ` | Unexplored: ${unexplored.length}`;
   if (bestLead) summary += ` | Lead: "${truncate(bestLead.content, 20)}" (${bestLead.score!.toFixed(2)})`;
-  if (stagnant) summary += `\n⚠ Stagnation — seek discriminating evidence or restructure`;
+  if (stagnant) summary += `\n⚠ Stagnation — devil's advocate: what if your lowest-scored hypothesis is correct?`;
 
   return summary;
 }

@@ -22,10 +22,12 @@ interface JournalEntry {
 
 export class Persistence {
   private filePath: string;
+  private onError?: (err: Error) => void;
 
-  constructor(dataDir: string, sessionId: string) {
+  constructor(dataDir: string, sessionId: string, onError?: (err: Error) => void) {
     mkdirSync(dataDir, { recursive: true });
     this.filePath = join(dataDir, `${sessionId}.jsonl`);
+    this.onError = onError;
     ensureGitignore(dataDir);
   }
 
@@ -37,6 +39,7 @@ export class Persistence {
     };
     await appendFile(this.filePath, JSON.stringify(entry) + '\n').catch((err) => {
       console.error(`[tot-mcp] Warning: failed to write JSONL: ${err}`);
+      this.onError?.(err instanceof Error ? err : new Error(String(err)));
     });
   }
 }
