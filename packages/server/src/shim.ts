@@ -131,12 +131,12 @@ export async function startShim(): Promise<void> {
   socket.on('close', () => {
     console.error('[tot-shim] Daemon connection closed');
     rejectAllPending('Daemon connection closed');
-    process.exit(1);
+    server.close().finally(() => process.exit(1));
   });
   socket.on('error', (err) => {
     console.error(`[tot-shim] Daemon connection error: ${err.message}`);
     rejectAllPending(`Daemon error: ${err.message}`);
-    process.exit(1);
+    server.close().finally(() => process.exit(1));
   });
 
   // Graceful shutdown on signals
