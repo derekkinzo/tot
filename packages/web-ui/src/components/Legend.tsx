@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { STATUS_COLORS, STATUS_NODE_STYLES } from '../theme';
 
 export default function Legend() {
   const [dismissed, setDismissed] = useState(false);
@@ -17,10 +18,10 @@ export default function Legend() {
         >×</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        <LegendItem color="#3b82f6" icon="○" label="Pending" />
-        <LegendItem color="#eab308" icon="◉" label="Exploring" />
-        <LegendItem color="#ef4444" icon="✗" label="Eliminated" />
-        <LegendItem color="#22c55e" icon="✓" label="Confirmed" />
+        <LegendItem color={STATUS_COLORS.pending} icon={STATUS_NODE_STYLES.pending.icon} label="Pending" />
+        <LegendItem color={STATUS_COLORS.exploring} icon={STATUS_NODE_STYLES.exploring.icon} label="Exploring" />
+        <LegendItem color={STATUS_COLORS.eliminated} icon={STATUS_NODE_STYLES.eliminated.icon} label="Eliminated" />
+        <LegendItem color={STATUS_COLORS.confirmed} icon={STATUS_NODE_STYLES.confirmed.icon} label="Confirmed" />
       </div>
       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #30363d', color: '#6b7280', lineHeight: 1.4 }}>
         Click: select • Alt+click: collapse<br/>

@@ -1,0 +1,10 @@
+export const HTTP_PORT_DEFAULT = 6274;
+export const IDLE_TIMEOUT_MS_DEFAULT = 1_800_000;
+export const STAGNATION_THRESHOLD_DEFAULT = 4;
+export const MAX_DEPTH_DEFAULT = 20;
+export const MAX_HYPOTHESES_DEFAULT = 500;
+export const MAX_LOADED_PROJECTS = 5;
+export const SHUTDOWN_DEADLINE_MS = 2000;
+export const DAEMON_STARTUP_TIMEOUT_MS = 5000;
+export const DAEMON_POLL_INTERVAL_MS = 50;
+export const TCP_PROBE_TIMEOUT_MS = 1000;

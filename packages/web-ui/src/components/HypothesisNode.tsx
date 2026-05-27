@@ -1,7 +1,8 @@
 import { memo, useState, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { STATUS_NODE_STYLES } from '../theme';
 
-interface HypothesisData {
+export type HypothesisData = {
   label: string;
   status: string;
   score: number | null;
@@ -13,18 +14,11 @@ interface HypothesisData {
   hiddenChildren: number;
   pulseClass?: string;
   onToggleCollapse?: (id: string) => void;
-}
-
-const STATUS_STYLES: Record<string, { bg: string; border: string; icon: string }> = {
-  pending: { bg: '#1e293b', border: '#3b82f6', icon: '○' },
-  exploring: { bg: '#1c1917', border: '#eab308', icon: '◉' },
-  eliminated: { bg: '#1c1917', border: '#4b5563', icon: '✗' },
-  confirmed: { bg: '#052e16', border: '#22c55e', icon: '✓' },
 };
 
 function HypothesisNode({ id: nodeId, data }: NodeProps) {
   const d = data as unknown as HypothesisData;
-  const style = STATUS_STYLES[d.status] ?? STATUS_STYLES.pending;
+  const style = STATUS_NODE_STYLES[d.status as keyof typeof STATUS_NODE_STYLES] ?? STATUS_NODE_STYLES.pending;
   const [showTooltip, setShowTooltip] = useState(false);
   const textRef = useRef<HTMLDivElement>(null);
 
