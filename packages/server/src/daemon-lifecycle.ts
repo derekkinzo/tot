@@ -101,12 +101,16 @@ export async function startDaemon(totDir: string): Promise<DaemonInfo> {
     writeFileSync(lockFile, String(process.pid));
 
     const daemonScript = join(import.meta.dirname, 'daemon.js');
+    const logPath = join(totDir, 'daemon.log');
+    const logFd = openSync(logPath, 'a');
     const child = fork(daemonScript, [], {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', logFd, logFd, 'ipc'],
       env: { ...process.env, TOT_GLOBAL_DIR: totDir },
     });
     child.unref();
+    child.disconnect();
+    closeSync(logFd);
   } finally {
     closeSync(lockFd);
     try { unlinkSync(lockFile); } catch {}

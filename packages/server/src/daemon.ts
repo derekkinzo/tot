@@ -17,13 +17,7 @@ import { startHttpServer } from './http.js';
 import { getToolHandlers, type ToolHandler } from './tools.js';
 import { getTotDir, writeDaemonFiles, cleanup } from './daemon-lifecycle.js';
 import { encode, createLineParser, type ShimToDaemon, type DaemonToShim } from './ipc-protocol.js';
-import { HTTP_PORT_DEFAULT, IDLE_TIMEOUT_MS_DEFAULT, MAX_LOADED_PROJECTS, SHUTDOWN_DEADLINE_MS } from './defaults.js';
-
-const parsedIdleTimeout = parseInt(process.env['TOT_IDLE_TIMEOUT'] || '', 10);
-const IDLE_TIMEOUT_MS = Number.isNaN(parsedIdleTimeout) ? IDLE_TIMEOUT_MS_DEFAULT : parsedIdleTimeout;
-if (Number.isNaN(parsedIdleTimeout) && process.env['TOT_IDLE_TIMEOUT']) {
-  console.error(`[tot-daemon] Warning: invalid TOT_IDLE_TIMEOUT "${process.env['TOT_IDLE_TIMEOUT']}", using default ${IDLE_TIMEOUT_MS_DEFAULT}ms`);
-}
+import { HTTP_PORT_DEFAULT, MAX_LOADED_PROJECTS, SHUTDOWN_DEADLINE_MS } from './defaults.js';
 
 const parsedHttpPort = parseInt(process.env['TOT_PORT'] || '', 10);
 const HTTP_PORT = Number.isNaN(parsedHttpPort) ? HTTP_PORT_DEFAULT : parsedHttpPort;
@@ -140,37 +134,19 @@ export async function startDaemonProcess(): Promise<void> {
   // Track active shim connections + which project each socket belongs to
   const activeConnections = new Set<Socket>();
   const socketProjects = new Map<Socket, string>();
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  let sseClientCount = 0;
-
-  function resetIdleTimer(): void {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      if (activeConnections.size === 0 && sseClientCount === 0) {
-        console.error('[tot-daemon] Idle timeout reached (no shims, no SSE clients), shutting down');
-        process.exit(0);
-      }
-    }, IDLE_TIMEOUT_MS);
-    idleTimer.unref();
-  }
-
-  resetIdleTimer();
-
   // Start HTTP server for visualization (multi-project)
   const httpPort = await startHttpServer(HTTP_PORT, {
     getProject,
     getAllProjects,
     getLastActiveProject: () => lastActiveProject,
-    onSseConnect: () => { sseClientCount++; if (idleTimer) clearTimeout(idleTimer); },
-    onSseDisconnect: () => { sseClientCount--; if (activeConnections.size === 0 && sseClientCount === 0) resetIdleTimer(); },
+    onSseConnect: () => {},
+    onSseDisconnect: () => {},
   });
 
   // IPC TCP server
   const ipcServer = createServer((socket: Socket) => {
     activeConnections.add(socket);
-    if (idleTimer) clearTimeout(idleTimer);
 
-    // Serialize message processing per socket (prevents concurrent mutations)
     let processing: Promise<void> = Promise.resolve();
     const parser = createLineParser((msg: ShimToDaemon) => {
       processing = processing.then(() =>
@@ -184,18 +160,12 @@ export async function startDaemonProcess(): Promise<void> {
     socket.on('close', () => {
       activeConnections.delete(socket);
       socketProjects.delete(socket);
-      if (activeConnections.size === 0 && sseClientCount === 0) {
-        resetIdleTimer();
-      }
     });
 
     socket.on('error', () => {
       activeConnections.delete(socket);
       socketProjects.delete(socket);
       socket.destroy();
-      if (activeConnections.size === 0 && sseClientCount === 0) {
-        resetIdleTimer();
-      }
     });
   });
 
