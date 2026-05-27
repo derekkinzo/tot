@@ -1,5 +1,4 @@
 export const HTTP_PORT_DEFAULT = 6274;
-export const IDLE_TIMEOUT_MS_DEFAULT = 1_800_000;
 export const STAGNATION_THRESHOLD_DEFAULT = 4;
 export const MAX_DEPTH_DEFAULT = 20;
 export const MAX_HYPOTHESES_DEFAULT = 500;
