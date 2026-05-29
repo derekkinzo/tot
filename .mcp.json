@@ -1,0 +1,6 @@
+{
+  "tot": {
+    "command": "npx",
+    "args": ["tot-mcp"]
+  }
+}

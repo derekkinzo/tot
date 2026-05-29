@@ -1,0 +1,20 @@
+{
+  "name": "tot-mcp",
+  "version": "0.1.0",
+  "description": "Structured hypothesis tree reasoning with MECE decomposition and real-time visualization for AI agents",
+  "author": {
+    "name": "Derek Kinzo"
+  },
+  "homepage": "https://github.com/derekkinzo/tot",
+  "repository": "https://github.com/derekkinzo/tot",
+  "license": "MIT",
+  "keywords": [
+    "reasoning",
+    "debugging",
+    "tree-of-thoughts",
+    "mece",
+    "hypothesis",
+    "structured-thinking",
+    "mcp"
+  ]
+}
