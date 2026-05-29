@@ -5,6 +5,7 @@ static/
 .tot-repl/
 .claude/
 .playwright-mcp/
+
 eval/
 *.tgz
 .DS_Store
