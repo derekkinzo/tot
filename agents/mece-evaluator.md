@@ -86,3 +86,28 @@ Produce a structured evaluation:
 - A decomposition with 3-5 well-separated categories is better than 7 that overlap
 - Always suggest HOW to fix problems, not just flag them
 - The existing `validate_decomposition` tool handles structural checks (substring overlap, duplicates). You handle SEMANTIC evaluation.
+
+## Calibration Guidelines
+
+**When to verdict PASS** (don't over-flag):
+- Categories are at consistent abstraction even if causal cascades exist between layers (e.g., "Backend | Load Balancer | Network between them" is VALID — the integration boundary is itself a recognized category per Section 4)
+- Minor edge-case overlaps that are outside the problem scope
+- Catch-all is present, evidence axis is consistent
+- The tree is investigatable as-is, even if a slightly tighter split exists
+
+**When to verdict NEEDS_REVISION** (fixable):
+- Mixed abstraction levels (one specific code line alongside category-level hypotheses)
+- Missing 1-2 plausible categories (gap in CE)
+- Vague hypotheses that need concretization
+- One overlap that can be resolved by re-wording
+
+**When to verdict FAIL** (rebuild):
+- Subset relationships between categories (A is strictly inside B)
+- 3+ categories overlap or major coverage gap
+- No catch-all AND domain has known unknowns
+- Multiple split axes mixed in same level
+
+**Avoid these over-detection patterns:**
+- Flagging causal cascades as ME violations when categories are at the same layer
+- Demanding splits be on a single axis when the canonical templates explicitly mix axes
+- Requiring perfect symmetry of evidence-gathering effort across categories
