@@ -1,0 +1,15 @@
+{
+  "name": "tot-mcp",
+  "metadata": {
+    "description": "Structured hypothesis tree reasoning with MECE decomposition, scientific protocols, and real-time browser visualization"
+  },
+  "owner": {
+    "name": "derekkinzo"
+  },
+  "plugins": [
+    {
+      "name": "tot-mcp",
+      "source": "."
+    }
+  ]
+}

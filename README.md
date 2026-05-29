@@ -38,7 +38,19 @@ AI agents debugging complex problems tend to reason linearly — they follow the
 Open `http://localhost:6274` to see the visualization.
 
 <details>
-<summary><strong>Claude Code</strong></summary>
+<summary><strong>Claude Code (Plugin — recommended)</strong></summary>
+
+Install as a plugin for full skill support (`/tot-reason`, `/tot-inspect`, `/tot-export`):
+
+```bash
+claude plugin add derekkinzo/tot
+```
+
+This auto-registers the MCP server and enables slash commands and hooks.
+</details>
+
+<details>
+<summary><strong>Claude Code (MCP only)</strong></summary>
 
 ```bash
 claude mcp add tot -- npx tot-mcp
@@ -76,6 +88,18 @@ Add to your MCP configuration:
 | `get_tree` | View the current tree structure |
 | `get_status` | Progress summary + stagnation detection |
 | `validate_decomposition` | Check structural properties of a decomposition |
+
+## Skills (Claude Code Plugin)
+
+When installed as a plugin, these slash commands are available:
+
+| Skill | Purpose |
+|-------|---------|
+| `/tot-reason` | Full structured reasoning workflow — domain investigation, MECE decomposition, evidence gathering, elimination |
+| `/tot-inspect` | View current tree state, progress, and visualization |
+| `/tot-export` | Generate a Markdown investigation report from a completed tree |
+
+The plugin also includes agents (`hypothesis-challenger`, `evidence-reviewer`) for parallel investigation and hooks that detect failure patterns.
 
 ## How It Works
 
