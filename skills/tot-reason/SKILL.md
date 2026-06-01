@@ -21,9 +21,9 @@ Initiate structured Tree of Thought reasoning for systematic problem investigati
 
 BEFORE creating hypotheses, investigate the problem domain thoroughly:
 
-1. **Gather context**: What is the system architecture? What changed recently? When did it start?
+1. **Gather context**: What is the problem domain? What changed recently in the system or environment? When did it start?
 2. **Characterize symptoms**: Who/what is affected? What is the scope? Is it intermittent or constant?
-3. **Identify boundaries**: What is IN scope vs OUT of scope?
+3. **Identify boundaries**: What is IN scope vs OUT of scope? (Mill's Method of Difference: contrast cases where the effect occurs against cases where it does not.)
 
 Fan out subagents to research the domain from multiple angles simultaneously.
 
@@ -39,6 +39,8 @@ Call `create_tree` with a clear, specific problem statement. Include:
 Call `decompose` with 2-5 hypotheses that are:
 - **Mutually Exclusive**: Each covers a DISTINCT failure mode — no overlaps
 - **Collectively Exhaustive**: Together they cover ALL plausible explanations
+
+Decomposition forms a partition of the cause space (Chamberlin 1890; Mill 1843).
 
 Decomposition strategies:
 - By system layer (code / data / infrastructure / external)

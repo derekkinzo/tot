@@ -2,10 +2,16 @@
  * Adaptive response formatters for tool results.
  *
  * Signals are grounded in established reasoning methodologies:
- * - Strong Inference (Platt 1964): crucial experiment design, recycling discipline
- * - Analysis of Competing Hypotheses (Heuer 1999): diagnosticity, red team, sensitivity
+ * - Eliminative Induction (Bacon 1620, Novum Organum): tables of presence/absence,
+ *   exclusion of alternatives as the engine of inference
+ * - Methods of Agreement and Difference (Mill 1843, System of Logic): comparative
+ *   evidence across cases to isolate causal factors
+ * - Multiple Working Hypotheses (Chamberlin 1890): parallel hypothesis families
+ *   guard against parental affection for a single explanation
  * - Falsificationism (Popper 1959): severity of tests, asymmetry of refutation
+ * - Strong Inference (Platt 1964): crucial experiment design, recycling discipline
  * - Causal Inference (Hill 1965): temporality, specificity, reproducibility
+ * - Analysis of Competing Hypotheses (Heuer 1999): diagnosticity, red team, sensitivity
  * - Scientific Debugging (Zeller 2009): hypothesize-test-eliminate cycle
  * - Expert Debugging Studies (Ko & Myers 2004, Parnin & Orso 2011): depth limits
  *
@@ -181,7 +187,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     }
   }
 
-  // Confirmation bias detection + confounder check (Fisher 1935)
+  // Confirmation bias detection + confounder check (Heuer 1999 ACH)
   if (supporting >= 3 && refuting === 0 && activeSiblings.length > 0) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
