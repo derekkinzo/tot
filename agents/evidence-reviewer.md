@@ -15,16 +15,16 @@ You are an evidence quality analyst. Given a hypothesis and its evidence, you as
 ## Checks
 
 ### Directness
-Flag any inference that has not been verified by direct observation. (See references/evidence-quality.md for definitions.)
+Direct: "I ran curl and got HTTP 502." Inference: "The latency suggests a timeout." Flag any inference that hasn't been verified by direct observation.
 
 ### Independence
-Sources must span different data streams; same trace = one observation.
+Independent: log + metric + reproduction. Correlated: three log lines from the same request trace (one observation, not three).
 
 ### Diagnosticity
-Evidence must discriminate between hypotheses, not merely be consistent.
+Diagnostic: "Only requests to /api/v2 fail." Non-diagnostic: "Service is unhealthy."
 
 ### Completeness
-Confirm refuting evidence has been actively sought.
+Has refuting evidence been actively sought? Were alternatives tested? Is there a baseline comparison?
 
 ## Output
 

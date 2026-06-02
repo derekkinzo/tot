@@ -100,8 +100,17 @@ When installed as a plugin, these slash commands are available:
 | `/tot-reason` | Full structured reasoning workflow — domain investigation, MECE decomposition, evidence gathering, elimination |
 | `/tot-inspect` | View current tree state, progress, and visualization |
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |
+| `/tot-dashboard` | Open the live tree visualization in the default browser at `localhost:6274` |
 
-The plugin also includes agents (`hypothesis-challenger`, `evidence-reviewer`) for parallel investigation and hooks that detect failure patterns.
+The plugin also includes agents for parallel investigation and adversarial review:
+
+| Agent | Purpose |
+|-------|---------|
+| `hypothesis-challenger` | Stress-tests a hypothesis from multiple angles, surfacing assumptions and missing alternatives |
+| `evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
+| `mece-evaluator` | Validates a decomposition for mutual exclusivity, collective exhaustiveness, level alignment, and testability |
+
+It also ships hooks that detect failure patterns.
 
 ## How It Works
 

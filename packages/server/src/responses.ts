@@ -75,7 +75,9 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     result += `── Initial Structure (Critical) ──\n`;
     result += `This is the foundational decomposition. Its quality determines the entire investigation.\n`;
     result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n`;
-    result += `Fan out subagents to verify this structure is truly MECE and covers the full problem space.\n\n`;
+    const parentIdForDispatch = children[0]?.parentId ?? '';
+    result += `Dispatch the \`mece-evaluator\` subagent to validate this decomposition: it checks mutual exclusivity, collective exhaustiveness, level alignment, and testability.\n`;
+    result += `  Input — parent hypothesis ID: ${parentIdForDispatch} | child IDs: ${ids.join(', ')}\n\n`;
   }
 
   // Structural checks
@@ -123,7 +125,8 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   result += `  ME: Could a single root cause belong to TWO of these categories? If yes, refine the boundaries.\n`;
   result += `  CE: Can you imagine a plausible cause NOT covered by ANY of these? If yes, add it.\n`;
   result += `  Level: Are all hypotheses at the same level of abstraction?\n`;
-  result += `Fan out subagents to validate each hypothesis is distinct and the space is fully covered.\n`;
+  result += `Dispatch the \`mece-evaluator\` subagent to validate this decomposition: it checks mutual exclusivity, collective exhaustiveness, level alignment, and testability.\n`;
+  result += `  Input — parent hypothesis ID: ${children[0]?.parentId ?? ''} | child IDs: ${ids.join(', ')}\n`;
   result += `\n── Protocol ──\n`;
   result += `Crucial experiment: What SINGLE observation would yield DIFFERENT results depending on which sub-hypothesis is correct?\n`;
   result += `Prioritize this discriminating test before investigating each in isolation.\n`;
