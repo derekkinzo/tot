@@ -27,9 +27,9 @@ describe('Plugin Structure', () => {
       const path = join(REPO_ROOT, '.mcp.json');
       expect(existsSync(path)).toBe(true);
       const content = JSON.parse(readFileSync(path, 'utf-8'));
-      expect(content.tot).toBeDefined();
-      expect(content.tot.command).toBe('npx');
-      expect(content.tot.args).toContain('tot-mcp');
+      expect(content.mcpServers?.tot).toBeDefined();
+      expect(content.mcpServers.tot.command).toBe('npx');
+      expect(content.mcpServers.tot.args).toContain('tot-mcp');
     });
   });
 

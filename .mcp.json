@@ -1,6 +1,8 @@
 {
-  "tot": {
-    "command": "npx",
-    "args": ["tot-mcp"]
+  "mcpServers": {
+    "tot": {
+      "command": "npx",
+      "args": ["tot-mcp"]
+    }
   }
 }

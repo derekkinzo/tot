@@ -2,10 +2,16 @@
  * Adaptive response formatters for tool results.
  *
  * Signals are grounded in established reasoning methodologies:
- * - Strong Inference (Platt 1964): crucial experiment design, recycling discipline
- * - Analysis of Competing Hypotheses (Heuer 1999): diagnosticity, red team, sensitivity
+ * - Eliminative Induction (Bacon 1620, Novum Organum): tables of presence/absence,
+ *   exclusion of alternatives as the engine of inference
+ * - Methods of Agreement and Difference (Mill 1843, System of Logic): comparative
+ *   evidence across cases to isolate causal factors
+ * - Multiple Working Hypotheses (Chamberlin 1890): parallel hypothesis families
+ *   guard against parental affection for a single explanation
  * - Falsificationism (Popper 1959): severity of tests, asymmetry of refutation
+ * - Strong Inference (Platt 1964): crucial experiment design, recycling discipline
  * - Causal Inference (Hill 1965): temporality, specificity, reproducibility
+ * - Analysis of Competing Hypotheses (Heuer 1999): diagnosticity, red team, sensitivity
  * - Scientific Debugging (Zeller 2009): hypothesize-test-eliminate cycle
  * - Expert Debugging Studies (Ko & Myers 2004, Parnin & Orso 2011): depth limits
  *
@@ -69,7 +75,9 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     result += `── Initial Structure (Critical) ──\n`;
     result += `This is the foundational decomposition. Its quality determines the entire investigation.\n`;
     result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n`;
-    result += `Fan out subagents to verify this structure is truly MECE and covers the full problem space.\n\n`;
+    const parentIdForDispatch = children[0]?.parentId ?? '';
+    result += `Dispatch the \`mece-evaluator\` subagent to validate this decomposition: it checks mutual exclusivity, collective exhaustiveness, level alignment, and testability.\n`;
+    result += `  Input — parent hypothesis ID: ${parentIdForDispatch} | child IDs: ${ids.join(', ')}\n\n`;
   }
 
   // Structural checks
@@ -117,7 +125,8 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   result += `  ME: Could a single root cause belong to TWO of these categories? If yes, refine the boundaries.\n`;
   result += `  CE: Can you imagine a plausible cause NOT covered by ANY of these? If yes, add it.\n`;
   result += `  Level: Are all hypotheses at the same level of abstraction?\n`;
-  result += `Fan out subagents to validate each hypothesis is distinct and the space is fully covered.\n`;
+  result += `Dispatch the \`mece-evaluator\` subagent to validate this decomposition: it checks mutual exclusivity, collective exhaustiveness, level alignment, and testability.\n`;
+  result += `  Input — parent hypothesis ID: ${children[0]?.parentId ?? ''} | child IDs: ${ids.join(', ')}\n`;
   result += `\n── Protocol ──\n`;
   result += `Crucial experiment: What SINGLE observation would yield DIFFERENT results depending on which sub-hypothesis is correct?\n`;
   result += `Prioritize this discriminating test before investigating each in isolation.\n`;
@@ -181,7 +190,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     }
   }
 
-  // Confirmation bias detection + confounder check (Fisher 1935)
+  // Confirmation bias detection + confounder check (Heuer 1999 ACH)
   if (supporting >= 3 && refuting === 0 && activeSiblings.length > 0) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;

@@ -15,6 +15,7 @@ export class TreeManager extends EventEmitter {
   private sessions = new Map<string, Session>();
   private hypotheses = new Map<string, Hypothesis>();
   private sessionHypotheses = new Map<string, Set<string>>();
+  private currentSessionId: string | null = null;
   private mutationsSinceStatusChange = 0;
   private stagnationThreshold: number;
   private maxDepth: number;
@@ -67,6 +68,7 @@ export class TreeManager extends EventEmitter {
     this.sessions.set(sessionId, session);
     this.hypotheses.set(rootId, root);
     this.sessionHypotheses.set(sessionId, new Set([rootId]));
+    this.currentSessionId = sessionId;
     this.mutationsSinceStatusChange = 0;
     this.touch();
 
@@ -86,6 +88,7 @@ export class TreeManager extends EventEmitter {
    */
   decompose(parentId: string, childContents: string[]): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
+    this.currentSessionId = parent.sessionId;
 
     if (parent.status === 'eliminated' || parent.status === 'confirmed') {
       throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
@@ -146,6 +149,7 @@ export class TreeManager extends EventEmitter {
    */
   addHypothesis(parentId: string, content: string): Hypothesis {
     const parent = this.getHypothesisOrThrow(parentId);
+    this.currentSessionId = parent.sessionId;
 
     if (parent.status === 'eliminated') {
       throw new TreeError('Cannot add hypothesis to an eliminated node');
@@ -198,6 +202,7 @@ export class TreeManager extends EventEmitter {
     source?: string,
   ): Evidence {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
+    this.currentSessionId = hypothesis.sessionId;
 
     if (hypothesis.status === 'eliminated' || hypothesis.status === 'confirmed') {
       throw new TreeError(`Cannot add evidence to a ${hypothesis.status} hypothesis`);
@@ -238,6 +243,7 @@ export class TreeManager extends EventEmitter {
    */
   eliminateHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
+    this.currentSessionId = hypothesis.sessionId;
 
     if (hypothesis.status === 'eliminated') {
       throw new TreeError('Hypothesis is already eliminated');
@@ -266,6 +272,7 @@ export class TreeManager extends EventEmitter {
    */
   confirmHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
+    this.currentSessionId = hypothesis.sessionId;
 
     if (hypothesis.status === 'confirmed') {
       throw new TreeError('Hypothesis is already confirmed');
@@ -303,6 +310,7 @@ export class TreeManager extends EventEmitter {
    */
   scoreHypothesis(hypothesisId: string, score: number, rationale?: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
+    this.currentSessionId = hypothesis.sessionId;
 
     if (score < 0 || score > 1 || Number.isNaN(score)) {
       throw new TreeError('Score must be between 0 and 1');
@@ -362,9 +370,14 @@ export class TreeManager extends EventEmitter {
    * @returns Tree state, or null if no matching session exists
    */
   getTree(sessionId?: string): TreeState | null {
-    const session = sessionId
-      ? this.sessions.get(sessionId)
-      : Array.from(this.sessions.values()).find((s) => s.status === 'active');
+    let session: Session | undefined;
+    if (sessionId) {
+      session = this.sessions.get(sessionId);
+    } else if (this.currentSessionId) {
+      session = this.sessions.get(this.currentSessionId);
+    } else {
+      session = Array.from(this.sessions.values()).find((s) => s.status === 'active');
+    }
 
     if (!session) return null;
 
@@ -436,7 +449,10 @@ export class TreeManager extends EventEmitter {
   }
 
   getActiveSession(): Session | undefined {
-    return Array.from(this.sessions.values()).find((s) => s.status === 'active');
+    if (this.currentSessionId) {
+      return this.sessions.get(this.currentSessionId);
+    }
+    return undefined;
   }
 
   /**
@@ -448,7 +464,10 @@ export class TreeManager extends EventEmitter {
    * the daemon at startup before any client connections exist.
    */
   loadState(sessions: Session[], hypotheses: Hypothesis[]): void {
-    for (const s of sessions) this.sessions.set(s.id, s);
+    for (const s of sessions) {
+      this.sessions.set(s.id, s);
+      this.currentSessionId = s.id;
+    }
     for (const h of hypotheses) {
       this.hypotheses.set(h.id, h);
       if (!this.sessionHypotheses.has(h.sessionId)) {
