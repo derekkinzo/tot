@@ -337,7 +337,7 @@ describe('TreeManager', () => {
       const { session: s1 } = tm.createSession('First');
       tm.addEvidence(s1.rootNodeId, 'supports', 'x');
       tm.confirmHypothesis(s1.rootNodeId, 'done');
-      const { session: s2 } = tm.createSession('Second');
+      tm.createSession('Second');
       const state = tm.getTree(s1.id);
       expect(state!.session.id).toBe(s1.id);
     });
@@ -503,6 +503,27 @@ describe('TreeManager', () => {
       const { root } = smallTm.createSession('Problem');
       smallTm.decompose(root.id, ['A', 'B', 'C']); // 4 total
       expect(() => smallTm.addHypothesis(root.id, 'Overflow')).toThrow('Maximum hypothesis count (4) exceeded');
+    });
+  });
+
+  // --- Active session tracking ---
+
+  describe('getActiveSession', () => {
+    it('tracks the most recently driven session, not the most recently created', () => {
+      // Create session A
+      const { session: sessionA, root: rootA } = tm.createSession('Problem A');
+
+      // Create session B — newest by creation time
+      const { session: sessionB } = tm.createSession('Problem B');
+
+      // Most recent creation wins: getActiveSession returns B
+      expect(tm.getActiveSession()?.id).toBe(sessionB.id);
+
+      // Drive session A by adding evidence to its root hypothesis
+      tm.addEvidence(rootA.id, 'supports', 'Found a clue in A');
+
+      // Active session now follows mutation, not creation order
+      expect(tm.getActiveSession()?.id).toBe(sessionA.id);
     });
   });
 });
