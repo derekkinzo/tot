@@ -302,6 +302,7 @@ async function handleMessage(
           }
           if (oldest && oldest !== projectDir) {
             projectManagers.delete(oldest);
+            projectLocks.delete(oldest);
             console.error(`[tot-daemon] Evicted LRU project: ${oldest}`);
           }
         }
