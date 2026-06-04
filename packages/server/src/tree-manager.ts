@@ -68,12 +68,12 @@ export class TreeManager extends EventEmitter {
     this.sessions.set(sessionId, session);
     this.hypotheses.set(rootId, root);
     this.sessionHypotheses.set(sessionId, new Set([rootId]));
-    this.currentSessionId = sessionId;
     this.mutationsSinceStatusChange = 0;
     this.touch();
 
     this.emit('event', { type: 'session-created', session } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-added', hypothesis: root } satisfies TreeEvent);
+    this.setCurrent(sessionId);
 
     return { session, root };
   }
@@ -88,7 +88,6 @@ export class TreeManager extends EventEmitter {
    */
   decompose(parentId: string, childContents: string[]): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
-    this.currentSessionId = parent.sessionId;
 
     if (parent.status === 'eliminated' || parent.status === 'confirmed') {
       throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
@@ -136,6 +135,7 @@ export class TreeManager extends EventEmitter {
     }
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis: parent } satisfies TreeEvent);
+    this.setCurrent(parent.sessionId);
     return children;
   }
 
@@ -149,7 +149,6 @@ export class TreeManager extends EventEmitter {
    */
   addHypothesis(parentId: string, content: string): Hypothesis {
     const parent = this.getHypothesisOrThrow(parentId);
-    this.currentSessionId = parent.sessionId;
 
     if (parent.status === 'eliminated') {
       throw new TreeError('Cannot add hypothesis to an eliminated node');
@@ -183,6 +182,7 @@ export class TreeManager extends EventEmitter {
 
     this.emit('event', { type: 'hypothesis-added', hypothesis } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis: parent } satisfies TreeEvent);
+    this.setCurrent(parent.sessionId);
     return hypothesis;
   }
 
@@ -202,7 +202,6 @@ export class TreeManager extends EventEmitter {
     source?: string,
   ): Evidence {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
-    this.currentSessionId = hypothesis.sessionId;
 
     if (hypothesis.status === 'eliminated' || hypothesis.status === 'confirmed') {
       throw new TreeError(`Cannot add evidence to a ${hypothesis.status} hypothesis`);
@@ -230,6 +229,7 @@ export class TreeManager extends EventEmitter {
 
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
+    this.setCurrent(hypothesis.sessionId);
 
     return evidence;
   }
@@ -243,7 +243,6 @@ export class TreeManager extends EventEmitter {
    */
   eliminateHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
-    this.currentSessionId = hypothesis.sessionId;
 
     if (hypothesis.status === 'eliminated') {
       throw new TreeError('Hypothesis is already eliminated');
@@ -260,6 +259,24 @@ export class TreeManager extends EventEmitter {
     this.touch();
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
+
+    // If every hypothesis in the session is now eliminated, the session is a
+    // dead end — mark it abandoned so it stops appearing as active. Without
+    // this, getActiveSession would keep returning a session the agent can no
+    // longer make progress in.
+    const session = this.sessions.get(hypothesis.sessionId);
+    if (session && session.status === 'active' && this.allHypothesesEliminated(session.id)) {
+      session.status = 'abandoned';
+      session.completedAt = now;
+      this.emit('event', { type: 'session-completed', sessionId: session.id } satisfies TreeEvent);
+      if (this.currentSessionId === session.id) {
+        this.currentSessionId = null;
+      }
+    }
+
+    // Eliminating a hypothesis is pruning, not investigative progress, so
+    // currentSessionId is not promoted to this session unless it was already
+    // current and we just abandoned it (handled above).
     return hypothesis;
   }
 
@@ -272,7 +289,6 @@ export class TreeManager extends EventEmitter {
    */
   confirmHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
-    this.currentSessionId = hypothesis.sessionId;
 
     if (hypothesis.status === 'confirmed') {
       throw new TreeError('Hypothesis is already confirmed');
@@ -297,6 +313,10 @@ export class TreeManager extends EventEmitter {
       this.emit('event', { type: 'session-completed', sessionId: session.id } satisfies TreeEvent);
     }
 
+    if (this.currentSessionId === hypothesis.sessionId) {
+      this.currentSessionId = null;
+    }
+
     return hypothesis;
   }
 
@@ -310,7 +330,6 @@ export class TreeManager extends EventEmitter {
    */
   scoreHypothesis(hypothesisId: string, score: number, rationale?: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
-    this.currentSessionId = hypothesis.sessionId;
 
     if (score < 0 || score > 1 || Number.isNaN(score)) {
       throw new TreeError('Score must be between 0 and 1');
@@ -324,6 +343,7 @@ export class TreeManager extends EventEmitter {
     this.incrementMutationCounter();
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
+    this.setCurrent(hypothesis.sessionId);
     return hypothesis;
   }
 
@@ -370,15 +390,7 @@ export class TreeManager extends EventEmitter {
    * @returns Tree state, or null if no matching session exists
    */
   getTree(sessionId?: string): TreeState | null {
-    let session: Session | undefined;
-    if (sessionId) {
-      session = this.sessions.get(sessionId);
-    } else if (this.currentSessionId) {
-      session = this.sessions.get(this.currentSessionId);
-    } else {
-      session = Array.from(this.sessions.values()).find((s) => s.status === 'active');
-    }
-
+    const session = sessionId ? this.sessions.get(sessionId) : this.getActiveSession();
     if (!session) return null;
 
     const sessionHypotheses = new Map<string, Hypothesis>();
@@ -450,9 +462,10 @@ export class TreeManager extends EventEmitter {
 
   getActiveSession(): Session | undefined {
     if (this.currentSessionId) {
-      return this.sessions.get(this.currentSessionId);
+      const tracked = this.sessions.get(this.currentSessionId);
+      if (tracked && tracked.status === 'active') return tracked;
     }
-    return undefined;
+    return Array.from(this.sessions.values()).find((s) => s.status === 'active');
   }
 
   /**
@@ -466,7 +479,6 @@ export class TreeManager extends EventEmitter {
   loadState(sessions: Session[], hypotheses: Hypothesis[]): void {
     for (const s of sessions) {
       this.sessions.set(s.id, s);
-      this.currentSessionId = s.id;
     }
     for (const h of hypotheses) {
       this.hypotheses.set(h.id, h);
@@ -513,6 +525,29 @@ export class TreeManager extends EventEmitter {
 
   private touch(): void {
     this.lastInteractionTime = Date.now();
+  }
+
+  /**
+   * Marks `sessionId` as the agent's current working session. Called from
+   * mutation methods AFTER validation succeeds, so a rejected call cannot
+   * leak state. Refuses to track a non-active session so the next status
+   * read falls through to the active-session scan.
+   */
+  private setCurrent(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session && session.status === 'active') {
+      this.currentSessionId = sessionId;
+    }
+  }
+
+  private allHypothesesEliminated(sessionId: string): boolean {
+    const ids = this.sessionHypotheses.get(sessionId);
+    if (!ids || ids.size === 0) return false;
+    for (const id of ids) {
+      const h = this.hypotheses.get(id);
+      if (h && h.status !== 'eliminated') return false;
+    }
+    return true;
   }
 
   private getHypothesisOrThrow(id: string): Hypothesis {
