@@ -246,6 +246,30 @@ describe('TreeManager', () => {
       expect(events.some((e) => e.type === 'hypothesis-updated')).toBe(true);
       expect(events.some((e) => e.type === 'session-completed')).toBe(true);
     });
+
+    it('rejects confirming a parent while a child is pending', () => {
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, ['A', 'B']);
+      expect(() => tm.confirmHypothesis(root.id, 'reason')).toThrow(TreeError);
+    });
+
+    it('rejects confirming a parent while a child is exploring', () => {
+      const { root } = tm.createSession('Problem');
+      const children = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(children[0].id, 'supports', 'note');
+      expect(children[0].status).toBe('exploring');
+      tm.eliminateHypothesis(children[1].id, 'reason');
+      expect(() => tm.confirmHypothesis(root.id, 'reason')).toThrow(TreeError);
+    });
+
+    it('confirms a parent once every child is resolved', () => {
+      const { root } = tm.createSession('Problem');
+      const children = tm.decompose(root.id, ['A', 'B']);
+      tm.eliminateHypothesis(children[0].id, 'reason');
+      tm.eliminateHypothesis(children[1].id, 'reason');
+      const result = tm.confirmHypothesis(root.id, 'reason');
+      expect(result.status).toBe('confirmed');
+    });
   });
 
   // --- Score ---

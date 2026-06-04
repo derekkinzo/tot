@@ -285,7 +285,7 @@ export class TreeManager extends EventEmitter {
    * @param hypothesisId - ID of the hypothesis to confirm
    * @param reason - Justification for confirmation
    * @returns The updated hypothesis
-   * @throws TreeError if already confirmed or eliminated
+   * @throws TreeError if already confirmed, eliminated, or any child is unresolved
    */
   confirmHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
@@ -295,6 +295,16 @@ export class TreeManager extends EventEmitter {
     }
     if (hypothesis.status === 'eliminated') {
       throw new TreeError('Cannot confirm an eliminated hypothesis');
+    }
+
+    // Decomposition is a structural commitment: the parent's truth is
+    // determined by the resolution of its children, so the parent cannot be
+    // confirmed until each child has been eliminated or confirmed.
+    for (const childId of hypothesis.children) {
+      const child = this.hypotheses.get(childId);
+      if (child && (child.status === 'pending' || child.status === 'exploring')) {
+        throw new TreeError('Cannot confirm a hypothesis with unresolved children');
+      }
     }
 
     const now = new Date().toISOString();
