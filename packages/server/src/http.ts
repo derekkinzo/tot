@@ -3,8 +3,16 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import type { TreeManager } from './tree-manager.js';
-import type { TreeEvent } from './types.js';
+import type { Session, TreeEvent } from './types.js';
 import type { ProjectState } from './daemon.js';
+
+/** Most recently created active session, falling back to the most recent overall. */
+function pickDefaultSession(tm: TreeManager): Session | null {
+  const sessions = tm.getAllSessions().sort((a, b) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  return sessions.find((s) => s.status === 'active') ?? sessions[0] ?? null;
+}
 
 export interface MultiProjectContext {
   getProject: (projectDir: string) => ProjectState | undefined;
@@ -49,10 +57,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
         for (const wc of waitingClients) {
           clients.add(wc);
           // Send snapshot to the waiting client
-          const sessions = tm.getAllSessions().sort((a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-          const session = sessions.find((s) => s.status === 'active') ?? sessions[0];
+          const session = pickDefaultSession(tm);
           if (session) {
             const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
             const snapshot: TreeEvent = { type: 'snapshot', session, hypotheses };
@@ -226,11 +231,8 @@ function handleSSE(
   });
   res.flushHeaders();
 
-  // Send initial snapshot (most recently created active session, or latest overall)
-  const sessions = tm.getAllSessions().sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-  const session = sessions.find((s) => s.status === 'active') ?? sessions[0];
+  // Send initial snapshot.
+  const session = pickDefaultSession(tm);
   if (session) {
     const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
     const snapshot: TreeEvent = { type: 'snapshot', session, hypotheses };
