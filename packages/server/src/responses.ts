@@ -190,7 +190,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     }
   }
 
-  // Confirmation bias detection + confounder check (Heuer 1999 ACH)
+  // Confirmation bias detection + confounder check (Mill 1843, Hill 1965)
   if (supporting >= 3 && refuting === 0 && activeSiblings.length > 0) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
