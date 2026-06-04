@@ -42,10 +42,11 @@ Open `http://localhost:6274` to see the visualization.
 <details>
 <summary><strong>Claude Code (Plugin — recommended)</strong></summary>
 
-Install as a plugin for full skill support (`/tot-reason`, `/tot-inspect`, `/tot-export`):
+Install as a plugin for full skill support (`/tot-reason`, `/tot-inspect`, `/tot-export`, `/tot-dashboard`). From inside Claude Code:
 
-```bash
-claude plugin add derekkinzo/tot
+```
+/plugin marketplace add derekkinzo/tot
+/plugin install tot-mcp@tot
 ```
 
 This auto-registers the MCP server and enables slash commands and hooks.
