@@ -18,6 +18,7 @@ export interface MultiProjectContext {
   getProject: (projectDir: string) => ProjectState | undefined;
   getAllProjects: () => ProjectState[];
   getLastActiveProject: () => string | null;
+  withLock: <T>(projectDir: string, fn: () => Promise<T>) => Promise<T>;
   onSseConnect: () => void;
   onSseDisconnect: () => void;
 }
@@ -140,7 +141,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
 
     if (url.pathname === '/api/state') {
       setCorsHeaders(res);
-      handleStateAPI(res, url, ctx);
+      await handleStateAPI(res, url, ctx);
       return;
     }
 
@@ -255,39 +256,41 @@ function handleSSE(
   });
 }
 
-function handleStateAPI(res: ServerResponse, url: URL, ctx: MultiProjectContext): void {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-
+async function handleStateAPI(res: ServerResponse, url: URL, ctx: MultiProjectContext): Promise<void> {
   const project = resolveProject(url, ctx);
   if (!project) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ session: null, hypotheses: [] }));
     return;
   }
 
-  const { tm } = project;
+  const { tm, projectDir } = project;
   const requestedSessionId = url.searchParams.get('sessionId');
 
-  // If a specific session is requested and not in memory, try to load it
-  if (requestedSessionId) {
-    project.ensureSessionLoaded(requestedSessionId);
-  }
+  // Lazy-load + read snapshot under the per-project lock so ensureSessionLoaded
+  // (which writes the in-memory sessions/hypotheses Maps) cannot interleave
+  // with an MCP handler mid-mutation.
+  try {
+    const payload = await ctx.withLock(projectDir, async () => {
+      if (requestedSessionId) {
+        project.ensureSessionLoaded(requestedSessionId);
+      }
 
-  const sessions = tm.getAllSessions().sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+      const session: Session | null = requestedSessionId
+        ? tm.getAllSessions().find((s) => s.id === requestedSessionId) ?? null
+        : pickDefaultSession(tm);
 
-  let session;
-  if (requestedSessionId) {
-    session = sessions.find((s) => s.id === requestedSessionId) ?? null;
-  } else {
-    session = sessions.find((s) => s.status === 'active') ?? sessions[0] ?? null;
-  }
+      if (!session) return { session: null, hypotheses: [] };
+      const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
+      return { session, hypotheses };
+    });
 
-  if (session) {
-    const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
-    res.end(JSON.stringify({ session, hypotheses }));
-  } else {
-    res.end(JSON.stringify({ session: null, hypotheses: [] }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(payload));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'state-load-failed' }));
+    console.error('[tot-mcp] handleStateAPI error:', err);
   }
 }
 
