@@ -114,6 +114,13 @@ describe('TreeManager', () => {
       expect(() => tm.addHypothesis(root.id, 'Too late')).toThrow(TreeError);
     });
 
+    it('rejects when parent is corroborated', () => {
+      const { root } = tm.createSession('Problem');
+      tm.addEvidence(root.id, 'supports', 'good');
+      tm.corroborateHypothesis(root.id, 'done');
+      expect(() => tm.addHypothesis(root.id, 'Too late')).toThrow(TreeError);
+    });
+
     it('rejects non-existent parent', () => {
       tm.createSession('Problem');
       expect(() => tm.addHypothesis('fake', 'Nope')).toThrow(TreeError);

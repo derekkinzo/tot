@@ -143,17 +143,20 @@ export class TreeManager extends EventEmitter {
 
   /**
    * Adds a single hypothesis as a child of an existing node.
-   * Use when a MECE decomposition is missing a possibility.
+   * Use when a sibling-level decomposition is missing a possibility.
    * @param parentId - ID of the parent hypothesis
    * @param content - Description of the new hypothesis
    * @returns The newly created hypothesis
-   * @throws TreeError if parent is eliminated, depth exceeded, or count exceeded
+   * @throws TreeError if parent is eliminated/corroborated, depth exceeded, or count exceeded
    */
   addHypothesis(parentId: string, content: string): Hypothesis {
     const parent = this.getHypothesisOrThrow(parentId);
 
-    if (parent.status === 'eliminated') {
-      throw new TreeError('Cannot add hypothesis to an eliminated node');
+    // Mirror decompose's terminal-parent guard. Without this, a new pending
+    // child can appear under a corroborated ancestor, leaving structural
+    // debt that the closure predicate would silently overlook.
+    if (parent.status === 'eliminated' || parent.status === 'corroborated') {
+      throw new TreeError(`Cannot add hypothesis to a ${parent.status} node`);
     }
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
