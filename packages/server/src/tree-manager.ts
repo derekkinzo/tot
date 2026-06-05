@@ -468,11 +468,20 @@ export class TreeManager extends EventEmitter {
       catchAllPatterns.some((p) => l.includes(p)),
     );
 
+    let abstractionMismatch = false;
+    if (children.length >= 2) {
+      const wordCounts = children.map((c) => c.content.split(/\s+/).length);
+      const minLen = Math.min(...wordCounts);
+      const maxLen = Math.max(...wordCounts);
+      abstractionMismatch = maxLen > minLen * 3;
+    }
+
     return {
       childCount: children.length,
       substringOverlaps,
       duplicateLabels,
       hasCatchAll,
+      abstractionMismatch,
     };
   }
 

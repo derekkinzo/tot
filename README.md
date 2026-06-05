@@ -110,7 +110,7 @@ The plugin also includes agents for parallel investigation and adversarial revie
 |-------|---------|
 | `hypothesis-challenger` | Stress-tests a hypothesis from multiple angles, surfacing assumptions and missing alternatives |
 | `evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
-| `mece-evaluator` | Validates a decomposition for mutual exclusivity, collective exhaustiveness, level alignment, and testability |
+| `decomposition-evaluator` | Advises on decomposition structure: sibling overlap, coverage, level of abstraction, testability. Emits advisory categories, not pass/fail. |
 
 It also ships hooks that detect failure patterns.
 

@@ -54,12 +54,12 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
     `3. Identify boundaries: What is IN scope vs OUT of scope for this investigation?\n` +
     `Fan out subagents to research the domain from multiple angles simultaneously.\n\n` +
     `── Decomposition ──\n` +
-    `Once you understand the domain, decompose into 2-5 MECE hypotheses.\n` +
+    `Once you understand the domain, decompose into 2-5 sibling hypotheses.\n` +
     (domainHint ? domainHint : '') +
-    `MECE criteria:\n` +
-    `  ME (Mutually Exclusive): Each hypothesis covers a DISTINCT failure mode — no overlaps.\n` +
-    `  CE (Collectively Exhaustive): Together they cover ALL plausible explanations.\n` +
-    `For EACH hypothesis, define what TEST would REFUTE it.\n` +
+    `Aim for (the underlying set-partition property — overlap is acceptable when it reflects domain co-occurrence):\n` +
+    `  Non-overlapping siblings: each hypothesis covers a distinct failure mode unless the domain genuinely co-instantiates them.\n` +
+    `  Collective coverage: together they cover the plausible space; an explicit catch-all branch is first-class.\n` +
+    `For EACH hypothesis, define what observation would REFUTE it.\n` +
     `Execute the most discriminating test first (one that separates hypotheses).\n\n` +
     `── Tree ──\n` +
     `0 hypotheses | Session: ${sessionId.slice(0, 8)}`;
@@ -89,7 +89,7 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   const minLen = Math.min(...lengths);
   const maxLen = Math.max(...lengths);
   if (maxLen > minLen * 3) {
-    result += `⚠ Abstraction mismatch: labels range from ${minLen} to ${maxLen} words\n`;
+    result += `level-mismatch-advisory: labels range from ${minLen} to ${maxLen} words — uneven abstraction\n`;
   }
 
   if (check.substringOverlaps.length === 0 && check.childCount >= 2 && maxLen <= minLen * 3) {
@@ -116,18 +116,18 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     result += `\nDepth ${children[0].depth}: Deep decompositions risk fragmenting the problem. Consider whether the parent is specific enough to test directly.\n`;
   }
 
-  // MECE review and protocol guidance
-  result += `\n── MECE Review ──\n`;
-  result += `STOP and review this decomposition before proceeding:\n`;
-  result += `  ME: Could a single root cause belong to TWO of these categories? If yes, refine the boundaries.\n`;
-  result += `  CE: Can you imagine a plausible cause NOT covered by ANY of these? If yes, add it.\n`;
-  result += `  Level: Are all hypotheses at the same level of abstraction?\n`;
-  // Dispatch the mece-evaluator subagent with content inlined (not bare UUIDs)
-  // so the validator can run its four checks without an extra get_tree call.
-  // Each child is prefixed with an 8-char ID so the agent can map findings
-  // back to a specific node when it follows up with add_evidence/eliminate.
+  // Decomposition advisory and protocol guidance
+  result += `\n── Decomposition Review ──\n`;
+  result += `Stop and review this decomposition before proceeding:\n`;
+  result += `  Overlap: could a single root cause belong to two of these? If accidental, refine the boundaries; if it reflects domain co-occurrence, consider an explicit "A and B" combined child.\n`;
+  result += `  Coverage: imagine a plausible cause NOT covered by ANY of these. If yes, add it (catch-all branches are first-class).\n`;
+  result += `  Level: are all hypotheses at the same level of abstraction?\n`;
+  // Dispatch the decomposition-evaluator subagent with content inlined (not
+  // bare UUIDs) so the validator can run its checks without an extra
+  // get_tree call. Each child is prefixed with an 8-char ID so the agent
+  // can map findings back to a specific node when it follows up.
   if (parent) {
-    result += `\nDispatch the \`mece-evaluator\` subagent (mutual exclusivity, collective exhaustiveness, level alignment, testability):\n`;
+    result += `\nDispatch the \`decomposition-evaluator\` subagent (overlap, coverage, level, testability):\n`;
     result += `  Parent: "${truncate(parent.content, 80)}"\n`;
     for (const c of children) {
       result += `  - ${c.id.slice(0, 8)}: "${truncate(c.content, 80)}"\n`;
@@ -148,11 +148,11 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
   let result = JSON.stringify({ hypothesisId: hypothesis.id }) + '\n\n' +
     `✓ Added hypothesis: "${truncate(hypothesis.content, 60)}"\n\n`;
 
-  result += `── MECE Validation ──\n`;
+  result += `── Sibling Review ──\n`;
   result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
-  result += `  ME: Does this new hypothesis overlap with any existing sibling?\n`;
-  result += `  CE: Does adding this close a gap, or is there still something missing?\n`;
-  result += `Fan out subagents to challenge whether this hypothesis is truly distinct from its siblings.\n\n`;
+  result += `  Overlap: does this overlap acknowledge a domain co-occurrence (e.g., an INUS cluster), or is it accidental redundancy?\n`;
+  result += `  Coverage: does adding this close a gap, or is there still something missing?\n`;
+  result += `Fan out subagents to challenge whether this hypothesis is genuinely distinct or whether it should be merged with a sibling.\n\n`;
 
   result += `── Protocol ──\n`;
   result += `What is the fastest path to REFUTE this hypothesis? Define the test before investigating.\n`;
@@ -393,26 +393,44 @@ export function formatScore(hypothesis: Hypothesis, tm: TreeManager): string {
 }
 
 export function formatValidateDecomposition(parentId: string, check: StructuralCheck): string {
-  let result = JSON.stringify({ parentId, check }) + '\n\n' +
+  // Advisory output, not pass/fail. Strict mutual exclusivity is rejected
+  // for hypothesis sets (Heuer 2005); siblings can overlap when they
+  // reflect domain co-occurrence (Mackie INUS).
+  const advisories: string[] = [];
+  if (check.substringOverlaps.length > 0) advisories.push('overlap-advisory');
+  if (check.duplicateLabels.length > 0) advisories.push('overlap-advisory');
+  if (!check.hasCatchAll) advisories.push('coverage-gap-advisory');
+  if (check.abstractionMismatch) advisories.push('level-mismatch-advisory');
+  if (advisories.length === 0) advisories.push('no-issues-detected');
+
+  let result = JSON.stringify({ parentId, advisories: Array.from(new Set(advisories)), check }) + '\n\n' +
     `── Structural Checks ──\n` +
     `Children: ${check.childCount}\n`;
 
   if (check.substringOverlaps.length > 0) {
-    result += `⚠ Substring overlaps: ${check.substringOverlaps.length} pair(s)\n`;
+    result += `overlap-advisory: ${check.substringOverlaps.length} substring pair(s) — accidental redundancy, or domain co-occurrence (INUS)?\n`;
   } else {
-    result += `✓ No substring overlaps\n`;
+    result += `No substring overlaps detected.\n`;
   }
 
   if (check.duplicateLabels.length > 0) {
-    result += `⚠ Duplicates: ${check.duplicateLabels.join(', ')}\n`;
+    result += `overlap-advisory: duplicate labels: ${check.duplicateLabels.join(', ')}\n`;
   }
 
-  result += check.hasCatchAll ? `✓ Has catch-all category\n` : `Note: No catch-all\n`;
+  result += check.hasCatchAll
+    ? `Has explicit catch-all branch.\n`
+    : `coverage-gap-advisory: no explicit catch-all — closure of the cause space is being claimed by enumeration.\n`;
 
-  result += `\n── Validation Questions ──\n`;
-  result += `ME: Could a single observation belong to two of these hypotheses?\n`;
-  result += `CE: Is there a plausible cause not covered by any hypothesis?\n`;
-  result += `Level: Are all hypotheses at the same level of abstraction?\n`;
+  if (check.abstractionMismatch) {
+    result += `level-mismatch-advisory: child labels span uneven word-count ranges, suggesting mixed abstraction.\n`;
+  }
+
+  result += `\n── Review Questions ──\n`;
+  result += `\n(testability-advisory cases — unfalsifiable hypotheses — require semantic review; dispatch the decomposition-evaluator subagent for those.)\n`;
+  result += `Overlap: could a single observation belong to two of these by accident?\n`;
+  result += `Coverage: is there a plausible cause not covered by any sibling or catch-all?\n`;
+  result += `Level: are all hypotheses at the same level of abstraction?\n`;
+  result += `\nDispatch the \`decomposition-evaluator\` subagent for structural advice on ambiguous cases.\n`;
 
   return result;
 }

@@ -72,6 +72,9 @@ export interface StructuralCheck {
   substringOverlaps: [string, string][];
   duplicateLabels: string[];
   hasCatchAll: boolean;
+  // True when sibling labels span uneven word-count ranges, surfacing the
+  // possibility of mixed abstraction levels.
+  abstractionMismatch: boolean;
 }
 
 export interface TreeState {

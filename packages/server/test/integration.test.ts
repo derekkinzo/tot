@@ -88,7 +88,7 @@ describe('MCP Integration', () => {
         arguments: { problem: 'Memory leak in production' },
       });
       const text = getText(result);
-      expect(text).toContain('MECE');
+      expect(text).toContain('Decomposition');
       expect(text).toContain('REFUTE');
     });
 
@@ -126,7 +126,7 @@ describe('MCP Integration', () => {
         arguments: { parentId: rootId, children: ['Network layer', 'Application layer'] },
       });
       const text = getText(result);
-      expect(text).toContain('MECE Review');
+      expect(text).toContain('Decomposition Review');
     });
 
     it('supports multi-level decomposition', async () => {
@@ -646,6 +646,44 @@ describe('MCP Integration', () => {
       });
       const text = getText(result);
       expect(text).toContain('No substring overlaps');
+    });
+
+    it('emits advisory categories rather than pass/fail', async () => {
+      const { rootId } = parseResult(
+        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
+      );
+      await client.callTool({
+        name: 'decompose',
+        arguments: { parentId: rootId, children: ['Network error', 'Network'] },
+      });
+      const result = await client.callTool({
+        name: 'validate_decomposition',
+        arguments: { parentId: rootId },
+      });
+      const text = getText(result);
+      // Output uses advisory vocabulary, not PASS/FAIL/NEEDS_REVISION
+      expect(text).not.toContain('PASS');
+      expect(text).not.toContain('FAIL');
+      expect(text).toContain('overlap-advisory');
+    });
+
+    it('detects abstraction mismatch and emits level-mismatch-advisory', async () => {
+      const { rootId } = parseResult(
+        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
+      );
+      await client.callTool({
+        name: 'decompose',
+        arguments: { parentId: rootId, children: [
+          'Layer issue',
+          'Persistent connection drift in long-lived TCP socket pool under concurrent reuse pressure',
+        ] },
+      });
+      const result = await client.callTool({
+        name: 'validate_decomposition',
+        arguments: { parentId: rootId },
+      });
+      const text = getText(result);
+      expect(text).toContain('level-mismatch-advisory');
     });
 
     it('error: non-existent parent', async () => {
