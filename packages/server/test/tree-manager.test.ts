@@ -246,6 +246,30 @@ describe('TreeManager', () => {
       expect(events.some((e) => e.type === 'hypothesis-updated')).toBe(true);
       expect(events.some((e) => e.type === 'session-completed')).toBe(true);
     });
+
+    it('rejects confirming a parent while a child is pending', () => {
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, ['A', 'B']);
+      expect(() => tm.confirmHypothesis(root.id, 'reason')).toThrow(TreeError);
+    });
+
+    it('rejects confirming a parent while a child is exploring', () => {
+      const { root } = tm.createSession('Problem');
+      const children = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(children[0].id, 'supports', 'note');
+      expect(children[0].status).toBe('exploring');
+      tm.eliminateHypothesis(children[1].id, 'reason');
+      expect(() => tm.confirmHypothesis(root.id, 'reason')).toThrow(TreeError);
+    });
+
+    it('confirms a parent once every child is resolved', () => {
+      const { root } = tm.createSession('Problem');
+      const children = tm.decompose(root.id, ['A', 'B']);
+      tm.eliminateHypothesis(children[0].id, 'reason');
+      tm.eliminateHypothesis(children[1].id, 'reason');
+      const result = tm.confirmHypothesis(root.id, 'reason');
+      expect(result.status).toBe('confirmed');
+    });
   });
 
   // --- Score ---
@@ -510,20 +534,125 @@ describe('TreeManager', () => {
 
   describe('getActiveSession', () => {
     it('tracks the most recently driven session, not the most recently created', () => {
-      // Create session A
       const { session: sessionA, root: rootA } = tm.createSession('Problem A');
-
-      // Create session B — newest by creation time
       const { session: sessionB } = tm.createSession('Problem B');
 
-      // Most recent creation wins: getActiveSession returns B
+      // Most recent creation wins
       expect(tm.getActiveSession()?.id).toBe(sessionB.id);
 
-      // Drive session A by adding evidence to its root hypothesis
+      // Drive session A
       tm.addEvidence(rootA.id, 'supports', 'Found a clue in A');
-
-      // Active session now follows mutation, not creation order
       expect(tm.getActiveSession()?.id).toBe(sessionA.id);
+    });
+
+    it('skips a completed session: confirming the tracked session falls back to the next active one', () => {
+      const { session: sessionA, root: rootA } = tm.createSession('Problem A');
+      const { session: sessionB } = tm.createSession('Problem B');
+
+      tm.confirmHypothesis(rootA.id, 'A is the answer');
+      expect(sessionA.status).toBe('completed');
+
+      // getActiveSession returns B (still active), not the just-completed A
+      expect(tm.getActiveSession()?.id).toBe(sessionB.id);
+    });
+
+    it('returns undefined when no active session exists', () => {
+      const { root } = tm.createSession('Problem');
+      tm.confirmHypothesis(root.id, 'done');
+      expect(tm.getActiveSession()).toBeUndefined();
+    });
+
+    it('does not promote a session to current when its only progress is elimination', () => {
+      // Eliminating a hypothesis is pruning, not investigative progress, so
+      // it must not hijack currentSessionId from a session the agent is
+      // actively driving.
+      const { root: rootA } = tm.createSession('Problem A');
+      const { session: sessionB } = tm.createSession('Problem B');
+      expect(tm.getActiveSession()?.id).toBe(sessionB.id);
+
+      tm.eliminateHypothesis(rootA.id, 'dead end');
+      expect(tm.getActiveSession()?.id).toBe(sessionB.id);
+    });
+
+    it('does not flip current session when a mutation completes its target', () => {
+      const { root: rootA } = tm.createSession('Problem A');
+      tm.addEvidence(rootA.id, 'supports', 'evidence in A');
+      const activeBefore = tm.getActiveSession()?.id;
+
+      const { root: rootB } = tm.createSession('Problem B');
+      tm.confirmHypothesis(rootB.id, 'done');
+      // B was just completed by confirm; active session stays at A.
+      expect(tm.getActiveSession()?.id).toBe(activeBefore);
+    });
+
+    it('does not flip current session when a mutation throws', () => {
+      const { root: rootA } = tm.createSession('Problem A');
+      tm.addEvidence(rootA.id, 'supports', 'evidence in A');
+      const activeBefore = tm.getActiveSession()?.id;
+
+      const { root: rootB } = tm.createSession('Problem B');
+      tm.confirmHypothesis(rootB.id, 'done');
+
+      // Score validation fails before any state change. currentSessionId
+      // must not be promoted on a rejected call.
+      expect(() => tm.scoreHypothesis(rootB.id, NaN)).toThrow();
+      expect(tm.getActiveSession()?.id).toBe(activeBefore);
+    });
+  });
+
+  describe('eliminateHypothesis abandons fully-pruned sessions', () => {
+    it('marks a session abandoned when every hypothesis is eliminated', () => {
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['cause A', 'cause B']);
+
+      tm.eliminateHypothesis(a.id, 'no');
+      tm.eliminateHypothesis(b.id, 'no');
+      expect(session.status).toBe('active');
+
+      // Eliminating the root is the last live hypothesis — session abandons.
+      tm.eliminateHypothesis(root.id, 'all branches dead');
+      expect(session.status).toBe('abandoned');
+    });
+
+    it('emits session-completed when a session is abandoned', () => {
+      const { root } = tm.createSession('Problem');
+      const events: string[] = [];
+      tm.on('event', (e) => events.push(e.type));
+      tm.eliminateHypothesis(root.id, 'dead');
+      expect(events).toContain('session-completed');
+    });
+
+    it('falls through to the next active session after an abandonment', () => {
+      const { root: rootA } = tm.createSession('Problem A');
+      const { session: sessionB } = tm.createSession('Problem B');
+      // Drive A so currentSessionId points at it
+      tm.addEvidence(rootA.id, 'supports', 'tested A');
+      expect(tm.getActiveSession()?.id).not.toBe(sessionB.id);
+
+      tm.eliminateHypothesis(rootA.id, 'dead end');
+      // A is abandoned; getActiveSession picks B.
+      expect(tm.getActiveSession()?.id).toBe(sessionB.id);
+    });
+  });
+
+  describe('loadState', () => {
+    it('does not change currentSessionId — only mutations do', () => {
+      const { session: a, root: rootA } = tm.createSession('Problem A');
+      tm.addEvidence(rootA.id, 'supports', 'evidence');
+      expect(tm.getActiveSession()?.id).toBe(a.id);
+
+      // A dashboard view that lazy-loads a historical session must not hijack
+      // the agent's active pointer.
+      const historical = {
+        id: '00000000-0000-4000-8000-000000000001',
+        problem: 'Old completed investigation',
+        rootNodeId: '00000000-0000-4000-8000-000000000002',
+        status: 'completed' as const,
+        createdAt: new Date(2020, 0, 1).toISOString(),
+      };
+      tm.loadState([historical], []);
+
+      expect(tm.getActiveSession()?.id).toBe(a.id);
     });
   });
 });
