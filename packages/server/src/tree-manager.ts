@@ -260,25 +260,51 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Marks a hypothesis as eliminated (dead end), recording the reason.
+   * Marks a hypothesis as eliminated (dead end), grounded in refuting
+   * evidence. Per Popper, elimination is the operational form of
+   * falsification (modus tollens) — a counter-instance must exist on the
+   * hypothesis's evidence ledger.
+   *
    * @param hypothesisId - ID of the hypothesis to eliminate
    * @param reason - Justification for elimination (creates audit trail)
+   * @param refutingEvidenceIds - Optional explicit refutes-typed evidence
+   *   ids that ground the verdict. When omitted, the call binds implicitly
+   *   to every refutes-typed record on the target.
    * @returns The updated hypothesis
-   * @throws TreeError if already eliminated or confirmed
+   * @throws TreeError if already terminal, or no refuting record exists
    */
-  eliminateHypothesis(hypothesisId: string, reason: string): Hypothesis {
+  eliminateHypothesis(hypothesisId: string, reason: string, refutingEvidenceIds?: string[]): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
     if (hypothesis.status === 'eliminated') {
       throw new TreeError('Hypothesis is already eliminated');
     }
-    if (hypothesis.status === 'corroborated') {
-      throw new TreeError('Cannot eliminate a corroborated hypothesis');
+    if (hypothesis.status === 'corroborated' || hypothesis.status === 'out-of-scope') {
+      throw new TreeError(`Cannot eliminate a ${hypothesis.status} hypothesis`);
+    }
+
+    const refutesOnTarget = hypothesis.evidence.filter((e) => e.type === 'refutes');
+    let groundedIds: string[];
+    if (refutingEvidenceIds && refutingEvidenceIds.length > 0) {
+      const refutesIds = new Set(refutesOnTarget.map((e) => e.id));
+      for (const id of refutingEvidenceIds) {
+        if (!refutesIds.has(id)) {
+          throw new TreeError(`Evidence id ${id} is not a refutes-typed record on this hypothesis`);
+        }
+      }
+      groundedIds = refutingEvidenceIds;
+    } else {
+      if (refutesOnTarget.length === 0) {
+        throw new TreeError(
+          'Cannot eliminate without recorded refuting evidence — call add_evidence(type=refutes) first, or use set_out_of_scope to mark this branch uninvestigated',
+        );
+      }
+      groundedIds = refutesOnTarget.map((e) => e.id);
     }
 
     const now = new Date().toISOString();
     hypothesis.status = 'eliminated';
-    hypothesis.conclusion = { verdict: 'eliminated', reason, timestamp: now };
+    hypothesis.conclusion = { verdict: 'eliminated', reason, timestamp: now, refutingEvidenceIds: groundedIds };
     hypothesis.metadata.updatedAt = now;
     this.mutationsSinceStatusChange = 0;
     this.touch();

@@ -265,6 +265,7 @@ describe('TreeManager', () => {
       const children = tm.decompose(root.id, ['A', 'B']);
       tm.addEvidence(children[0].id, 'supports', 'note');
       expect(children[0].status).toBe('exploring');
+      tm.addEvidence(children[1].id, 'refutes', 'no');
       tm.eliminateHypothesis(children[1].id, 'reason');
       expect(() => tm.corroborateHypothesis(root.id, 'reason')).toThrow(TreeError);
     });
@@ -272,7 +273,9 @@ describe('TreeManager', () => {
     it('corroborates a parent once every child is resolved', () => {
       const { root } = tm.createSession('Problem');
       const children = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(children[0].id, 'refutes', 'no');
       tm.eliminateHypothesis(children[0].id, 'reason');
+      tm.addEvidence(children[1].id, 'refutes', 'no');
       tm.eliminateHypothesis(children[1].id, 'reason');
       const result = tm.corroborateHypothesis(root.id, 'reason');
       expect(result.status).toBe('corroborated');
@@ -295,6 +298,7 @@ describe('TreeManager', () => {
     it('resolves once every top-level branch is terminal', () => {
       const { session, root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
       tm.corroborateHypothesis(a.id, 'A survives');
@@ -327,6 +331,7 @@ describe('TreeManager', () => {
     it('refuting evidence on a corroborated leaf reopens the session', () => {
       const { session, root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
       tm.corroborateHypothesis(a.id, 'A');
@@ -345,6 +350,7 @@ describe('TreeManager', () => {
     it('rejects supports/neutral evidence on a corroborated leaf', () => {
       const { root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
       tm.corroborateHypothesis(a.id, 'A');
@@ -352,29 +358,53 @@ describe('TreeManager', () => {
       expect(() => tm.addEvidence(a.id, 'neutral', 'extra')).toThrow(TreeError);
     });
 
-    it('walks the corroborated subtree to detect a pending grandchild under an eliminated intermediate', () => {
-      // Hybrid closure rule: corroborated top-level can sit over an eliminated
-      // intermediate whose own children are still pending. The predicate must
-      // catch that.
+    it('resolves a deeply corroborated branch when every other top-level is terminal', () => {
       const { session, root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       const [a1, a2] = tm.decompose(a.id, ['A1', 'A2']);
+      tm.addEvidence(a1.id, 'refutes', 'no');
       tm.eliminateHypothesis(a1.id, 'no');
-      // a2 is still pending at this point.
-      // Corroborate a1's parent? No — a1 is eliminated, a2 pending. Try
-      // a different shape: build a subtree where the corroborated parent
-      // accepts an eliminated child but a pending grandchild remains via
-      // a different path. The one-hop guard on corroborateHypothesis
-      // accepts an eliminated child, but here a2 is still pending so
-      // corroborateHypothesis(a) throws — exactly the parent-resolution
-      // gate. This case is the safety-net for state arrived at by replay
-      // or future refactor that bypasses the gate; we exercise it through
-      // the predicate directly.
+      tm.addEvidence(a2.id, 'refutes', 'no');
       tm.eliminateHypothesis(a2.id, 'no');
-      // Now a's children are both terminal; a can be corroborated.
-      tm.corroborateHypothesis(a.id, 'A survives');
+      tm.corroborateHypothesis(a.id, 'A survives by elimination');
       expect(session.status).toBe('resolved');
+    });
+  });
+
+  describe('eliminateHypothesis evidence binding', () => {
+    it('rejects elimination without recorded refuting evidence and without explicit ids', () => {
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.eliminateHypothesis(root.id, 'gut feeling')).toThrow(
+        /add_evidence\(type=refutes\).+set_out_of_scope/,
+      );
+    });
+
+    it('binds all refutes-typed records when no explicit ids are passed', () => {
+      const { root } = tm.createSession('Problem');
+      const e1 = tm.addEvidence(root.id, 'refutes', 'r1');
+      const e2 = tm.addEvidence(root.id, 'refutes', 'r2');
+      tm.addEvidence(root.id, 'neutral', 'n');
+      const result = tm.eliminateHypothesis(root.id, 'multiple refutations');
+      expect(result.conclusion?.refutingEvidenceIds).toEqual([e1.id, e2.id]);
+    });
+
+    it('binds explicit ids when supplied', () => {
+      const { root } = tm.createSession('Problem');
+      const e1 = tm.addEvidence(root.id, 'refutes', 'r1');
+      tm.addEvidence(root.id, 'refutes', 'r2');
+      const result = tm.eliminateHypothesis(root.id, 'just one is decisive', [e1.id]);
+      expect(result.conclusion?.refutingEvidenceIds).toEqual([e1.id]);
+    });
+
+    it('rejects explicit ids that reference non-refutes records', () => {
+      const { root } = tm.createSession('Problem');
+      const supports = tm.addEvidence(root.id, 'supports', 'irrelevant here');
+      tm.addEvidence(root.id, 'refutes', 'real refute');
+      expect(() => tm.eliminateHypothesis(root.id, 'wrong id', [supports.id])).toThrow(
+        /not a refutes-typed record/,
+      );
     });
   });
 
@@ -692,6 +722,7 @@ describe('TreeManager', () => {
       const { session: sessionB } = tm.createSession('Problem B');
       expect(tm.getActiveSession()?.id).toBe(sessionB.id);
 
+      tm.addEvidence(rootA.id, 'refutes', 'no');
       tm.eliminateHypothesis(rootA.id, 'dead end');
       expect(tm.getActiveSession()?.id).toBe(sessionB.id);
     });
@@ -727,11 +758,14 @@ describe('TreeManager', () => {
       const { session, root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['cause A', 'cause B']);
 
+      tm.addEvidence(a.id, 'refutes', 'no');
       tm.eliminateHypothesis(a.id, 'no');
+      tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       expect(session.status).toBe('open');
 
       // Eliminating the root is the last live hypothesis — session abandons.
+      tm.addEvidence(root.id, 'refutes', 'all branches dead');
       tm.eliminateHypothesis(root.id, 'all branches dead');
       expect(session.status).toBe('abandoned');
     });
@@ -740,6 +774,7 @@ describe('TreeManager', () => {
       const { root } = tm.createSession('Problem');
       const events: string[] = [];
       tm.on('event', (e) => events.push(e.type));
+      tm.addEvidence(root.id, 'refutes', 'no');
       tm.eliminateHypothesis(root.id, 'dead');
       expect(events).toContain('session-completed');
     });
@@ -751,6 +786,7 @@ describe('TreeManager', () => {
       tm.addEvidence(rootA.id, 'supports', 'tested A');
       expect(tm.getActiveSession()?.id).not.toBe(sessionB.id);
 
+      tm.addEvidence(rootA.id, 'refutes', 'no');
       tm.eliminateHypothesis(rootA.id, 'dead end');
       // A is abandoned; getActiveSession picks B.
       expect(tm.getActiveSession()?.id).toBe(sessionB.id);

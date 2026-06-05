@@ -60,6 +60,10 @@ describe('Persistence Roundtrip', () => {
       arguments: { hypothesisId: childIds[0], score: 0.7 },
     });
     await c1.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'B is ruled out' },
+    });
+    await c1.callTool({
       name: 'eliminate_hypothesis',
       arguments: { hypothesisId: childIds[1], reason: 'B is ruled out' },
     });
@@ -175,6 +179,30 @@ describe('Persistence Roundtrip', () => {
 
     const gitignorePath = join(tempDir, '.gitignore');
     expect(existsSync(gitignorePath)).toBe(false);
+  });
+
+  it('legacy eliminated records without refutingEvidenceIds replay with an empty array', () => {
+    const sessionId = '00000000-0000-4000-8000-dddddddddddd';
+    const rootId = '00000000-0000-4000-8000-eeeeeeeeeeee';
+    const ts = '2024-02-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Legacy elim', rootNodeId: rootId,
+        status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
+        status: 'eliminated', score: null, evidence: [],
+        // Pre-rework conclusion shape: no refutingEvidenceIds field.
+        conclusion: { verdict: 'eliminated', reason: 'legacy', timestamp: ts },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const { hypotheses } = loadActiveSessions(tempDir);
+    expect(hypotheses[0].conclusion?.refutingEvidenceIds).toEqual([]);
   });
 
   it('legacy JSONL with confirmed/active/completed literals replays under the new vocabulary', () => {

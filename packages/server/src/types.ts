@@ -35,6 +35,9 @@ export interface Conclusion {
   verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
   reason: string;
   timestamp: string;
+  // Refuting evidence ids that grounded the verdict. Only populated for
+  // 'eliminated'. Empty array on legacy replay where no audit trail exists.
+  refutingEvidenceIds?: string[];
 }
 
 export interface HypothesisMetadata {

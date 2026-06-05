@@ -53,10 +53,11 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   eliminate_hypothesis: {
-    description: 'Mark a hypothesis as eliminated (dead end). Provide the reason — this creates an audit trail.',
+    description: 'Mark a hypothesis as eliminated, grounded in refuting evidence. Per Popper, elimination is the operational form of falsification — a counter-instance must exist on the hypothesis. Call add_evidence(type=refutes) first, or use set_out_of_scope to mark a branch as uninvestigated without claiming refutation.',
     schema: {
       hypothesisId: z.string().min(1).describe('ID of the hypothesis to eliminate'),
       reason: z.string().min(1).max(10000).describe('Why this hypothesis is being eliminated'),
+      refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional().describe('Optional explicit ids of refutes-typed evidence records that ground this verdict. When omitted, all refutes-typed records on the hypothesis are bound.'),
     },
   },
   corroborate_hypothesis: {
@@ -120,6 +121,7 @@ const schemas = {
   eliminate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
     reason: z.string().min(1).max(10000),
+    refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional(),
   }),
   corroborate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
@@ -240,8 +242,8 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
 
   handlers.set('eliminate_hypothesis', async (args) => {
     try {
-      const { hypothesisId, reason } = schemas.eliminate_hypothesis.parse(args);
-      const hypothesis = tm.eliminateHypothesis(hypothesisId, reason);
+      const { hypothesisId, reason, refutingEvidenceIds } = schemas.eliminate_hypothesis.parse(args);
+      const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
       return toolResult(fmt.formatEliminate(hypothesis, tm));

@@ -807,6 +807,10 @@ describe('MCP Integration', () => {
       });
       expect(getText(scoreResult)).toContain('Progress:');
 
+      await client.callTool({
+        name: 'add_evidence',
+        arguments: { hypothesisId: childIds[2], type: 'refutes', content: 'nope' },
+      });
       const elimResult = await client.callTool({
         name: 'eliminate_hypothesis',
         arguments: { hypothesisId: childIds[2], reason: 'nope' },

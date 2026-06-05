@@ -8,9 +8,10 @@ export interface Hypothesis {
   score: number | null;
   evidence: Evidence[];
   conclusion?: {
-    verdict: 'eliminated' | 'corroborated';
+    verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
     reason: string;
     timestamp: string;
+    refutingEvidenceIds?: string[];
   };
   metadata: {
     createdAt: string;

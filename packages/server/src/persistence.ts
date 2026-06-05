@@ -33,9 +33,15 @@ function translateLegacyStatus<T extends { status?: string }>(payload: T): T {
   return payload;
 }
 
-function translateLegacyVerdict<T extends { conclusion?: { verdict?: string } }>(payload: T): T {
+function translateLegacyVerdict<T extends { conclusion?: { verdict?: string; refutingEvidenceIds?: string[] } }>(payload: T): T {
   if (payload?.conclusion?.verdict === 'confirmed') {
     payload.conclusion.verdict = 'corroborated';
+  }
+  // Legacy eliminated records carry no refutingEvidenceIds. Fill an empty
+  // array so the in-memory shape is consistent; the audit trail is genuinely
+  // absent for these records.
+  if (payload?.conclusion?.verdict === 'eliminated' && payload.conclusion.refutingEvidenceIds === undefined) {
+    payload.conclusion.refutingEvidenceIds = [];
   }
   return payload;
 }
