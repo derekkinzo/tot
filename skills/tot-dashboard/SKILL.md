@@ -1,7 +1,6 @@
 ---
 name: tot-dashboard
 description: Use this skill when the user asks to "open the dashboard", "show the visualization", "view the tree in the browser", or wants to launch the live tot-mcp web UI. Opens the system browser to the running daemon's visualization at http://localhost:6274.
-argument-hint: [sessionId]
 ---
 
 # /tot-dashboard
@@ -37,8 +36,6 @@ The tot-mcp daemon serves the dashboard on `http://localhost:6274` whenever it i
    - Use the Sessions dropdown to switch between historical sessions
    - Status bar shows counts by hypothesis status
    ```
-
-4. **If a `sessionId` argument was provided**, tell the user to select it from the Sessions dropdown in the dashboard header — the dashboard does not currently support deep-link URL parameters.
 
 ## Notes
 

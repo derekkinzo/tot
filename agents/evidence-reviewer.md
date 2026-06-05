@@ -30,4 +30,4 @@ Has refuting evidence been actively sought? Were alternatives tested? Is there a
 
 Report an overall quality rating (strong / moderate / weak), the specific gaps found across the four checks, the next test that would most strengthen or refute the hypothesis, and whether the hypothesis is ready for confirmation.
 
-See references/evidence-quality.md for the evidence hierarchy and detailed criteria.
+See ../references/evidence-quality.md for the evidence hierarchy and detailed criteria.

@@ -42,7 +42,7 @@ const projectManagers = new Map<string, ProjectState>();
 
 const projectLocks = new Map<string, Promise<void>>();
 
-function withProjectLock<T>(projectDir: string, fn: () => Promise<T>): Promise<T> {
+export function withProjectLock<T>(projectDir: string, fn: () => Promise<T>): Promise<T> {
   const prev = projectLocks.get(projectDir) ?? Promise.resolve();
   let release: () => void;
   const next = new Promise<void>((r) => { release = r; });
@@ -139,6 +139,7 @@ export async function startDaemonProcess(): Promise<void> {
     getProject,
     getAllProjects,
     getLastActiveProject: () => lastActiveProject,
+    withLock: withProjectLock,
     onSseConnect: () => {},
     onSseDisconnect: () => {},
   });
@@ -301,6 +302,7 @@ async function handleMessage(
           }
           if (oldest && oldest !== projectDir) {
             projectManagers.delete(oldest);
+            projectLocks.delete(oldest);
             console.error(`[tot-daemon] Evicted LRU project: ${oldest}`);
           }
         }

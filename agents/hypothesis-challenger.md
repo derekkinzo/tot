@@ -27,4 +27,4 @@ You are a rigorous skeptic assigned to refute a leading hypothesis. Your job is 
 
 Call `add_evidence` for every finding with the correct type (supports / refutes / neutral). Report honestly: surviving support, refutations, alternatives with evidence, and any discriminating test you propose.
 
-See references/evidence-quality.md for evidence hierarchy and Mill's methods.
+See ../references/evidence-quality.md for evidence hierarchy and Mill's methods.

@@ -74,10 +74,7 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   if (isRootDecomposition) {
     result += `── Initial Structure (Critical) ──\n`;
     result += `This is the foundational decomposition. Its quality determines the entire investigation.\n`;
-    result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n`;
-    const parentIdForDispatch = children[0]?.parentId ?? '';
-    result += `Dispatch the \`mece-evaluator\` subagent to validate this decomposition: it checks mutual exclusivity, collective exhaustiveness, level alignment, and testability.\n`;
-    result += `  Input — parent hypothesis ID: ${parentIdForDispatch} | child IDs: ${ids.join(', ')}\n\n`;
+    result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n\n`;
   }
 
   // Structural checks
@@ -125,8 +122,17 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   result += `  ME: Could a single root cause belong to TWO of these categories? If yes, refine the boundaries.\n`;
   result += `  CE: Can you imagine a plausible cause NOT covered by ANY of these? If yes, add it.\n`;
   result += `  Level: Are all hypotheses at the same level of abstraction?\n`;
-  result += `Dispatch the \`mece-evaluator\` subagent to validate this decomposition: it checks mutual exclusivity, collective exhaustiveness, level alignment, and testability.\n`;
-  result += `  Input — parent hypothesis ID: ${children[0]?.parentId ?? ''} | child IDs: ${ids.join(', ')}\n`;
+  // Dispatch the mece-evaluator subagent with content inlined (not bare UUIDs)
+  // so the validator can run its four checks without an extra get_tree call.
+  // Each child is prefixed with an 8-char ID so the agent can map findings
+  // back to a specific node when it follows up with add_evidence/eliminate.
+  if (parent) {
+    result += `\nDispatch the \`mece-evaluator\` subagent (mutual exclusivity, collective exhaustiveness, level alignment, testability):\n`;
+    result += `  Parent: "${truncate(parent.content, 80)}"\n`;
+    for (const c of children) {
+      result += `  - ${c.id.slice(0, 8)}: "${truncate(c.content, 80)}"\n`;
+    }
+  }
   result += `\n── Protocol ──\n`;
   result += `Crucial experiment: What SINGLE observation would yield DIFFERENT results depending on which sub-hypothesis is correct?\n`;
   result += `Prioritize this discriminating test before investigating each in isolation.\n`;
@@ -190,7 +196,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     }
   }
 
-  // Confirmation bias detection + confounder check (Heuer 1999 ACH)
+  // Confirmation bias detection + confounder check (Mill 1843, Hill 1965)
   if (supporting >= 3 && refuting === 0 && activeSiblings.length > 0) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;

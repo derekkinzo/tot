@@ -65,5 +65,5 @@ Keep justifications terse. Cite the specific hypothesis text when flagging a gap
 
 ## Pointers
 
-See references/mece-partition.md for formal definition.
-See references/decomposition-templates.md for domain templates.
+See ../references/mece-partition.md for formal definition.
+See ../references/decomposition-templates.md for domain templates.
