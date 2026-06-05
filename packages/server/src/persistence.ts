@@ -22,14 +22,21 @@ interface JournalEntry {
 
 // Translates legacy status literals on read so older JSONL files replay into
 // the current vocabulary. The on-disk bytes are never rewritten — every read
-// path passes payloads through this before they become typed records.
-function translateLegacyStatus<T extends { status?: string }>(payload: T): T {
+// path passes payloads through one of these before they become typed records.
+// Session and hypothesis vocabularies are translated separately because their
+// legacy and current value sets do not overlap.
+function translateLegacySessionStatus<T extends { status?: string }>(payload: T): T {
   if (!payload || typeof payload !== 'object' || !payload.status) return payload;
   switch (payload.status) {
     case 'active':    payload.status = 'open'; break;
     case 'completed': payload.status = 'resolved'; break;
-    case 'confirmed': payload.status = 'corroborated'; break;
   }
+  return payload;
+}
+
+function translateLegacyHypothesisStatus<T extends { status?: string }>(payload: T): T {
+  if (!payload || typeof payload !== 'object' || !payload.status) return payload;
+  if (payload.status === 'confirmed') payload.status = 'corroborated';
   return payload;
 }
 
@@ -110,7 +117,25 @@ export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypo
     }
   }
 
+  discriminateTerminalSessions(sessions, hypotheses);
   return { sessions, hypotheses };
+}
+
+/**
+ * Post-replay pass: any session whose status reads terminal (resolved or
+ * abandoned) is reclassified from the final hypothesis state. The wire
+ * event session-completed covers both terminal transitions; legacy files
+ * may have written a terminal status directly on the session-created
+ * payload (translated above). Either path needs the discriminator.
+ */
+function discriminateTerminalSessions(sessions: Session[], hypotheses: Hypothesis[]): void {
+  for (const s of sessions) {
+    if (s.status !== 'resolved' && s.status !== 'abandoned') continue;
+    const sessionHypotheses = hypotheses.filter((h) => h.sessionId === s.id);
+    if (sessionHypotheses.length === 0) continue;
+    const allEliminated = sessionHypotheses.every((h) => h.status === 'eliminated');
+    s.status = allEliminated ? 'abandoned' : 'resolved';
+  }
 }
 
 /**
@@ -139,20 +164,47 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       const firstEntry: JournalEntry = JSON.parse(lines[0]);
       if (firstEntry.type !== 'session-created') continue;
 
-      const session = translateLegacyStatus(firstEntry.payload as Session);
+      const session = translateLegacySessionStatus(firstEntry.payload as Session);
 
-      // Determine final status by scanning for session-completed event
-      // (the wire identifier covers both 'resolved' and 'abandoned' transitions).
+      // Determine final status by tracking the LAST session-level event.
+      // The wire identifier session-completed covers both terminal
+      // transitions; resolved vs abandoned is discriminated from the
+      // hypothesis state at the moment of the event (every-eliminated
+      // implies abandoned, otherwise a corroborated answer drove the
+      // closure). A later session-reopened wins over an earlier
+      // session-completed.
       let status: SessionIndex['status'] = session.status;
-      for (let i = lines.length - 1; i >= 1; i--) {
+      let lastSessionEvent: 'completed' | 'reopened' | null = null;
+      const latestHypothesisStatus = new Map<string, string>();
+      for (let i = 1; i < lines.length; i++) {
         try {
           const entry: JournalEntry = JSON.parse(lines[i]);
           if (entry.type === 'session-completed') {
-            status = 'resolved';
-            break;
+            lastSessionEvent = 'completed';
+          } else if (entry.type === 'session-reopened') {
+            lastSessionEvent = 'reopened';
+          } else if (entry.type === 'hypothesis-added' || entry.type === 'hypothesis-updated') {
+            const h = translateLegacyVerdict(translateLegacyHypothesisStatus(entry.payload as Hypothesis));
+            latestHypothesisStatus.set(h.id, h.status);
           }
         } catch {
           // skip corrupt lines
+        }
+      }
+      // Legacy files may have written a terminal status directly on the
+      // session-created payload (translated from 'completed' to 'resolved'
+      // above) rather than emitting a session-completed event. Either path
+      // into terminal state must be discriminated by hypothesis content.
+      if (lastSessionEvent === 'reopened') {
+        status = 'open';
+      } else {
+        const reachedTerminal =
+          lastSessionEvent === 'completed' ||
+          (lastSessionEvent === null && status !== 'open');
+        if (reachedTerminal) {
+          const statuses = Array.from(latestHypothesisStatus.values());
+          const allEliminated = statuses.length > 0 && statuses.every((s) => s === 'eliminated');
+          status = allEliminated ? 'abandoned' : 'resolved';
         }
       }
 
@@ -195,6 +247,7 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
     }
 
     if (sessions.length === 0) return null;
+    discriminateTerminalSessions(sessions, hypotheses);
     return { session: sessions[0], hypotheses };
   } catch {
     return null;
@@ -204,17 +257,17 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
 function replayEntry(entry: JournalEntry, sessions: Session[], hypotheses: Hypothesis[]): void {
   switch (entry.type) {
     case 'session-created': {
-      const session = translateLegacyStatus(entry.payload as Session);
+      const session = translateLegacySessionStatus(entry.payload as Session);
       sessions.push(session);
       break;
     }
     case 'hypothesis-added': {
-      const h = translateLegacyVerdict(translateLegacyStatus(entry.payload as Hypothesis));
+      const h = translateLegacyVerdict(translateLegacyHypothesisStatus(entry.payload as Hypothesis));
       hypotheses.push(h);
       break;
     }
     case 'hypothesis-updated': {
-      const updated = translateLegacyVerdict(translateLegacyStatus(entry.payload as Hypothesis));
+      const updated = translateLegacyVerdict(translateLegacyHypothesisStatus(entry.payload as Hypothesis));
       const idx = hypotheses.findIndex((h) => h.id === updated.id);
       if (idx >= 0) hypotheses[idx] = updated;
       else hypotheses.push(updated);
@@ -229,11 +282,17 @@ function replayEntry(entry: JournalEntry, sessions: Session[], hypotheses: Hypot
     case 'session-completed': {
       const { sessionId } = entry.payload as { sessionId: string };
       const s = sessions.find((sess) => sess.id === sessionId);
-      if (s) {
-        // The wire event covers both terminal transitions; only flip
-        // 'open' sessions and assume resolution. Sessions written by newer
-        // code carry their own terminal status before this event replays.
-        if (s.status === 'open') s.status = 'resolved';
+      if (s && s.status === 'open') {
+        // The wire event covers both terminal transitions. Discriminate
+        // resolved vs abandoned by inspecting the hypothesis tree at the
+        // moment the event fires: a session whose every hypothesis is
+        // eliminated is abandoned (no live work); any non-eliminated
+        // hypothesis at this point implies a corroborated answer drove
+        // the closure.
+        const sessionHypotheses = hypotheses.filter((h) => h.sessionId === sessionId);
+        const allEliminated = sessionHypotheses.length > 0 &&
+          sessionHypotheses.every((h) => h.status === 'eliminated');
+        s.status = allEliminated ? 'abandoned' : 'resolved';
         s.completedAt = entry.timestamp;
       }
       break;

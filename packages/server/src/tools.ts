@@ -246,6 +246,15 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
+      // If this elimination abandoned the session, journal the terminal
+      // event so replay reconstructs the same state. The session-completed
+      // wire identifier covers both terminal transitions; the resolved vs
+      // abandoned discriminator is recovered at replay from the hypothesis
+      // statuses present in the file.
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      if (session && session.status === 'abandoned') {
+        await p.append('session-completed', { sessionId: hypothesis.sessionId });
+      }
       return toolResult(fmt.formatEliminate(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {

@@ -181,6 +181,110 @@ describe('Persistence Roundtrip', () => {
     expect(existsSync(gitignorePath)).toBe(false);
   });
 
+  it('legacy session-created with status=completed and an eliminated hypothesis replays as abandoned', () => {
+    // Adv 3 regression: the legacy translator collapsed 'completed' to
+    // 'resolved' before the all-eliminated discriminator could fire.
+    const sessionId = '00000000-0000-4000-8000-aabbccddeeff';
+    const rootId = '00000000-0000-4000-8000-112233445566';
+    const ts = '2024-04-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Legacy abandon', rootNodeId: rootId,
+        status: 'completed', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
+        status: 'eliminated', score: null, evidence: [],
+        conclusion: { verdict: 'eliminated', reason: 'legacy', timestamp: ts, refutingEvidenceIds: [] },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
+  it('scanSessions honors a later session-reopened over an earlier session-completed', () => {
+    const sessionId = '00000000-0000-4000-8000-eeeeeeeeeeff';
+    const rootId = '00000000-0000-4000-8000-ffffffffffaa';
+    const ts = '2024-03-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Reopened test', rootNodeId: rootId,
+        status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
+        status: 'corroborated', score: null, evidence: [],
+        conclusion: { verdict: 'corroborated', reason: 'survived', timestamp: ts, refutingEvidenceIds: [] },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+      { timestamp: ts, type: 'session-completed', payload: { sessionId } },
+      { timestamp: ts, type: 'session-reopened', payload: { sessionId } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('open');
+  });
+
+  it('legacy session-created with terminal status, then session-reopened, surfaces as open', () => {
+    // The legacy translator collapses 'completed' → 'resolved' on read.
+    // A subsequent session-reopened must override that translated status
+    // and surface the session as open. scanSessions and loadActiveSessions
+    // must agree.
+    const sessionId = '00000000-0000-4000-8000-aaaa11112222';
+    const rootId = '00000000-0000-4000-8000-aaaa33334444';
+    const ts = '2024-05-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Legacy reopen', rootNodeId: rootId,
+        status: 'completed', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
+        status: 'corroborated', score: null, evidence: [],
+        conclusion: { verdict: 'corroborated', reason: 'survived', timestamp: ts },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+      { timestamp: ts, type: 'session-reopened', payload: { sessionId } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('open');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('open');
+  });
+
+  it('abandoned session round-trips: every-eliminated journal replays as abandoned, not resolved', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Abandon test' },
+    }));
+    await client.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: rootId, type: 'refutes', content: 'no' },
+    });
+    await client.callTool({
+      name: 'eliminate_hypothesis',
+      arguments: { hypothesisId: rootId, reason: 'dead' },
+    });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
   it('legacy eliminated records without refutingEvidenceIds replay with an empty array', () => {
     const sessionId = '00000000-0000-4000-8000-dddddddddddd';
     const rootId = '00000000-0000-4000-8000-eeeeeeeeeeee';

@@ -358,7 +358,117 @@ describe('TreeManager', () => {
       expect(() => tm.addEvidence(a.id, 'neutral', 'extra')).toThrow(TreeError);
     });
 
-    it('resolves a deeply corroborated branch when every other top-level is terminal', () => {
+    it('does not resolve when a pending grandchild hides under an eliminated intermediate of a corroborated branch', () => {
+      // Closure walker must descend through pruned intermediates because
+      // elimination does not cascade — a pending grandchild can legally
+      // sit below an eliminated parent on a corroborated lineage.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'no');
+      const [a1, a2] = tm.decompose(a.id, ['A1', 'A2']);
+      tm.decompose(a1.id, ['A1a', 'A1b']);  // A1a, A1b pending
+      tm.addEvidence(a1.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a1.id, 'no');
+      tm.addEvidence(a2.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a2.id, 'no');
+      tm.corroborateHypothesis(a.id, 'A survives');
+      expect(session.status).toBe('open');
+    });
+
+    it('does not resolve when a pending grandchild hides under an out-of-scope intermediate of a corroborated branch', () => {
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'no');
+      const [a1, a2] = tm.decompose(a.id, ['A1', 'A2']);
+      tm.decompose(a1.id, ['A1a', 'A1b']);
+      tm.setOutOfScope(a1.id, 'set aside');
+      tm.addEvidence(a2.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a2.id, 'no');
+      tm.corroborateHypothesis(a.id, 'A survives');
+      expect(session.status).toBe('open');
+    });
+
+    it('clears completedAt when a corroborated leaf is reopened by refutation', () => {
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'no');
+      tm.addEvidence(a.id, 'supports', 'good');
+      tm.corroborateHypothesis(a.id, 'A');
+      expect(session.completedAt).toBeDefined();
+      tm.addEvidence(a.id, 'refutes', 'counter-instance');
+      expect(session.status).toBe('open');
+      expect(session.completedAt).toBeUndefined();
+    });
+
+    it('resolves when set_out_of_scope completes the disposition of the last open top-level branch', () => {
+      // Closure check must fire from setOutOfScope, not only from corroborate.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b, c] = tm.decompose(root.id, ['A', 'B', 'C']);
+      tm.addEvidence(a.id, 'supports', 'good');
+      tm.corroborateHypothesis(a.id, 'A survives');
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'no');
+      expect(session.status).toBe('open');
+      tm.setOutOfScope(c.id, 'set aside');
+      expect(session.status).toBe('resolved');
+    });
+
+    it('resolves when an elimination completes the disposition of the last open top-level branch', () => {
+      // Closure check must fire from eliminate, not only from corroborate.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b, c] = tm.decompose(root.id, ['A', 'B', 'C']);
+      tm.addEvidence(a.id, 'supports', 'good');
+      tm.corroborateHypothesis(a.id, 'A survives');
+      tm.setOutOfScope(b.id, 'set aside');
+      expect(session.status).toBe('open');
+      tm.addEvidence(c.id, 'refutes', 'no');
+      tm.eliminateHypothesis(c.id, 'no');
+      expect(session.status).toBe('resolved');
+    });
+
+    it('does not count a corroboration buried under a pruned top-level branch as survival', () => {
+      // A corroborated grandchild under an out-of-scope or eliminated
+      // top-level branch is moot under the same pruning rule the closure
+      // walker applies. With every top-level pruned and no surviving
+      // answer on a non-pruned lineage, the session abandons.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      const [a1] = tm.decompose(a.id, ['A1', 'A2']);
+      tm.addEvidence(a1.id, 'supports', 'good');
+      tm.corroborateHypothesis(a1.id, 'A1 survives');
+      tm.setOutOfScope(a.id, 'set aside');
+      tm.setOutOfScope(b.id, 'set aside');
+      expect(session.status).toBe('abandoned');
+    });
+
+    it('abandons when every top-level is pruned and no corroboration survives on a non-pruned lineage', () => {
+      // Mix of eliminated and out-of-scope, no corroborated answer — the
+      // session has no live work and no surviving answer, so the only
+      // honest disposition is abandonment.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(a.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a.id, 'no');
+      tm.setOutOfScope(b.id, 'set aside');
+      expect(session.status).toBe('abandoned');
+    });
+
+    it('abandons when every top-level branch is set out-of-scope', () => {
+      // Pure out-of-scope disposition: no corroboration, no elimination.
+      // The session has been wholly set aside; the closure rule must
+      // recognise this as abandonment, not leave the session stuck open.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.setOutOfScope(a.id, 'set aside');
+      expect(session.status).toBe('open');
+      tm.setOutOfScope(b.id, 'set aside');
+      expect(session.status).toBe('abandoned');
+    });
+
+    it('resolves a deeply corroborated branch when every leaf is terminal', () => {
       const { session, root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['A', 'B']);
       tm.addEvidence(b.id, 'refutes', 'no');
@@ -411,16 +521,23 @@ describe('TreeManager', () => {
   describe('setOutOfScope', () => {
     it('marks a hypothesis terminal with verdict out-of-scope', () => {
       const { root } = tm.createSession('Problem');
-      const result = tm.setOutOfScope(root.id, 'set aside');
+      const [a] = tm.decompose(root.id, ['A', 'B']);
+      const result = tm.setOutOfScope(a.id, 'set aside');
       expect(result.status).toBe('out-of-scope');
       expect(result.conclusion?.verdict).toBe('out-of-scope');
     });
 
+    it('rejects setting the root hypothesis out-of-scope', () => {
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.setOutOfScope(root.id, 'abandon entire investigation')).toThrow(TreeError);
+    });
+
     it('rejects setting a terminal hypothesis out-of-scope', () => {
       const { root } = tm.createSession('Problem');
-      tm.addEvidence(root.id, 'refutes', 'no');
-      tm.eliminateHypothesis(root.id, 'gone');
-      expect(() => tm.setOutOfScope(root.id, 'too late')).toThrow(TreeError);
+      const [a] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(a.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a.id, 'gone');
+      expect(() => tm.setOutOfScope(a.id, 'too late')).toThrow(TreeError);
     });
   });
 
@@ -754,19 +871,18 @@ describe('TreeManager', () => {
   });
 
   describe('eliminateHypothesis abandons fully-pruned sessions', () => {
-    it('marks a session abandoned when every hypothesis is eliminated', () => {
+    it('marks a session abandoned when every top-level branch is eliminated', () => {
       const { session, root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['cause A', 'cause B']);
 
       tm.addEvidence(a.id, 'refutes', 'no');
       tm.eliminateHypothesis(a.id, 'no');
-      tm.addEvidence(b.id, 'refutes', 'no');
-      tm.eliminateHypothesis(b.id, 'no');
       expect(session.status).toBe('open');
 
-      // Eliminating the root is the last live hypothesis — session abandons.
-      tm.addEvidence(root.id, 'refutes', 'all branches dead');
-      tm.eliminateHypothesis(root.id, 'all branches dead');
+      // Eliminating the last top-level branch leaves no live work and no
+      // corroborated answer — the session abandons.
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'no');
       expect(session.status).toBe('abandoned');
     });
 
