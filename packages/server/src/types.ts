@@ -13,7 +13,15 @@ export interface Hypothesis {
   children: string[];
 }
 
-export type HypothesisStatus = 'pending' | 'exploring' | 'eliminated' | 'corroborated';
+// 'out-of-scope': terminal but no refutation claimed — the agent is set
+// aside this branch as not worth investigating, distinct from elimination
+// which asserts a refuting record. Closure treats both as pruning.
+export type HypothesisStatus =
+  | 'pending'
+  | 'exploring'
+  | 'eliminated'
+  | 'corroborated'
+  | 'out-of-scope';
 
 export interface Evidence {
   id: string;
@@ -24,7 +32,7 @@ export interface Evidence {
 }
 
 export interface Conclusion {
-  verdict: 'eliminated' | 'corroborated';
+  verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
   reason: string;
   timestamp: string;
 }
@@ -53,6 +61,7 @@ export type TreeEvent =
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
   | { type: 'session-completed'; sessionId: string }
+  | { type: 'session-reopened'; sessionId: string }
   | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };
 
 export interface StructuralCheck {

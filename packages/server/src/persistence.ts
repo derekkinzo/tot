@@ -232,6 +232,15 @@ function replayEntry(entry: JournalEntry, sessions: Session[], hypotheses: Hypot
       }
       break;
     }
+    case 'session-reopened': {
+      const { sessionId } = entry.payload as { sessionId: string };
+      const s = sessions.find((sess) => sess.id === sessionId);
+      if (s) {
+        s.status = 'open';
+        s.completedAt = undefined;
+      }
+      break;
+    }
   }
 }
 

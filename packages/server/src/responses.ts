@@ -289,27 +289,60 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
 }
 
 export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): string {
-  const siblings = tm.getSiblings(hypothesis.id);
-  const eliminated = siblings.filter((s) => s.status === 'eliminated');
+  const state = tm.getTree(hypothesis.sessionId);
+  const sessionResolved = state?.session.status === 'resolved';
 
-  let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'corroborated' }) + '\n\n' +
+  let result = JSON.stringify({
+    hypothesisId: hypothesis.id,
+    status: 'corroborated',
+    sessionStatus: state?.session.status ?? 'open',
+  }) + '\n\n' +
     `✓ Corroborated "${truncate(hypothesis.content, 50)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
 
-  result += `── Verification ──\n`;
+  if (sessionResolved) {
+    const corroboratedLeaves = state ? Array.from(state.hypotheses.values()).filter(
+      (h) => h.status === 'corroborated' && h.children.length === 0,
+    ) : [];
+    result += `── Session resolved ──\n`;
+    if (corroboratedLeaves.length > 1) {
+      result += `${corroboratedLeaves.length} corroborated leaves (multiple co-instantiated contributors are admissible — Mackie INUS):\n`;
+      for (const h of corroboratedLeaves) {
+        result += `  - ${h.id.slice(0, 8)}: "${truncate(h.content, 60)}"\n`;
+      }
+    }
+    result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
+  } else {
+    // List every still-pending or still-exploring hypothesis session-wide,
+    // not just direct siblings — the agent must dispose of every other
+    // top-level branch before resolution.
+    const open = state ? Array.from(state.hypotheses.values()).filter(
+      (h) => h.status === 'pending' || h.status === 'exploring',
+    ) : [];
+    result += `── Resolution pending ──\n`;
+    result += `${open.length} hypothes${open.length === 1 ? 'is' : 'es'} still open:\n`;
+    for (const h of open) {
+      result += `  - ${h.id.slice(0, 8)} [${h.status}]: "${truncate(h.content, 60)}"\n`;
+    }
+    result += `\nEach must be eliminated (with refuting evidence), corroborated, or set_out_of_scope before the session resolves.\n`;
+  }
+
+  result += `\n── Verification ──\n`;
   result += `1. Does this explain ALL observed symptoms?\n`;
   result += `2. Can you REPRODUCE the issue by triggering this cause?\n`;
-  result += `3. Were competing hypotheses eliminated with evidence (not just ignored)?\n`;
+  result += `3. Were competing hypotheses disposed of with evidence (not just ignored)?\n`;
   result += `4. TEMPORALITY: Did this cause precede the failure in time?\n`;
   result += `5. SPECIFICITY: Does this explain THIS failure pattern specifically, not just failures in general?\n`;
 
-  if (eliminated.length < siblings.length) {
-    const unresolved = siblings.filter((s) => s.status !== 'eliminated' && s.id !== hypothesis.id);
-    if (unresolved.length > 0) {
-      result += `\n⚠ ${unresolved.length} sibling(s) not eliminated: ${unresolved.map((u) => truncate(u.content, 25)).join(', ')}\n`;
-    }
-  }
+  result += '\n' + formatTreeSummary(tm);
+  return result;
+}
 
+export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): string {
+  let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'out-of-scope' }) + '\n\n' +
+    `⊘ Out-of-scope "${truncate(hypothesis.content, 50)}"\n` +
+    `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
+  result += `Branch set aside without investigation. The audit trail records the choice; closure treats this as pruning.\n`;
   result += '\n' + formatTreeSummary(tm);
   return result;
 }

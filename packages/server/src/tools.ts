@@ -60,10 +60,17 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   corroborate_hypothesis: {
-    description: 'Mark a hypothesis as corroborated — it has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification: the verdict can be reopened by later refuting evidence. Resolves the session.',
+    description: 'Mark a hypothesis as corroborated — it has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification: the verdict can be reopened by later refuting evidence. Resolves the session only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope).',
     schema: {
       hypothesisId: z.string().min(1).describe('ID of the hypothesis to corroborate'),
       reason: z.string().min(1).max(10000).describe('Why this hypothesis has survived refutation'),
+    },
+  },
+  set_out_of_scope: {
+    description: 'Mark a hypothesis as out-of-scope: terminal but no refutation claimed. Use to set aside a branch the agent does not want to investigate. Distinct from elimination, which asserts a refuting record. Closure treats both as pruning — descendants of an out-of-scope node are not required to be terminal.',
+    schema: {
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis to set out-of-scope'),
+      reason: z.string().min(1).max(10000).describe('Why this branch is being set aside without investigation'),
     },
   },
   score_hypothesis: {
@@ -115,6 +122,10 @@ const schemas = {
     reason: z.string().min(1).max(10000),
   }),
   corroborate_hypothesis: z.object({
+    hypothesisId: z.string().min(1),
+    reason: z.string().min(1).max(10000),
+  }),
+  set_out_of_scope: z.object({
     hypothesisId: z.string().min(1),
     reason: z.string().min(1).max(10000),
   }),
@@ -248,8 +259,29 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
-      await p.append('session-completed', { sessionId: hypothesis.sessionId });
+      // Only emit session-completed if the closure predicate flipped the
+      // session to resolved. The TreeManager owns that decision; checking
+      // session.status here keeps the wire log consistent with the runtime.
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      if (session && session.status === 'resolved') {
+        await p.append('session-completed', { sessionId: hypothesis.sessionId });
+      }
       return toolResult(fmt.formatCorroborate(hypothesis, tm));
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
+      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
+    }
+  });
+
+  handlers.set('set_out_of_scope', async (args) => {
+    try {
+      const { hypothesisId, reason } = schemas.set_out_of_scope.parse(args);
+      const hypothesis = tm.setOutOfScope(hypothesisId, reason);
+      const p = getPersistence(hypothesis.sessionId);
+      await p.append('hypothesis-updated', hypothesis);
+      return toolResult(fmt.formatSetOutOfScope(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
         return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
@@ -346,6 +378,7 @@ function renderCompactTree(hypotheses: Map<string, import('./types.js').Hypothes
     exploring: '◉',
     eliminated: '✗',
     corroborated: '✓',
+    'out-of-scope': '⊘',
   }[node.status];
 
   const scoreStr = node.score !== null ? ` (${node.score.toFixed(2)})` : '';
