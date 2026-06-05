@@ -64,19 +64,19 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
       {hypothesis.conclusion && (
         <div style={{
           padding: '14px 16px',
-          background: hypothesis.conclusion.verdict === 'confirmed' ? '#052e1620' : '#1c1f26',
+          background: hypothesis.conclusion.verdict === 'corroborated' ? '#052e1620' : '#1c1f26',
           borderRadius: 8,
-          borderLeft: `3px solid ${hypothesis.conclusion.verdict === 'confirmed' ? '#22c55e' : '#ef4444'}`,
+          borderLeft: `3px solid ${hypothesis.conclusion.verdict === 'corroborated' ? '#22c55e' : '#ef4444'}`,
         }}>
           <div style={{
             fontSize: 11,
             fontWeight: 600,
             textTransform: 'uppercase',
             letterSpacing: 0.5,
-            color: hypothesis.conclusion.verdict === 'confirmed' ? '#22c55e' : '#ef4444',
+            color: hypothesis.conclusion.verdict === 'corroborated' ? '#22c55e' : '#ef4444',
             marginBottom: 6,
           }}>
-            {hypothesis.conclusion.verdict === 'confirmed' ? 'Root Cause' : 'Eliminated'}
+            {hypothesis.conclusion.verdict === 'corroborated' ? 'Corroborated' : 'Eliminated'}
           </div>
           <div style={{ fontSize: 14, lineHeight: 1.5, color: '#e1e4e8' }}>
             {hypothesis.conclusion.reason}

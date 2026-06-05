@@ -8,7 +8,7 @@ import type { Evidence, Hypothesis, Session } from './types.js';
 export interface SessionIndex {
   id: string;
   problem: string;
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   filePath: string;
   nodeCount: number; // estimated from line count
@@ -18,6 +18,26 @@ interface JournalEntry {
   timestamp: string;
   type: string;
   payload: unknown;
+}
+
+// Translates legacy status literals on read so older JSONL files replay into
+// the current vocabulary. The on-disk bytes are never rewritten — every read
+// path passes payloads through this before they become typed records.
+function translateLegacyStatus<T extends { status?: string }>(payload: T): T {
+  if (!payload || typeof payload !== 'object' || !payload.status) return payload;
+  switch (payload.status) {
+    case 'active':    payload.status = 'open'; break;
+    case 'completed': payload.status = 'resolved'; break;
+    case 'confirmed': payload.status = 'corroborated'; break;
+  }
+  return payload;
+}
+
+function translateLegacyVerdict<T extends { conclusion?: { verdict?: string } }>(payload: T): T {
+  if (payload?.conclusion?.verdict === 'confirmed') {
+    payload.conclusion.verdict = 'corroborated';
+  }
+  return payload;
 }
 
 export class Persistence {
@@ -113,15 +133,16 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       const firstEntry: JournalEntry = JSON.parse(lines[0]);
       if (firstEntry.type !== 'session-created') continue;
 
-      const session = firstEntry.payload as Session;
+      const session = translateLegacyStatus(firstEntry.payload as Session);
 
       // Determine final status by scanning for session-completed event
-      let status = session.status;
+      // (the wire identifier covers both 'resolved' and 'abandoned' transitions).
+      let status: SessionIndex['status'] = session.status;
       for (let i = lines.length - 1; i >= 1; i--) {
         try {
           const entry: JournalEntry = JSON.parse(lines[i]);
           if (entry.type === 'session-completed') {
-            status = 'completed';
+            status = 'resolved';
             break;
           }
         } catch {
@@ -177,15 +198,17 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
 function replayEntry(entry: JournalEntry, sessions: Session[], hypotheses: Hypothesis[]): void {
   switch (entry.type) {
     case 'session-created': {
-      sessions.push(entry.payload as Session);
+      const session = translateLegacyStatus(entry.payload as Session);
+      sessions.push(session);
       break;
     }
     case 'hypothesis-added': {
-      hypotheses.push(entry.payload as Hypothesis);
+      const h = translateLegacyVerdict(translateLegacyStatus(entry.payload as Hypothesis));
+      hypotheses.push(h);
       break;
     }
     case 'hypothesis-updated': {
-      const updated = entry.payload as Hypothesis;
+      const updated = translateLegacyVerdict(translateLegacyStatus(entry.payload as Hypothesis));
       const idx = hypotheses.findIndex((h) => h.id === updated.id);
       if (idx >= 0) hypotheses[idx] = updated;
       else hypotheses.push(updated);
@@ -201,7 +224,10 @@ function replayEntry(entry: JournalEntry, sessions: Session[], hypotheses: Hypot
       const { sessionId } = entry.payload as { sessionId: string };
       const s = sessions.find((sess) => sess.id === sessionId);
       if (s) {
-        s.status = 'completed';
+        // The wire event covers both terminal transitions; only flip
+        // 'open' sessions and assume resolution. Sessions written by newer
+        // code carry their own terminal status before this event replays.
+        if (s.status === 'open') s.status = 'resolved';
         s.completedAt = entry.timestamp;
       }
       break;

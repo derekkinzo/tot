@@ -59,11 +59,11 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
       reason: z.string().min(1).max(10000).describe('Why this hypothesis is being eliminated'),
     },
   },
-  confirm_hypothesis: {
-    description: 'Mark a hypothesis as confirmed (the answer/root cause). This completes the session.',
+  corroborate_hypothesis: {
+    description: 'Mark a hypothesis as corroborated — it has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification: the verdict can be reopened by later refuting evidence. Resolves the session.',
     schema: {
-      hypothesisId: z.string().min(1).describe('ID of the hypothesis to confirm'),
-      reason: z.string().min(1).max(10000).describe('Why this hypothesis is confirmed as the answer'),
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis to corroborate'),
+      reason: z.string().min(1).max(10000).describe('Why this hypothesis has survived refutation'),
     },
   },
   score_hypothesis: {
@@ -114,7 +114,7 @@ const schemas = {
     hypothesisId: z.string().min(1),
     reason: z.string().min(1).max(10000),
   }),
-  confirm_hypothesis: z.object({
+  corroborate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
     reason: z.string().min(1).max(10000),
   }),
@@ -242,14 +242,14 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     }
   });
 
-  handlers.set('confirm_hypothesis', async (args) => {
+  handlers.set('corroborate_hypothesis', async (args) => {
     try {
-      const { hypothesisId, reason } = schemas.confirm_hypothesis.parse(args);
-      const hypothesis = tm.confirmHypothesis(hypothesisId, reason);
+      const { hypothesisId, reason } = schemas.corroborate_hypothesis.parse(args);
+      const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
       await p.append('session-completed', { sessionId: hypothesis.sessionId });
-      return toolResult(fmt.formatConfirm(hypothesis, tm));
+      return toolResult(fmt.formatCorroborate(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
         return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
@@ -277,7 +277,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     try {
       const { format } = schemas.get_tree.parse(args);
       const state = tm.getTree();
-      if (!state) return toolResult('No active session. Call create_tree to start.');
+      if (!state) return toolResult('No open session. Call create_tree to start.');
 
       if (format === 'full') {
         const hypotheses = Object.fromEntries(state.hypotheses);
@@ -345,7 +345,7 @@ function renderCompactTree(hypotheses: Map<string, import('./types.js').Hypothes
     pending: '○',
     exploring: '◉',
     eliminated: '✗',
-    confirmed: '✓',
+    corroborated: '✓',
   }[node.status];
 
   const scoreStr = node.score !== null ? ` (${node.score.toFixed(2)})` : '';

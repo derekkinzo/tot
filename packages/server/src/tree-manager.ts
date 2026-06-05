@@ -48,7 +48,7 @@ export class TreeManager extends EventEmitter {
       id: sessionId,
       problem,
       rootNodeId: rootId,
-      status: 'active',
+      status: 'open',
       createdAt: now,
     };
 
@@ -79,17 +79,19 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Decomposes a hypothesis into MECE sub-hypotheses, creating child nodes.
+   * Decomposes a hypothesis into sibling sub-hypotheses, creating child nodes.
+   * Aim for non-overlapping siblings that collectively cover the parent's
+   * claim — strict mutual exclusivity is not required (Heuer 2005).
    * Auto-transitions the parent from 'pending' to 'exploring'.
    * @param parentId - ID of the hypothesis to decompose
    * @param childContents - Array of sub-hypothesis descriptions (2+)
    * @returns The created child hypothesis nodes
-   * @throws TreeError if parent is eliminated/confirmed, fewer than 2 children, depth exceeded, or count exceeded
+   * @throws TreeError if parent is eliminated/corroborated, fewer than 2 children, depth exceeded, or count exceeded
    */
   decompose(parentId: string, childContents: string[]): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
 
-    if (parent.status === 'eliminated' || parent.status === 'confirmed') {
+    if (parent.status === 'eliminated' || parent.status === 'corroborated') {
       throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
     }
     if (childContents.length < 2) {
@@ -203,7 +205,7 @@ export class TreeManager extends EventEmitter {
   ): Evidence {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
-    if (hypothesis.status === 'eliminated' || hypothesis.status === 'confirmed') {
+    if (hypothesis.status === 'eliminated' || hypothesis.status === 'corroborated') {
       throw new TreeError(`Cannot add evidence to a ${hypothesis.status} hypothesis`);
     }
 
@@ -247,8 +249,8 @@ export class TreeManager extends EventEmitter {
     if (hypothesis.status === 'eliminated') {
       throw new TreeError('Hypothesis is already eliminated');
     }
-    if (hypothesis.status === 'confirmed') {
-      throw new TreeError('Cannot eliminate a confirmed hypothesis');
+    if (hypothesis.status === 'corroborated') {
+      throw new TreeError('Cannot eliminate a corroborated hypothesis');
     }
 
     const now = new Date().toISOString();
@@ -265,7 +267,7 @@ export class TreeManager extends EventEmitter {
     // this, getActiveSession would keep returning a session the agent can no
     // longer make progress in.
     const session = this.sessions.get(hypothesis.sessionId);
-    if (session && session.status === 'active' && this.allHypothesesEliminated(session.id)) {
+    if (session && session.status === 'open' && this.allHypothesesEliminated(session.id)) {
       session.status = 'abandoned';
       session.completedAt = now;
       this.emit('event', { type: 'session-completed', sessionId: session.id } satisfies TreeEvent);
@@ -281,35 +283,38 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Marks a hypothesis as confirmed (the answer). Completes the session.
-   * @param hypothesisId - ID of the hypothesis to confirm
-   * @param reason - Justification for confirmation
+   * Marks a hypothesis as corroborated (provisionally retained — survived
+   * available refutation attempts). Per Popper, corroboration never amounts
+   * to verification; the verdict remains revisable by later refuting
+   * evidence. Resolves the session under the current closure rule.
+   * @param hypothesisId - ID of the hypothesis to corroborate
+   * @param reason - Justification for corroboration
    * @returns The updated hypothesis
-   * @throws TreeError if already confirmed, eliminated, or any child is unresolved
+   * @throws TreeError if already corroborated, eliminated, or any child is unresolved
    */
-  confirmHypothesis(hypothesisId: string, reason: string): Hypothesis {
+  corroborateHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
-    if (hypothesis.status === 'confirmed') {
-      throw new TreeError('Hypothesis is already confirmed');
+    if (hypothesis.status === 'corroborated') {
+      throw new TreeError('Hypothesis is already corroborated');
     }
     if (hypothesis.status === 'eliminated') {
-      throw new TreeError('Cannot confirm an eliminated hypothesis');
+      throw new TreeError('Cannot corroborate an eliminated hypothesis');
     }
 
     // Decomposition is a structural commitment: the parent's truth is
     // determined by the resolution of its children, so the parent cannot be
-    // confirmed until each child has been eliminated or confirmed.
+    // corroborated until each child has been eliminated or corroborated.
     for (const childId of hypothesis.children) {
       const child = this.hypotheses.get(childId);
       if (child && (child.status === 'pending' || child.status === 'exploring')) {
-        throw new TreeError('Cannot confirm a hypothesis with unresolved children');
+        throw new TreeError('Cannot corroborate a hypothesis with unresolved children');
       }
     }
 
     const now = new Date().toISOString();
-    hypothesis.status = 'confirmed';
-    hypothesis.conclusion = { verdict: 'confirmed', reason, timestamp: now };
+    hypothesis.status = 'corroborated';
+    hypothesis.conclusion = { verdict: 'corroborated', reason, timestamp: now };
     hypothesis.metadata.updatedAt = now;
     this.mutationsSinceStatusChange = 0;
     this.touch();
@@ -318,7 +323,7 @@ export class TreeManager extends EventEmitter {
 
     const session = this.sessions.get(hypothesis.sessionId);
     if (session) {
-      session.status = 'completed';
+      session.status = 'resolved';
       session.completedAt = now;
       this.emit('event', { type: 'session-completed', sessionId: session.id } satisfies TreeEvent);
     }
@@ -426,10 +431,10 @@ export class TreeManager extends EventEmitter {
   } {
     const state = this.getTree();
     if (!state) {
-      return { session: null, counts: { pending: 0, exploring: 0, eliminated: 0, confirmed: 0 }, stagnant: false, unexplored: [], bestLead: null };
+      return { session: null, counts: { pending: 0, exploring: 0, eliminated: 0, corroborated: 0 }, stagnant: false, unexplored: [], bestLead: null };
     }
 
-    const counts: Record<HypothesisStatus, number> = { pending: 0, exploring: 0, eliminated: 0, confirmed: 0 };
+    const counts: Record<HypothesisStatus, number> = { pending: 0, exploring: 0, eliminated: 0, corroborated: 0 };
     const unexplored: Hypothesis[] = [];
     let bestLead: Hypothesis | null = null;
 
@@ -473,9 +478,9 @@ export class TreeManager extends EventEmitter {
   getActiveSession(): Session | undefined {
     if (this.currentSessionId) {
       const tracked = this.sessions.get(this.currentSessionId);
-      if (tracked && tracked.status === 'active') return tracked;
+      if (tracked && tracked.status === 'open') return tracked;
     }
-    return Array.from(this.sessions.values()).find((s) => s.status === 'active');
+    return Array.from(this.sessions.values()).find((s) => s.status === 'open');
   }
 
   /**
@@ -540,12 +545,12 @@ export class TreeManager extends EventEmitter {
   /**
    * Marks `sessionId` as the agent's current working session. Called from
    * mutation methods AFTER validation succeeds, so a rejected call cannot
-   * leak state. Refuses to track a non-active session so the next status
+   * leak state. Refuses to track a non-open session so the next status
    * read falls through to the active-session scan.
    */
   private setCurrent(sessionId: string): void {
     const session = this.sessions.get(sessionId);
-    if (session && session.status === 'active') {
+    if (session && session.status === 'open') {
       this.currentSessionId = sessionId;
     }
   }

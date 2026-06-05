@@ -66,16 +66,17 @@ Key principles:
 - Test from multiple independent data sources (logs, metrics, code, reproduction)
 - A strong test is one whose outcome is predicted by ONE hypothesis but NOT its siblings
 
-### Phase 5: Eliminate and Confirm
+### Phase 5: Eliminate and Corroborate
 
 - Call `eliminate_hypothesis` when 2+ refuting evidence with documented reasoning
 - Call `score_hypothesis` to track relative confidence
 - Drill deeper: call `decompose` on surviving hypotheses to test sub-causes
-- Call `confirm_hypothesis` only when:
+- Call `corroborate_hypothesis` only when:
   1. You can REPRODUCE the issue by triggering this cause
   2. All competing hypotheses were eliminated with evidence
   3. The cause preceded the failure in time (temporality)
   4. The cause explains THIS specific failure pattern (specificity)
+- Corroboration is provisional retention (Popper), not verification — the verdict can be reopened by later refuting evidence.
 
 ### Phase 6: Verification
 
@@ -87,7 +88,7 @@ Before declaring done:
 ## Visualization
 
 The tree is visible in real-time at `http://localhost:6274`. Open it to see:
-- Color-coded hypothesis statuses (blue=pending, yellow=exploring, red=eliminated, green=confirmed)
+- Color-coded hypothesis statuses (blue=pending, yellow=exploring, red=eliminated, green=corroborated)
 - Evidence attached to each node
 - Path highlighting from root to selected hypothesis
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -7,7 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
-import { loadActiveSessions } from '../src/persistence.js';
+import { loadActiveSessions, scanSessions } from '../src/persistence.js';
 
 function parseResult(result: any): any {
   const text = result.content?.find((c: any) => c.type === 'text')?.text;
@@ -177,24 +177,68 @@ describe('Persistence Roundtrip', () => {
     expect(existsSync(gitignorePath)).toBe(false);
   });
 
-  it('confirmed session persists as completed', async () => {
+  it('legacy JSONL with confirmed/active/completed literals replays under the new vocabulary', () => {
+    // Hand-write a JSONL file using the pre-rename literals to simulate a
+    // session written by an older binary. Read paths must translate without
+    // mutating the bytes on disk.
+    const sessionId = '00000000-0000-4000-8000-aaaaaaaaaaaa';
+    const rootId = '00000000-0000-4000-8000-bbbbbbbbbbbb';
+    const childId = '00000000-0000-4000-8000-cccccccccccc';
+    const ts = '2024-01-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Legacy', rootNodeId: rootId,
+        status: 'active', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Legacy',
+        status: 'pending', score: null, evidence: [],
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [childId],
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: childId, parentId: rootId, sessionId, depth: 1, content: 'Old child',
+        status: 'confirmed', score: null, evidence: [],
+        conclusion: { verdict: 'confirmed', reason: 'legacy', timestamp: ts },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+      { timestamp: ts, type: 'session-completed', payload: { sessionId } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('resolved');
+    expect(hypotheses.find((h) => h.id === childId)?.status).toBe('corroborated');
+    expect(hypotheses.find((h) => h.id === childId)?.conclusion?.verdict).toBe('corroborated');
+
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('resolved');
+
+    // Bytes on disk are unchanged
+    const reread = readFileSync(filePath, 'utf-8');
+    expect(reread).toContain('"status":"active"');
+    expect(reread).toContain('"status":"confirmed"');
+    expect(reread).toContain('"verdict":"confirmed"');
+  });
+
+  it('corroborated session persists as resolved', async () => {
     const { client, cleanup } = await createServerWithClient(tempDir);
 
     const { rootId } = parseResult(await client.callTool({
       name: 'create_tree',
-      arguments: { problem: 'Confirm test' },
+      arguments: { problem: 'Corroborate test' },
     }));
     await client.callTool({
       name: 'add_evidence',
       arguments: { hypothesisId: rootId, type: 'supports', content: 'proof' },
     });
     await client.callTool({
-      name: 'confirm_hypothesis',
+      name: 'corroborate_hypothesis',
       arguments: { hypothesisId: rootId, reason: 'Root cause found' },
     });
     await cleanup();
 
     const { sessions } = loadActiveSessions(tempDir);
-    expect(sessions[0].status).toBe('completed');
+    expect(sessions[0].status).toBe('resolved');
   });
 });

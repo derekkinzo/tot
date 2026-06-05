@@ -13,7 +13,7 @@ export interface Hypothesis {
   children: string[];
 }
 
-export type HypothesisStatus = 'pending' | 'exploring' | 'eliminated' | 'confirmed';
+export type HypothesisStatus = 'pending' | 'exploring' | 'eliminated' | 'corroborated';
 
 export interface Evidence {
   id: string;
@@ -24,7 +24,7 @@ export interface Evidence {
 }
 
 export interface Conclusion {
-  verdict: 'eliminated' | 'confirmed';
+  verdict: 'eliminated' | 'corroborated';
   reason: string;
   timestamp: string;
 }
@@ -39,11 +39,14 @@ export interface Session {
   id: string;
   problem: string;
   rootNodeId: string;
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   completedAt?: string;
 }
 
+// 'session-completed' is retained as a stable wire identifier for both the
+// resolved and abandoned terminal transitions; renaming would break replay
+// of existing JSONL files and external SSE consumers.
 export type TreeEvent =
   | { type: 'session-created'; session: Session }
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }

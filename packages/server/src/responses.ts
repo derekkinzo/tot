@@ -288,12 +288,12 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   return result;
 }
 
-export function formatConfirm(hypothesis: Hypothesis, tm: TreeManager): string {
+export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): string {
   const siblings = tm.getSiblings(hypothesis.id);
   const eliminated = siblings.filter((s) => s.status === 'eliminated');
 
-  let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'confirmed' }) + '\n\n' +
-    `✓ Confirmed "${truncate(hypothesis.content, 50)}"\n` +
+  let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'corroborated' }) + '\n\n' +
+    `✓ Corroborated "${truncate(hypothesis.content, 50)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
 
   result += `── Verification ──\n`;
@@ -345,13 +345,13 @@ export function formatScore(hypothesis: Hypothesis, tm: TreeManager): string {
     result += `What test would SEPARATE them?\n`;
   }
 
-  // Ready-for-confirmation signal
+  // Ready-for-corroboration signal
   if (hypothesis.score !== null && hypothesis.score >= 0.85) {
     const siblings = tm.getSiblings(hypothesis.id);
     const allSiblingsWeak = siblings.every((s) => s.status === 'eliminated' || (s.score !== null && s.score < 0.3));
     const someRefutationAttempted = siblings.some((s) => s.evidence.some((e) => e.type === 'refutes'));
     if (allSiblingsWeak && someRefutationAttempted) {
-      result += `\n→ Evidence appears sufficient: strong support, alternatives eliminated, refutation attempted. Consider confirmation.\n`;
+      result += `\n→ Evidence appears sufficient: strong support, alternatives eliminated, refutation attempted. Consider corroboration.\n`;
     }
   }
 
@@ -388,16 +388,16 @@ export function formatStatus(tm: TreeManager): string {
   const status = tm.getStatus();
 
   if (!status.session) {
-    return `No active session. Call create_tree to start.`;
+    return `No open session. Call create_tree to start.`;
   }
 
   const { session, counts, stagnant, unexplored, bestLead } = status;
-  const total = counts.pending + counts.exploring + counts.eliminated + counts.confirmed;
+  const total = counts.pending + counts.exploring + counts.eliminated + counts.corroborated;
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +
     `Problem: "${truncate(session.problem, 70)}"\n` +
-    `Progress: ${counts.eliminated + counts.confirmed}/${total} resolved ` +
-    `(${counts.eliminated} eliminated, ${counts.confirmed} confirmed, ${counts.exploring} exploring)\n`;
+    `Progress: ${counts.eliminated + counts.corroborated}/${total} resolved ` +
+    `(${counts.eliminated} eliminated, ${counts.corroborated} corroborated, ${counts.exploring} exploring)\n`;
 
   if (unexplored.length > 0) {
     result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
@@ -411,9 +411,9 @@ export function formatStatus(tm: TreeManager): string {
     result += `  This reframing often reveals overlooked tests.\n`;
   }
 
-  const activeSessions = tm.getAllSessions().filter((s) => s.status === 'active');
-  if (activeSessions.length > 1) {
-    result += `\nNote: ${activeSessions.length} active sessions. Use get_tree with sessionId to view others.`;
+  const openSessions = tm.getAllSessions().filter((s) => s.status === 'open');
+  if (openSessions.length > 1) {
+    result += `\nNote: ${openSessions.length} open sessions. Use get_tree with sessionId to view others.`;
   }
 
   return result;
@@ -424,10 +424,10 @@ function formatTreeSummary(tm: TreeManager): string {
   if (!status.session) return '';
 
   const { counts, stagnant, unexplored, bestLead } = status;
-  const total = counts.pending + counts.exploring + counts.eliminated + counts.confirmed;
+  const total = counts.pending + counts.exploring + counts.eliminated + counts.corroborated;
 
   let summary = `── Tree ──\n`;
-  summary += `Progress: ${counts.eliminated + counts.confirmed}/${total} resolved`;
+  summary += `Progress: ${counts.eliminated + counts.corroborated}/${total} resolved`;
   if (counts.exploring > 0) summary += ` | Investigating: ${counts.exploring}`;
   if (unexplored.length > 0) summary += ` | Unexplored: ${unexplored.length}`;
   if (bestLead) summary += ` | Lead: "${truncate(bestLead.content, 20)}" (${bestLead.score!.toFixed(2)})`;

@@ -11,7 +11,7 @@ function pickDefaultSession(tm: TreeManager): Session | null {
   const sessions = tm.getAllSessions().sort((a, b) =>
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
-  return sessions.find((s) => s.status === 'active') ?? sessions[0] ?? null;
+  return sessions.find((s) => s.status === 'open') ?? sessions[0] ?? null;
 }
 
 export interface MultiProjectContext {
@@ -363,14 +363,14 @@ function handleProjectsAPI(res: ServerResponse, ctx: MultiProjectContext): void 
   res.writeHead(200, { 'Content-Type': 'application/json' });
 
   const projects = ctx.getAllProjects().map((p) => {
-    const activeSessions = p.tm.getAllSessions().filter((s) => s.status === 'active');
-    const latestActive = activeSessions.sort((a, b) =>
+    const openSessions = p.tm.getAllSessions().filter((s) => s.status === 'open');
+    const latestOpen = openSessions.sort((a, b) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )[0];
 
     return {
       dir: p.projectDir,
-      activeProblem: latestActive?.problem ?? null,
+      activeProblem: latestOpen?.problem ?? null,
       sessionCount: p.sessionIndex.length || p.tm.getAllSessions().length,
     };
   });
@@ -382,14 +382,14 @@ function handleInfoAPI(res: ServerResponse, ctx: MultiProjectContext): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
 
   const projects = ctx.getAllProjects().map((p) => {
-    const activeSessions = p.tm.getAllSessions().filter((s) => s.status === 'active');
-    const latestActive = activeSessions.sort((a, b) =>
+    const openSessions = p.tm.getAllSessions().filter((s) => s.status === 'open');
+    const latestOpen = openSessions.sort((a, b) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )[0];
 
     return {
       dir: p.projectDir,
-      activeProblem: latestActive?.problem ?? null,
+      activeProblem: latestOpen?.problem ?? null,
       sessionCount: p.sessionIndex.length || p.tm.getAllSessions().length,
       persistenceHealthy: p.persistenceHealthy,
     };

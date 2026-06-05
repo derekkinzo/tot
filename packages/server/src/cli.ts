@@ -73,7 +73,7 @@ function printStatus(): void {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
       for (const s of sorted.slice(0, 5)) {
-        const statusIcon = s.status === 'active' ? '*' : s.status === 'completed' ? '+' : '-';
+        const statusIcon = s.status === 'open' ? '*' : s.status === 'resolved' ? '+' : '-';
         console.log(`  [${statusIcon}] ${s.id.slice(0, 8)} "${s.problem.slice(0, 50)}" (${s.nodeCount} nodes)`);
       }
       if (sorted.length > 5) {

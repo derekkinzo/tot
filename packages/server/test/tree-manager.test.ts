@@ -16,7 +16,7 @@ describe('TreeManager', () => {
       const { session, root } = tm.createSession('Why is the API slow?');
       expect(session.id).toBeDefined();
       expect(session.problem).toBe('Why is the API slow?');
-      expect(session.status).toBe('active');
+      expect(session.status).toBe('open');
       expect(root.id).toBe(session.rootNodeId);
       expect(root.parentId).toBeNull();
       expect(root.depth).toBe(0);
@@ -68,7 +68,7 @@ describe('TreeManager', () => {
     it('rejects decompose on confirmed hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'This is it');
-      tm.confirmHypothesis(root.id, 'Confirmed');
+      tm.corroborateHypothesis(root.id, 'Confirmed');
       expect(() => tm.decompose(root.id, ['A', 'B'])).toThrow(TreeError);
     });
 
@@ -156,7 +156,7 @@ describe('TreeManager', () => {
     it('rejects evidence on confirmed hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'Good');
-      tm.confirmHypothesis(root.id, 'Found it');
+      tm.corroborateHypothesis(root.id, 'Found it');
       expect(() => tm.addEvidence(root.id, 'neutral', 'Extra')).toThrow(TreeError);
     });
 
@@ -197,7 +197,7 @@ describe('TreeManager', () => {
     it('rejects eliminating a confirmed hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'Good');
-      tm.confirmHypothesis(root.id, 'Found');
+      tm.corroborateHypothesis(root.id, 'Found');
       expect(() => tm.eliminateHypothesis(root.id, 'Changed mind')).toThrow(TreeError);
     });
 
@@ -211,30 +211,30 @@ describe('TreeManager', () => {
     });
   });
 
-  // --- Confirm ---
+  // --- Corroborate ---
 
-  describe('confirmHypothesis', () => {
-    it('sets status to confirmed with conclusion and completes session', () => {
+  describe('corroborateHypothesis', () => {
+    it('sets status to corroborated with conclusion and resolves session', () => {
       const { session, root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'Evidence');
-      const result = tm.confirmHypothesis(root.id, 'Root cause found');
-      expect(result.status).toBe('confirmed');
-      expect(result.conclusion?.verdict).toBe('confirmed');
-      expect(session.status).toBe('completed');
+      const result = tm.corroborateHypothesis(root.id, 'Root cause found');
+      expect(result.status).toBe('corroborated');
+      expect(result.conclusion?.verdict).toBe('corroborated');
+      expect(session.status).toBe('resolved');
     });
 
-    it('rejects confirming an eliminated hypothesis', () => {
+    it('rejects corroborating an eliminated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'refutes', 'Bad');
       tm.eliminateHypothesis(root.id, 'Done');
-      expect(() => tm.confirmHypothesis(root.id, 'Wait')).toThrow(TreeError);
+      expect(() => tm.corroborateHypothesis(root.id, 'Wait')).toThrow(TreeError);
     });
 
-    it('rejects already confirmed', () => {
+    it('rejects already corroborated', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'Good');
-      tm.confirmHypothesis(root.id, 'Found');
-      expect(() => tm.confirmHypothesis(root.id, 'Again')).toThrow(TreeError);
+      tm.corroborateHypothesis(root.id, 'Found');
+      expect(() => tm.corroborateHypothesis(root.id, 'Again')).toThrow(TreeError);
     });
 
     it('emits hypothesis-updated and session-completed events', () => {
@@ -242,33 +242,33 @@ describe('TreeManager', () => {
       tm.addEvidence(root.id, 'supports', 'Good');
       const events: TreeEvent[] = [];
       tm.on('event', (e) => events.push(e));
-      tm.confirmHypothesis(root.id, 'Found');
+      tm.corroborateHypothesis(root.id, 'Found');
       expect(events.some((e) => e.type === 'hypothesis-updated')).toBe(true);
       expect(events.some((e) => e.type === 'session-completed')).toBe(true);
     });
 
-    it('rejects confirming a parent while a child is pending', () => {
+    it('rejects corroborating a parent while a child is pending', () => {
       const { root } = tm.createSession('Problem');
       tm.decompose(root.id, ['A', 'B']);
-      expect(() => tm.confirmHypothesis(root.id, 'reason')).toThrow(TreeError);
+      expect(() => tm.corroborateHypothesis(root.id, 'reason')).toThrow(TreeError);
     });
 
-    it('rejects confirming a parent while a child is exploring', () => {
+    it('rejects corroborating a parent while a child is exploring', () => {
       const { root } = tm.createSession('Problem');
       const children = tm.decompose(root.id, ['A', 'B']);
       tm.addEvidence(children[0].id, 'supports', 'note');
       expect(children[0].status).toBe('exploring');
       tm.eliminateHypothesis(children[1].id, 'reason');
-      expect(() => tm.confirmHypothesis(root.id, 'reason')).toThrow(TreeError);
+      expect(() => tm.corroborateHypothesis(root.id, 'reason')).toThrow(TreeError);
     });
 
-    it('confirms a parent once every child is resolved', () => {
+    it('corroborates a parent once every child is resolved', () => {
       const { root } = tm.createSession('Problem');
       const children = tm.decompose(root.id, ['A', 'B']);
       tm.eliminateHypothesis(children[0].id, 'reason');
       tm.eliminateHypothesis(children[1].id, 'reason');
-      const result = tm.confirmHypothesis(root.id, 'reason');
-      expect(result.status).toBe('confirmed');
+      const result = tm.corroborateHypothesis(root.id, 'reason');
+      expect(result.status).toBe('corroborated');
     });
   });
 
@@ -360,7 +360,7 @@ describe('TreeManager', () => {
     it('returns specific session by ID', () => {
       const { session: s1 } = tm.createSession('First');
       tm.addEvidence(s1.rootNodeId, 'supports', 'x');
-      tm.confirmHypothesis(s1.rootNodeId, 'done');
+      tm.corroborateHypothesis(s1.rootNodeId, 'done');
       tm.createSession('Second');
       const state = tm.getTree(s1.id);
       expect(state!.session.id).toBe(s1.id);
@@ -545,20 +545,20 @@ describe('TreeManager', () => {
       expect(tm.getActiveSession()?.id).toBe(sessionA.id);
     });
 
-    it('skips a completed session: confirming the tracked session falls back to the next active one', () => {
+    it('skips a resolved session: corroborating the tracked session falls back to the next open one', () => {
       const { session: sessionA, root: rootA } = tm.createSession('Problem A');
       const { session: sessionB } = tm.createSession('Problem B');
 
-      tm.confirmHypothesis(rootA.id, 'A is the answer');
-      expect(sessionA.status).toBe('completed');
+      tm.corroborateHypothesis(rootA.id, 'A is the answer');
+      expect(sessionA.status).toBe('resolved');
 
-      // getActiveSession returns B (still active), not the just-completed A
+      // getActiveSession returns B (still open), not the just-resolved A
       expect(tm.getActiveSession()?.id).toBe(sessionB.id);
     });
 
-    it('returns undefined when no active session exists', () => {
+    it('returns undefined when no open session exists', () => {
       const { root } = tm.createSession('Problem');
-      tm.confirmHypothesis(root.id, 'done');
+      tm.corroborateHypothesis(root.id, 'done');
       expect(tm.getActiveSession()).toBeUndefined();
     });
 
@@ -574,14 +574,14 @@ describe('TreeManager', () => {
       expect(tm.getActiveSession()?.id).toBe(sessionB.id);
     });
 
-    it('does not flip current session when a mutation completes its target', () => {
+    it('does not flip current session when a mutation resolves its target', () => {
       const { root: rootA } = tm.createSession('Problem A');
       tm.addEvidence(rootA.id, 'supports', 'evidence in A');
       const activeBefore = tm.getActiveSession()?.id;
 
       const { root: rootB } = tm.createSession('Problem B');
-      tm.confirmHypothesis(rootB.id, 'done');
-      // B was just completed by confirm; active session stays at A.
+      tm.corroborateHypothesis(rootB.id, 'done');
+      // B was just resolved by corroborate; active session stays at A.
       expect(tm.getActiveSession()?.id).toBe(activeBefore);
     });
 
@@ -591,7 +591,7 @@ describe('TreeManager', () => {
       const activeBefore = tm.getActiveSession()?.id;
 
       const { root: rootB } = tm.createSession('Problem B');
-      tm.confirmHypothesis(rootB.id, 'done');
+      tm.corroborateHypothesis(rootB.id, 'done');
 
       // Score validation fails before any state change. currentSessionId
       // must not be promoted on a rejected call.
@@ -607,7 +607,7 @@ describe('TreeManager', () => {
 
       tm.eliminateHypothesis(a.id, 'no');
       tm.eliminateHypothesis(b.id, 'no');
-      expect(session.status).toBe('active');
+      expect(session.status).toBe('open');
 
       // Eliminating the root is the last live hypothesis — session abandons.
       tm.eliminateHypothesis(root.id, 'all branches dead');
@@ -645,9 +645,9 @@ describe('TreeManager', () => {
       // the agent's active pointer.
       const historical = {
         id: '00000000-0000-4000-8000-000000000001',
-        problem: 'Old completed investigation',
+        problem: 'Old resolved investigation',
         rootNodeId: '00000000-0000-4000-8000-000000000002',
-        status: 'completed' as const,
+        status: 'resolved' as const,
         createdAt: new Date(2020, 0, 1).toISOString(),
       };
       tm.loadState([historical], []);

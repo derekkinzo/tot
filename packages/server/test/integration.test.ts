@@ -51,7 +51,7 @@ describe('MCP Integration', () => {
       expect(result.tools).toHaveLength(10);
       const names = result.tools.map((t) => t.name).sort();
       expect(names).toEqual([
-        'add_evidence', 'add_hypothesis', 'confirm_hypothesis',
+        'add_evidence', 'add_hypothesis', 'corroborate_hypothesis',
         'create_tree', 'decompose', 'eliminate_hypothesis',
         'get_status', 'get_tree', 'score_hypothesis', 'validate_decomposition',
       ]);
@@ -375,7 +375,7 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: rootId, type: 'supports', content: 'good' },
       });
       await client.callTool({
-        name: 'confirm_hypothesis',
+        name: 'corroborate_hypothesis',
         arguments: { hypothesisId: rootId, reason: 'confirmed' },
       });
       const result = await client.callTool({
@@ -386,10 +386,10 @@ describe('MCP Integration', () => {
     });
   });
 
-  // ─── confirm_hypothesis ───
+  // ─── corroborate_hypothesis ───
 
-  describe('confirm_hypothesis', () => {
-    it('confirms and includes completeness prompt', async () => {
+  describe('corroborate_hypothesis', () => {
+    it('corroborates and includes completeness prompt', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
       );
@@ -398,16 +398,16 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: rootId, type: 'supports', content: 'proof' },
       });
       const result = await client.callTool({
-        name: 'confirm_hypothesis',
+        name: 'corroborate_hypothesis',
         arguments: { hypothesisId: rootId, reason: 'Root cause found' },
       });
       expect(result.isError).toBeFalsy();
       const text = getText(result);
-      expect(text).toContain('Confirmed');
+      expect(text).toContain('Corroborated');
       expect(text).toContain('explain ALL observed symptoms');
     });
 
-    it('error: confirm eliminated hypothesis', async () => {
+    it('error: corroborate eliminated hypothesis', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
       );
@@ -420,7 +420,7 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: rootId, reason: 'dead' },
       });
       const result = await client.callTool({
-        name: 'confirm_hypothesis',
+        name: 'corroborate_hypothesis',
         arguments: { hypothesisId: rootId, reason: 'actually yes' },
       });
       expect(result.isError).toBe(true);
@@ -533,7 +533,7 @@ describe('MCP Integration', () => {
         name: 'get_tree',
         arguments: { format: 'compact' },
       });
-      expect(getText(result)).toContain('No active session');
+      expect(getText(result)).toContain('No open session');
     });
   });
 
@@ -592,7 +592,7 @@ describe('MCP Integration', () => {
 
     it('no session returns informative message', async () => {
       const result = await client.callTool({ name: 'get_status', arguments: {} });
-      expect(getText(result)).toContain('No active session');
+      expect(getText(result)).toContain('No open session');
     });
   });
 
@@ -744,16 +744,16 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: l2[0], score: 0.95 },
       });
 
-      // Confirm root cause
-      const confirmResult = await client.callTool({
-        name: 'confirm_hypothesis',
+      // Corroborate root cause
+      const corroborateResult = await client.callTool({
+        name: 'corroborate_hypothesis',
         arguments: {
           hypothesisId: l2[0],
           reason: 'v2.4.1 line 142: order.getGiftMessage().length() without null check. 5% of orders have null gift_message.',
         },
       });
-      expect(confirmResult.isError).toBeFalsy();
-      expect(getText(confirmResult)).toContain('Confirmed');
+      expect(corroborateResult.isError).toBeFalsy();
+      expect(getText(corroborateResult)).toContain('Corroborated');
     });
 
     it('agent adds missed hypothesis after initial decompose', async () => {

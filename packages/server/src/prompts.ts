@@ -62,8 +62,9 @@ Move on — don't spend more time on eliminated branches.
 For the remaining hypotheses, call \`decompose\` again to create sub-hypotheses.
 Repeat the evidence → eliminate cycle at each level.
 
-### Step 6: Confirm root cause
-When you have strong evidence pointing to a specific cause, call \`confirm_hypothesis\`.
+### Step 6: Corroborate the surviving cause
+When evidence has refuted competing hypotheses and one survives, call \`corroborate_hypothesis\`.
+Corroboration is provisional retention, not verification: the verdict can be reopened by later refuting evidence.
 Ask yourself: does this explain ALL observed symptoms?
 
 ## Key Principles

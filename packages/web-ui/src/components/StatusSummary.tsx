@@ -10,16 +10,16 @@ interface Props {
 
 export default function StatusSummary({ hypotheses, session }: Props) {
   const counts = useMemo(() => {
-    let pending = 0, exploring = 0, eliminated = 0, confirmed = 0;
+    let pending = 0, exploring = 0, eliminated = 0, corroborated = 0;
     for (const [, h] of hypotheses) {
       switch (h.status) {
         case 'pending': pending++; break;
         case 'exploring': exploring++; break;
         case 'eliminated': eliminated++; break;
-        case 'confirmed': confirmed++; break;
+        case 'corroborated': corroborated++; break;
       }
     }
-    return { pending, exploring, eliminated, confirmed, total: hypotheses.size };
+    return { pending, exploring, eliminated, corroborated, total: hypotheses.size };
   }, [hypotheses]);
 
   if (counts.total === 0) return null;
@@ -33,7 +33,7 @@ export default function StatusSummary({ hypotheses, session }: Props) {
       {counts.pending > 0 && <Pill color={STATUS_COLORS.pending} label="Pending" count={counts.pending} />}
       {counts.exploring > 0 && <Pill color={STATUS_COLORS.exploring} label="Exploring" count={counts.exploring} />}
       {counts.eliminated > 0 && <Pill color={STATUS_COLORS.eliminated} label="Eliminated" count={counts.eliminated} />}
-      {counts.confirmed > 0 && <Pill color={STATUS_COLORS.confirmed} label="Confirmed" count={counts.confirmed} />}
+      {counts.corroborated > 0 && <Pill color={STATUS_COLORS.corroborated} label="Corroborated" count={counts.corroborated} />}
       <span style={{ color: '#6b7280', borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
         {counts.total} total
       </span>

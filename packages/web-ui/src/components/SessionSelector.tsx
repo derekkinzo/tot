@@ -69,8 +69,8 @@ export default function SessionSelector({ currentSessionId, onSwitch, project }:
                 }}>{s.problem}</span>
                 <span style={{
                   fontSize: 10, padding: '2px 6px', borderRadius: 10,
-                  background: s.status === 'active' ? '#22c55e20' : '#6b728020',
-                  color: s.status === 'active' ? '#22c55e' : '#6b7280',
+                  background: s.status === 'open' ? '#22c55e20' : '#6b728020',
+                  color: s.status === 'open' ? '#22c55e' : '#6b7280',
                 }}>{s.status}</span>
               </div>
               <div style={{ fontSize: 11, color: '#6b7280', marginTop: 3 }}>

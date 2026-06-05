@@ -4,11 +4,11 @@ export interface Hypothesis {
   sessionId: string;
   depth: number;
   content: string;
-  status: 'pending' | 'exploring' | 'eliminated' | 'confirmed';
+  status: 'pending' | 'exploring' | 'eliminated' | 'corroborated';
   score: number | null;
   evidence: Evidence[];
   conclusion?: {
-    verdict: 'eliminated' | 'confirmed';
+    verdict: 'eliminated' | 'corroborated';
     reason: string;
     timestamp: string;
   };
@@ -32,7 +32,7 @@ export interface Session {
   id: string;
   problem: string;
   rootNodeId: string;
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   completedAt?: string;
 }

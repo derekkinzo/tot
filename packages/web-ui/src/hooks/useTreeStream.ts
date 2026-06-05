@@ -55,7 +55,7 @@ function reducer(state: TreeState, action: Action): TreeState {
     }
     case 'session-completed': {
       if (!state.session || state.session.id !== action.sessionId) return state;
-      return { ...state, session: { ...state.session, status: 'completed' } };
+      return { ...state, session: { ...state.session, status: 'resolved' } };
     }
     case 'clear-recent':
       return { ...state, recentlyChanged: new Set(), lastAddedId: null };
