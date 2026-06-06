@@ -444,20 +444,12 @@ export function formatStatus(tm: TreeManager): string {
   }
 
   const { session, counts, stagnant, unexplored, bestLead } = status;
-  const outOfScope = counts['out-of-scope'] ?? 0;
-  const terminal = counts.eliminated + counts.corroborated + outOfScope;
-  const total = counts.pending + counts.exploring + terminal;
-
-  const resolvedParts = [`${counts.eliminated} eliminated`, `${counts.corroborated} corroborated`];
-  if (outOfScope > 0) resolvedParts.push(`${outOfScope} out-of-scope`);
-  const activeParts: string[] = [];
-  if (counts.exploring > 0) activeParts.push(`${counts.exploring} exploring`);
-  if (counts.pending > 0) activeParts.push(`${counts.pending} pending`);
+  const breakdown = computeProgressBreakdown(counts);
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +
     `Problem: "${truncate(session.problem, 70)}"\n` +
-    `Progress: ${terminal}/${total} resolved (${resolvedParts.join(', ')})\n`;
-  if (activeParts.length > 0) result += `Active: ${activeParts.join(', ')}\n`;
+    `Progress: ${breakdown.terminal}/${breakdown.total} resolved (${breakdown.resolvedParts.join(', ')})\n`;
+  if (breakdown.activeParts.length > 0) result += `Active: ${breakdown.activeParts.join(', ')}\n`;
 
   if (unexplored.length > 0) {
     result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
@@ -484,20 +476,39 @@ function formatTreeSummary(tm: TreeManager): string {
   if (!status.session) return '';
 
   const { counts, stagnant, bestLead } = status;
-  const outOfScope = counts['out-of-scope'] ?? 0;
-  const terminal = counts.eliminated + counts.corroborated + outOfScope;
-  const total = counts.pending + counts.exploring + terminal;
+  const breakdown = computeProgressBreakdown(counts);
 
   let summary = `── Tree ──\n`;
-  summary += `Progress: ${terminal}/${total} resolved`;
-  const active: string[] = [];
-  if (counts.exploring > 0) active.push(`${counts.exploring} exploring`);
-  if (counts.pending > 0) active.push(`${counts.pending} pending`);
-  if (active.length > 0) summary += ` | ${active.join(', ')}`;
+  summary += `Progress: ${breakdown.terminal}/${breakdown.total} resolved`;
+  if (breakdown.activeParts.length > 0) summary += ` | ${breakdown.activeParts.join(', ')}`;
   if (bestLead) summary += ` | Lead: "${truncate(bestLead.content, 20)}" (${bestLead.score!.toFixed(2)})`;
   if (stagnant) summary += `\n⚠ Stagnation — devil's advocate: what if your lowest-scored hypothesis is correct?`;
 
   return summary;
+}
+
+/**
+ * Counts of resolved-vs-active hypotheses, decomposed for status renderers.
+ * The resolved sub-counts (eliminated, corroborated, out-of-scope) feed the
+ * "${terminal}/${total} resolved (...)" parenthetical; the active sub-counts
+ * (exploring, pending) feed a separate clause so the breakdown does not mix
+ * pruning verdicts with live work.
+ */
+function computeProgressBreakdown(counts: Record<Hypothesis['status'], number>): {
+  terminal: number;
+  total: number;
+  resolvedParts: string[];
+  activeParts: string[];
+} {
+  const outOfScope = counts['out-of-scope'] ?? 0;
+  const terminal = counts.eliminated + counts.corroborated + outOfScope;
+  const total = counts.pending + counts.exploring + terminal;
+  const resolvedParts = [`${counts.eliminated} eliminated`, `${counts.corroborated} corroborated`];
+  if (outOfScope > 0) resolvedParts.push(`${outOfScope} out-of-scope`);
+  const activeParts: string[] = [];
+  if (counts.exploring > 0) activeParts.push(`${counts.exploring} exploring`);
+  if (counts.pending > 0) activeParts.push(`${counts.pending} pending`);
+  return { terminal, total, resolvedParts, activeParts };
 }
 
 function truncate(s: string, max: number): string {

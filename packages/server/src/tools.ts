@@ -31,7 +31,7 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   decompose: {
-    description: 'Decompose a hypothesis into 2-5 sibling sub-hypotheses comparable along a single framing axis. Aim for non-overlapping siblings unless the domain genuinely co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
+    description: 'Decompose a hypothesis into sibling sub-hypotheses comparable along a single framing axis. 2-5 keeps the tree legible; up to 20 are accepted when the domain genuinely warrants more. Aim for non-overlapping siblings unless the domain co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
     schema: {
       parentId: z.string().min(1).describe('ID of the hypothesis to decompose'),
       children: z.array(z.string().min(1)).min(2).max(20).describe('Array of sub-hypothesis content strings'),

@@ -232,7 +232,25 @@ export class TreeManager extends EventEmitter {
     hypothesis.evidence.push(evidence);
     hypothesis.metadata.updatedAt = now;
 
+    // Three status-change paths reset the stagnation counter; everything
+    // else just bumps it. A refute against a corroborated leaf demotes the
+    // leaf to 'exploring' (the historical conclusion stays in the audit
+    // trail) and, when the session was terminal, reopens it. Both
+    // terminal states reflect a claimed closure that fresh refutation
+    // challenges.
+    const session = this.sessions.get(hypothesis.sessionId);
+    const reopensSession =
+      type === 'refutes' &&
+      hypothesis.status === 'corroborated' &&
+      Boolean(session) &&
+      session!.status !== 'open';
+    const demotesLeaf = type === 'refutes' && hypothesis.status === 'corroborated';
+
     if (hypothesis.status === 'pending') {
+      hypothesis.status = 'exploring';
+      this.mutationsSinceStatusChange = 0;
+      this.touch();
+    } else if (demotesLeaf) {
       hypothesis.status = 'exploring';
       this.mutationsSinceStatusChange = 0;
       this.touch();
@@ -243,25 +261,10 @@ export class TreeManager extends EventEmitter {
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
-    // A refute against a corroborated leaf demotes the leaf to 'exploring'
-    // and reopens the session: the historical conclusion record stays in
-    // the audit trail, but the live status is re-investigation. Both
-    // terminal states (resolved and abandoned) reflect a claimed closure
-    // that fresh refutation challenges; either reopens.
-    const session = this.sessions.get(hypothesis.sessionId);
-    if (type === 'refutes' && hypothesis.status === 'corroborated') {
-      hypothesis.status = 'exploring';
-      this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
-      if (session && session.status !== 'open') {
-        session.status = 'open';
-        session.completedAt = undefined;
-        // Session-level transitions are real disposition progress; reset
-        // the stagnation counter so a legitimate reopen does not register
-        // as a tick.
-        this.mutationsSinceStatusChange = 0;
-        this.touch();
-        this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
-      }
+    if (reopensSession) {
+      session!.status = 'open';
+      session!.completedAt = undefined;
+      this.emit('event', { type: 'session-reopened', sessionId: session!.id } satisfies TreeEvent);
     }
 
     this.setCurrent(hypothesis.sessionId);
@@ -360,7 +363,7 @@ export class TreeManager extends EventEmitter {
     // corroborated until each child is terminal.
     for (const childId of hypothesis.children) {
       const child = this.hypotheses.get(childId);
-      if (child && (child.status === 'pending' || child.status === 'exploring')) {
+      if (child && !isTerminal(child.status)) {
         throw new TreeError('Cannot corroborate a hypothesis with unresolved children');
       }
     }
@@ -690,13 +693,11 @@ export class TreeManager extends EventEmitter {
     const root = this.hypotheses.get(session.rootNodeId);
     if (!root) return false;
     const terminal: 'resolved' | 'abandoned' =
-      this.subtreeContainsCorroborated(root.id) ? 'resolved' : 'abandoned';
+      subtreeContainsCorroborated(root.id, (id) => this.hypotheses.get(id))
+        ? 'resolved'
+        : 'abandoned';
     this.closeSession(session, terminal, timestamp);
     return true;
-  }
-
-  private subtreeContainsCorroborated(rootId: string): boolean {
-    return subtreeContainsCorroborated(rootId, (id) => this.hypotheses.get(id));
   }
 
   /**
@@ -752,7 +753,7 @@ export class TreeManager extends EventEmitter {
       const id = stack.pop()!;
       const node = this.hypotheses.get(id);
       if (!node) continue;
-      if (node.status === 'pending' || node.status === 'exploring') return false;
+      if (!isTerminal(node.status)) return false;
       for (const childId of node.children) stack.push(childId);
     }
     return true;

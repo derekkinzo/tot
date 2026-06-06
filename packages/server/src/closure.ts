@@ -26,12 +26,9 @@ export function isTerminal(status: HypothesisStatus): boolean {
 }
 
 /**
- * Returns true when the subtree rooted at id contains a corroborated node
- * reachable through non-pruned ancestors.
- *
- * Caller supplies a lookup callback so this walker is independent of the
- * underlying storage. The engine binds it to its in-memory hypothesis Map;
- * replay paths bind it to the per-session Map built from journal entries.
+ * True when the subtree rooted at id contains a corroborated node reachable
+ * through non-pruned ancestors. Engine and replay both call this so closure
+ * decisions agree across live and persisted views.
  */
 export function subtreeContainsCorroborated(
   rootId: string,

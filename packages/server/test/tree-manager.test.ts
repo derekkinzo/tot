@@ -390,6 +390,11 @@ describe('TreeManager', () => {
       tm.addEvidence(a2.id, 'refutes', 'counter-instance');
       expect(session.status).toBe('open');
       expect(events.some((e) => e.type === 'session-reopened')).toBe(true);
+      // The leaf is demoted to 'exploring' so closure can re-evaluate
+      // honestly under the new evidence; the historical conclusion stays
+      // in the audit trail.
+      expect(a2.status).toBe('exploring');
+      expect(a2.conclusion?.verdict).toBe('corroborated');
     });
 
     it('rejects supports/neutral evidence on a corroborated leaf', () => {
