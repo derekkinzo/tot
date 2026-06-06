@@ -88,7 +88,9 @@ function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines
   lines.push(`${indent}- ${icon} **${node.content}**${score} [${node.status}]`);
 
   if (node.conclusion) {
-    lines.push(`${indent}  > ${node.conclusion.verdict}: ${node.conclusion.reason}`);
+    const isHistorical = node.status !== node.conclusion.verdict;
+    const prefix = isHistorical ? `historically ${node.conclusion.verdict}` : node.conclusion.verdict;
+    lines.push(`${indent}  > ${prefix}: ${node.conclusion.reason}`);
   }
 
   for (const ev of node.evidence) {

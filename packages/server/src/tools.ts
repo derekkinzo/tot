@@ -184,7 +184,10 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     if (!nextStatus || nextStatus === priorStatus) return;
     if (nextStatus === 'resolved' || nextStatus === 'abandoned') {
       await p.append('session-completed', { sessionId, terminalStatus: nextStatus });
-    } else if (priorStatus === 'resolved' && nextStatus === 'open') {
+    } else if (priorStatus !== 'open' && nextStatus === 'open') {
+      // Both terminal states (resolved, abandoned) can transition back to
+      // open via reopen-on-refute on a corroborated leaf; either path
+      // produces the same wire event.
       await p.append('session-reopened', { sessionId });
     }
   }

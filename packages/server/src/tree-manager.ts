@@ -400,7 +400,7 @@ export class TreeManager extends EventEmitter {
    */
   setOutOfScope(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
-    if (hypothesis.status !== 'pending' && hypothesis.status !== 'exploring') {
+    if (isTerminal(hypothesis.status)) {
       throw new TreeError(`Cannot set out-of-scope a ${hypothesis.status} hypothesis`);
     }
     // The root carries the session's problem statement; setting it

@@ -33,7 +33,8 @@ partition contract should be replaced with independence + comprehensiveness.
 ## 3. Cognitive Provenance
 
 The discipline of carving a hypothesis space into disjoint, exhaustive
-alternatives long predates the MECE label. Three primary sources:
+alternatives long predates the MECE label. Two primary sources, plus a
+closely related method:
 
 - **Bacon, F. (1620). *Novum Organum*.** Bacon's eliminative induction presumes
   candidate forms are laid out as competing alternatives to be pruned.

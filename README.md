@@ -21,7 +21,7 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 - **Evidence tracking** — typed evidence (supports/refutes/neutral) attached to each hypothesis
 - **Systematic elimination** — mark dead ends with documented reasoning
 - **Live visualization** — watch the tree build in real-time at `localhost:6274`
-- **MECE guidance** — structural checks help ensure decompositions don't overlap or miss gaps
+- **Decomposition guidance** — structural checks flag sibling overlap, missing coverage, and uneven abstraction levels
 - **Adaptive signals** — tool responses prompt agents to seek refuting evidence and avoid confirmation bias
 
 ## Quick Start
@@ -82,7 +82,7 @@ Add to your MCP configuration:
 | Tool | Purpose |
 |------|---------|
 | `create_tree` | Start a new reasoning session with a problem statement |
-| `decompose` | Split a hypothesis into MECE sub-hypotheses |
+| `decompose` | Split a hypothesis into sibling sub-hypotheses comparable along one axis |
 | `add_hypothesis` | Add a missed hypothesis to the tree |
 | `add_evidence` | Attach supporting/refuting/neutral evidence |
 | `eliminate_hypothesis` | Mark a hypothesis as a dead end (with reason) |
@@ -99,7 +99,7 @@ When installed as a plugin, these slash commands are available:
 
 | Skill | Purpose |
 |-------|---------|
-| `/tot-reason` | Full structured reasoning workflow — domain investigation, MECE decomposition, evidence gathering, elimination |
+| `/tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
 | `/tot-inspect` | View current tree state, progress, and visualization |
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |
 | `/tot-dashboard` | Open the live tree visualization in the default browser at `localhost:6274` |

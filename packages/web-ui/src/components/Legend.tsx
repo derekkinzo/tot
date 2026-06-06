@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { STATUS_COLORS, STATUS_NODE_STYLES } from '../theme';
+import { STATUS_COLORS, STATUS_LABELS, STATUS_NODE_STYLES } from '../theme';
 
 export default function Legend() {
   const [dismissed, setDismissed] = useState(false);
@@ -18,10 +18,11 @@ export default function Legend() {
         >×</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        <LegendItem color={STATUS_COLORS.pending} icon={STATUS_NODE_STYLES.pending.icon} label="Pending" />
-        <LegendItem color={STATUS_COLORS.exploring} icon={STATUS_NODE_STYLES.exploring.icon} label="Exploring" />
-        <LegendItem color={STATUS_COLORS.eliminated} icon={STATUS_NODE_STYLES.eliminated.icon} label="Eliminated" />
-        <LegendItem color={STATUS_COLORS.corroborated} icon={STATUS_NODE_STYLES.corroborated.icon} label="Corroborated" />
+        <LegendItem color={STATUS_COLORS.pending} icon={STATUS_NODE_STYLES.pending.icon} label={STATUS_LABELS.pending} />
+        <LegendItem color={STATUS_COLORS.exploring} icon={STATUS_NODE_STYLES.exploring.icon} label={STATUS_LABELS.exploring} />
+        <LegendItem color={STATUS_COLORS.eliminated} icon={STATUS_NODE_STYLES.eliminated.icon} label={STATUS_LABELS.eliminated} />
+        <LegendItem color={STATUS_COLORS.corroborated} icon={STATUS_NODE_STYLES.corroborated.icon} label={STATUS_LABELS.corroborated} />
+        <LegendItem color={STATUS_COLORS['out-of-scope']} icon={STATUS_NODE_STYLES['out-of-scope'].icon} label={STATUS_LABELS['out-of-scope']} />
       </div>
       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #30363d', color: '#6b7280', lineHeight: 1.4 }}>
         Click: select • Alt+click: collapse<br/>

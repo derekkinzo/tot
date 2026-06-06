@@ -34,7 +34,7 @@
  * - Inference detection: 2+ keywords (suggests/implies/could/might/possibly/likely)
  */
 
-import { isLive } from './closure.js';
+import { isLive, isTerminal } from './closure.js';
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
@@ -318,7 +318,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     // not just direct siblings — the agent must dispose of every other
     // top-level branch before resolution.
     const open = state ? Array.from(state.hypotheses.values()).filter(
-      (h) => h.status === 'pending' || h.status === 'exploring',
+      (h) => !isTerminal(h.status),
     ) : [];
     result += `── Resolution pending ──\n`;
     result += `${open.length} hypothes${open.length === 1 ? 'is' : 'es'} still open:\n`;
