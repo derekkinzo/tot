@@ -1,10 +1,25 @@
+export type HypothesisStatus =
+  | 'pending'
+  | 'exploring'
+  | 'eliminated'
+  | 'corroborated'
+  | 'out-of-scope';
+
+/**
+ * Eliminated and out-of-scope are pruning verdicts: descendants of a pruned
+ * branch are moot under the closure rule. Mirrors server closure.ts.
+ */
+export function isPruned(status: HypothesisStatus): boolean {
+  return status === 'eliminated' || status === 'out-of-scope';
+}
+
 export interface Hypothesis {
   id: string;
   parentId: string | null;
   sessionId: string;
   depth: number;
   content: string;
-  status: 'pending' | 'exploring' | 'eliminated' | 'corroborated' | 'out-of-scope';
+  status: HypothesisStatus;
   score: number | null;
   evidence: Evidence[];
   conclusion?: {

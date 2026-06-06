@@ -78,15 +78,12 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   if (check.substringOverlaps.length > 0) result += `⚠ Overlap detected between ${check.substringOverlaps.length} pair(s)\n`;
   if (!check.hasCatchAll) result += `Note: No catch-all — is anything missing?\n`;
 
-  // Abstraction level check
-  const lengths = children.map((c) => c.content.split(/\s+/).length);
-  const minLen = Math.min(...lengths);
-  const maxLen = Math.max(...lengths);
-  if (maxLen > minLen * 3) {
-    result += `level-mismatch-advisory: labels range from ${minLen} to ${maxLen} words — uneven abstraction\n`;
+  if (check.abstractionMismatch) {
+    const lengths = children.map((c) => c.content.split(/\s+/).length);
+    result += `level-mismatch-advisory: labels range from ${Math.min(...lengths)} to ${Math.max(...lengths)} words — uneven abstraction\n`;
   }
 
-  if (check.substringOverlaps.length === 0 && check.childCount >= 2 && maxLen <= minLen * 3) {
+  if (check.substringOverlaps.length === 0 && check.childCount >= 2 && !check.abstractionMismatch) {
     result += `No structural issues detected.\n`;
   }
 

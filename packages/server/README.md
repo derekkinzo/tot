@@ -19,7 +19,7 @@ AI agents debugging complex problems tend to reason linearly — they follow the
 - **Evidence tracking** — typed evidence (supports/refutes/neutral) attached to each hypothesis
 - **Systematic elimination** — mark dead ends with documented reasoning
 - **Live visualization** — watch the tree build in real-time at `localhost:6274`
-- **MECE guidance** — structural checks help ensure decompositions don't overlap or miss gaps
+- **Decomposition guidance** — structural checks flag sibling overlap, missing coverage, and uneven abstraction levels
 - **Adaptive signals** — tool responses prompt agents to seek refuting evidence and avoid confirmation bias
 
 ## Quick Start
@@ -67,7 +67,7 @@ Add to your MCP configuration:
 | Tool | Purpose |
 |------|---------|
 | `create_tree` | Start a new reasoning session with a problem statement |
-| `decompose` | Split a hypothesis into MECE sub-hypotheses |
+| `decompose` | Split a hypothesis into sibling sub-hypotheses comparable along one axis |
 | `add_hypothesis` | Add a missed hypothesis to the tree |
 | `add_evidence` | Attach supporting/refuting/neutral evidence |
 | `eliminate_hypothesis` | Mark a hypothesis as a dead end (with reason) |
@@ -108,7 +108,7 @@ The browser UI at `localhost:6274` shows:
 | Live browser visualization | No | No | **Yes** |
 | Typed evidence tracking | No | No | **Yes** |
 | Hypothesis elimination | No | No | **Yes** |
-| MECE decomposition guidance | No | No | **Yes** |
+| Decomposition guidance | No | No | **Yes** |
 | Confidence scoring | No | No | **Yes** |
 | Stagnation detection | No | No | **Yes** |
 | Adaptive response signals | No | No | **Yes** |
