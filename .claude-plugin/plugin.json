@@ -1,7 +1,7 @@
 {
   "name": "tot-mcp",
   "version": "0.1.0",
-  "description": "Structured hypothesis tree reasoning with MECE decomposition and real-time visualization for AI agents",
+  "description": "Structured hypothesis tree reasoning grounded in falsificationism and eliminative induction, with real-time visualization for AI agents",
   "author": {
     "name": "Derek Kinzo"
   },
@@ -10,10 +10,10 @@
   "license": "MIT",
   "keywords": [
     "reasoning",
-    "debugging",
     "tree-of-thoughts",
-    "mece",
     "hypothesis",
+    "falsification",
+    "eliminative-induction",
     "structured-thinking",
     "mcp"
   ]
