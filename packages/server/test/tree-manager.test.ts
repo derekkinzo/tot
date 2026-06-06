@@ -359,9 +359,11 @@ describe('TreeManager', () => {
       tm.addEvidence(a.id, 'refutes', 'wait, found a counter-instance');
       expect(session.status).toBe('open');
       expect(events.some((e) => e.type === 'session-reopened')).toBe(true);
-      // The historical verdict stays in the audit trail.
+      // The leaf is demoted to 'exploring' so closure can re-evaluate
+      // honestly under the new evidence; the historical conclusion stays
+      // in the audit trail.
+      expect(a.status).toBe('exploring');
       expect(a.conclusion?.verdict).toBe('corroborated');
-      expect(a.status).toBe('corroborated');
     });
 
     it('refuting evidence on a corroborated leaf reopens an abandoned session as well', () => {

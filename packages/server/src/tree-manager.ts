@@ -243,23 +243,25 @@ export class TreeManager extends EventEmitter {
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
-    // A refute against a corroborated leaf reopens the session: the verdict
-    // remains in the audit trail, but the closure is no longer claimed. Both
+    // A refute against a corroborated leaf demotes the leaf to 'exploring'
+    // and reopens the session: the historical conclusion record stays in
+    // the audit trail, but the live status is re-investigation. Both
     // terminal states (resolved and abandoned) reflect a claimed closure
     // that fresh refutation challenges; either reopens.
     const session = this.sessions.get(hypothesis.sessionId);
-    if (
-      type === 'refutes' &&
-      hypothesis.status === 'corroborated' &&
-      session && session.status !== 'open'
-    ) {
-      session.status = 'open';
-      session.completedAt = undefined;
-      // Session-level transitions are real disposition progress; reset the
-      // stagnation counter so a legitimate reopen does not register as a tick.
-      this.mutationsSinceStatusChange = 0;
-      this.touch();
-      this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
+    if (type === 'refutes' && hypothesis.status === 'corroborated') {
+      hypothesis.status = 'exploring';
+      this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
+      if (session && session.status !== 'open') {
+        session.status = 'open';
+        session.completedAt = undefined;
+        // Session-level transitions are real disposition progress; reset
+        // the stagnation counter so a legitimate reopen does not register
+        // as a tick.
+        this.mutationsSinceStatusChange = 0;
+        this.touch();
+        this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
+      }
     }
 
     this.setCurrent(hypothesis.sessionId);
