@@ -30,14 +30,14 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   decompose: {
-    description: 'Decompose a hypothesis into mutually exclusive, collectively exhaustive sub-hypotheses. Use at any depth to drill deeper into a branch.',
+    description: 'Decompose a hypothesis into 2-5 sibling sub-hypotheses comparable along a single framing axis. Aim for non-overlapping siblings unless the domain genuinely co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
     schema: {
       parentId: z.string().min(1).describe('ID of the hypothesis to decompose'),
       children: z.array(z.string().min(1)).min(2).max(20).describe('Array of sub-hypothesis content strings'),
     },
   },
   add_hypothesis: {
-    description: 'Add a single hypothesis to the tree. Use when you realize a MECE decomposition is missing a possibility.',
+    description: 'Add a single sibling hypothesis to the tree. Use when an existing decomposition is missing a possibility.',
     schema: {
       parentId: z.string().min(1).describe('ID of the parent hypothesis'),
       content: z.string().min(1).max(10000).describe('Description of the new hypothesis'),
