@@ -132,7 +132,9 @@ async function main() {
   const l2 = decomp2.childIds;
   await callTool('add_evidence', { hypothesisId: l2[2], type: 'supports', content: 'Health check returns 404 on new endpoint' });
   await callTool('score_hypothesis', { hypothesisId: l2[2], score: 0.92 });
+  await callTool('add_evidence', { hypothesisId: l2[0], type: 'refutes', content: 'DNS resolves correctly from gateway host' });
   await callTool('eliminate_hypothesis', { hypothesisId: l2[0], reason: 'DNS resolves correctly' });
+  await callTool('add_evidence', { hypothesisId: l2[1], type: 'refutes', content: '502 returned in 100ms, well under 30s timeout' });
   await callTool('eliminate_hypothesis', { hypothesisId: l2[1], reason: '502 in 100ms, timeout is 30s' });
   await sleep(1500);
   await capture(page);

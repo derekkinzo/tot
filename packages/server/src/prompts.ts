@@ -69,8 +69,8 @@ The session resolves only when every other top-level branch is terminal (elimina
 
 ## Key Principles
 
-- **Never pursue a single path linearly.** Decompose first, then investigate competing hypotheses in parallel (Chamberlin's method of multiple working hypotheses).
-- **Prefer discriminating evidence.** A test that separates two hypotheses is worth more than a test that confirms a favored one (Platt's strong inference).
+- **Never pursue a single path linearly.** Decompose first, then investigate competing hypotheses in parallel (cf. Chamberlin's method of multiple working hypotheses, 1890).
+- **Prefer discriminating evidence.** A test that separates two hypotheses is worth more than a test that confirms a favored one (cf. Platt's strong inference, 1964).
 - **Eliminate broadly before going deep.** Rule out entire categories before drilling into one.
 - **Track confidence.** Use \`score_hypothesis\` to maintain relative rankings among live siblings.
 - **Watch for stagnation.** If progress stalls, restructure the decomposition or relax the framing axis.
