@@ -1,19 +1,21 @@
 ---
 name: tot-reason
-description: Use this skill when investigating bugs, debugging failures, performing root cause analysis, or when the user asks to "use tree of thought", "debug this systematically", "investigate this", or "MECE analysis". Provides structured hypothesis tree reasoning with scientific protocols.
+description: Use this skill when investigating a problem with multiple competing hypotheses — root cause analysis, differential diagnosis, scientific inquiry, intelligence analysis, multi-factor decision-making — or when the user asks to "use tree of thought", "investigate this systematically", or "build a hypothesis tree". Provides structured hypothesis tree reasoning grounded in falsificationism and eliminative induction.
 argument-hint: [problem-description]
 ---
 
 # /tot-reason
 
-Initiate structured Tree of Thought reasoning for systematic problem investigation.
+Initiate structured Tree of Thought reasoning for systematic investigation of a problem with rival explanations.
 
 ## When to Use
 
-- Debugging complex failures (500 errors, intermittent issues, performance regressions)
-- Root cause analysis where multiple competing hypotheses exist
-- Any investigation where linear reasoning leads to rabbit holes
-- When the user explicitly requests structured/systematic debugging
+- Root cause analysis across any system (technical, biological, organizational, environmental) where multiple causes compete
+- Differential diagnosis: which condition best explains the observations
+- Scientific inquiry: choosing among rival hypotheses for an empirical question
+- Intelligence analysis: weighing competing explanations against fragmentary evidence
+- Multi-factor decisions where the right answer depends on disentangling correlated possibilities
+- Any investigation where linear reasoning would lead down a single rabbit hole
 
 ## Protocol
 
@@ -21,80 +23,76 @@ Initiate structured Tree of Thought reasoning for systematic problem investigati
 
 BEFORE creating hypotheses, investigate the problem domain thoroughly:
 
-1. **Gather context**: What is the problem domain? What changed recently in the system or environment? When did it start?
-2. **Characterize symptoms**: Who/what is affected? What is the scope? Is it intermittent or constant?
+1. **Gather context**: What is the relevant background? What is already known? What is the data set, the population, the system, or the situation?
+2. **Characterize the question**: What observations are being explained, or what decision is being made? What is the scope?
 3. **Identify boundaries**: What is IN scope vs OUT of scope? (Mill's Method of Difference: contrast cases where the effect occurs against cases where it does not.)
 
 Fan out subagents to research the domain from multiple angles simultaneously.
 
 ### Phase 2: Create Tree
 
-Call `create_tree` with a clear, specific problem statement. Include:
-- The symptom (what is observed)
-- The scope (who/what is affected)
-- The timeline (when it started, what changed)
+Call `create_tree` with a clear, specific problem statement. Include the observations, the scope, and any relevant background.
 
-### Phase 3: MECE Decomposition
+### Phase 3: Decompose into competing hypotheses
 
-Call `decompose` with 2-5 hypotheses that are:
-- **Mutually Exclusive**: Each covers a DISTINCT failure mode — no overlaps
-- **Collectively Exhaustive**: Together they cover ALL plausible explanations
+Call `decompose` with 2-5 sibling hypotheses that are comparable along a single framing axis:
 
-Decomposition forms a partition of the cause space (Chamberlin 1890; Mill 1843).
+- **By mechanism**: distinct causal pathways that could produce the same effect
+- **By location or layer**: where in the system the cause sits
+- **By stage or time**: phase of the process or moment in time
+- **By actor or population**: who or what is affected, or who is acting
+- **By category**: type of object, condition, or class of agent
 
-Decomposition strategies:
-- By system layer (code / data / infrastructure / external)
-- By scope (all users / subset / specific conditions)
-- By time (before/after change / gradual degradation)
-- By component (service A / service B / integration layer)
+The siblings form a partition of the explanation space (cf. Chamberlin's method of multiple working hypotheses, 1890; Mill's joint methods, 1843):
+- **Distinct siblings**: each hypothesis covers a different possibility unless co-occurrence is real (Mackie's INUS conditions describe genuinely compound causes).
+- **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain.
 
 After decomposing, STOP and review:
-- Fan out subagents to validate each hypothesis is truly distinct
-- Check: Could a single cause belong to two categories? If yes, refine boundaries.
-- Check: Can you imagine a cause NOT covered? If yes, add it.
+- Fan out subagents to validate each hypothesis is truly distinct from its siblings.
+- Could a single observation belong to two of these by accident? If yes, refine boundaries.
+- Is there a plausible explanation NOT covered by any sibling or catch-all? If yes, add it.
 
 ### Phase 4: Evidence Gathering
 
-For EACH hypothesis, seek REFUTING evidence (falsification-first):
-1. Define what test would REFUTE this hypothesis
-2. Execute the most discriminating test first (one that separates hypotheses)
-3. Call `add_evidence` with type `supports`, `refutes`, or `neutral`
-4. Fan out subagents to investigate from independent angles
+For EACH hypothesis, seek REFUTING evidence (falsification-first per Popper):
+
+1. Define what observation would REFUTE this hypothesis.
+2. Execute the most discriminating test first (one whose outcome is predicted by one sibling but not the others — Platt's strong inference).
+3. Call `add_evidence` with type `supports`, `refutes`, or `neutral`.
+4. Fan out subagents to investigate from independent data sources.
 
 Key principles:
-- Seek evidence that DISCRIMINATES between hypotheses, not just confirms one
-- Test from multiple independent data sources (logs, metrics, code, reproduction)
-- A strong test is one whose outcome is predicted by ONE hypothesis but NOT its siblings
+- Seek evidence that DISCRIMINATES between hypotheses, not just confirms a favored one.
+- Triangulate from multiple independent sources (records, measurements, observations, controlled tests).
+- A strong test predicts different outcomes for different hypotheses.
 
-### Phase 5: Eliminate and Corroborate
+### Phase 5: Eliminate, Set-aside, and Corroborate
 
-- Call `eliminate_hypothesis` when 2+ refuting evidence with documented reasoning
-- Call `score_hypothesis` to track relative confidence
-- Drill deeper: call `decompose` on surviving hypotheses to test sub-causes
-- Call `corroborate_hypothesis` only when:
-  1. You can REPRODUCE the issue by triggering this cause
-  2. All competing hypotheses were eliminated with evidence
-  3. The cause preceded the failure in time (temporality)
-  4. The cause explains THIS specific failure pattern (specificity)
-- Corroboration is provisional retention (Popper), not verification — the verdict can be reopened by later refuting evidence.
+- Call `eliminate_hypothesis` when refuting evidence is decisive. Bind the verdict to the supporting refuting-evidence ids so the audit trail is preserved.
+- Call `set_out_of_scope` when a branch is plausible but outside the scope of this investigation. Distinct from elimination — it sets a branch aside without claiming refutation.
+- Call `score_hypothesis` to track relative confidence among live siblings.
+- Drill deeper: call `decompose` on surviving hypotheses to test sub-causes.
+- Call `corroborate_hypothesis` when the hypothesis has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification — the verdict can be reopened by later refuting evidence.
+
+The session resolves only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope). Multiple corroborated branches are valid: many real-world outcomes have compound causes.
 
 ### Phase 6: Verification
 
 Before declaring done:
-- Can you reproduce the failure?
-- Does the fix actually resolve it?
-- Are there contributing factors beyond the root cause?
+- Does the surviving hypothesis (or set of hypotheses) account for all the relevant observations?
+- Have you considered whether multiple factors jointly produced the outcome?
+- Could new evidence reopen the verdict?
 
 ## Visualization
 
 The tree is visible in real-time at `http://localhost:6274`. Open it to see:
-- Color-coded hypothesis statuses (blue=pending, yellow=exploring, red=eliminated, green=corroborated)
+- Color-coded hypothesis statuses (blue=pending, yellow=exploring, red=eliminated, green=corroborated, purple=out-of-scope)
 - Evidence attached to each node
 - Path highlighting from root to selected hypothesis
 
 ## Tips
 
-- Never investigate linearly — always maintain multiple competing hypotheses
-- If stuck (stagnation), apply devil's advocate: assume your LOWEST-scored hypothesis is correct
-- Deep decompositions (depth 3+) risk fragmenting — ask if the parent is testable directly
-- Always seek the CRUCIAL EXPERIMENT: one observation that gives different results per hypothesis
+- Never investigate linearly — always maintain multiple competing hypotheses (Chamberlin's method of multiple working hypotheses).
+- If stuck (stagnation), apply devil's advocate: assume your LOWEST-scored hypothesis is correct and look for evidence that would corroborate it.
+- Deep decompositions (depth 3+) risk fragmenting — ask if the parent is directly testable instead.
+- Always seek the CRUCIAL EXPERIMENT: one observation that gives different results under different hypotheses.

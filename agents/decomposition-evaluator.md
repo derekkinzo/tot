@@ -22,19 +22,19 @@ Look for double-coverage between siblings:
 
 - **Subset overlap**: is any child a strict subset of another? If so, it is not a peer — it is a sub-branch and should live below.
 - **Domain co-occurrence**: if two children describe causes that genuinely co-instantiate (e.g. an INUS cluster), that is acknowledged overlap and a reason to consider a combined "A and B" hypothesis as a first-class child rather than to redraw boundaries.
-- **Causal-cascade overlap**: two children at different points in the same causal chain ("disk full" and "write failed") collapse or re-axis to one branch.
+- **Causal-cascade overlap**: two children at different points in the same causal chain (an upstream cause and its downstream symptom) collapse, or are re-axised to one branch.
 
 ## Check 2: Coverage
 
 Look for what the decomposition might miss:
 
 - **Adversarial scenario**: invent a plausible cause for the parent symptom. Does it land in some child? If not, name the gap.
-- **Common residuals**: external dependencies, configuration drift, human action, time-based triggers, multi-cause interactions.
+- **Common residuals**: external dependencies, environmental drift, human action, time-based triggers, multi-cause interactions, observer or measurement effects.
 - **Catch-all**: when the cause space is open-ended, an explicit "other / unknown" branch is preferable to claiming closure. Catch-alls are first-class children, not a fallback to apologise for.
 
 ## Check 3: Level of abstraction
 
-Children should sit at one consistent altitude. Mixing "network layer fault" with "TLS handshake timeout on port 443" indicates uneven granularity. Children should split the parent along one dimension (layer, lifecycle phase, component, actor) — not a mix.
+Children should sit at one consistent altitude. Mixing a broad category with a specific instance of that category indicates uneven granularity (e.g., a class and one of its members at the same level). Children should split the parent along one dimension (mechanism, lifecycle phase, location, actor, time, population) — not a mix.
 
 ## Check 4: Testability
 

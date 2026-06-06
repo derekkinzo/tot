@@ -16,7 +16,7 @@ Five canons for inferring causal connection from observed regularities.
 - **Applies when**: Multiple positive cases of the effect are available.
 - **Strength**: Weak. Cannot rule out unobserved common factors. Suggests
   correlation, not causation.
-- **Example**: Three failed deployments all used the same library version.
+- **Example**: Three patients with the same condition all consumed water from the same well; or three failed runs all used the same component version.
 
 ### Method of Difference
 - **Definition**: If an instance where the phenomenon occurs and an instance
@@ -25,8 +25,7 @@ Five canons for inferring causal connection from observed regularities.
 - **Applies when**: A controlled comparison between presence and absence is
   possible.
 - **Strength**: Strong. Closest of Mill's methods to a controlled experiment.
-- **Example**: Same code, same config, only difference is the rollback flag —
-  the flag is the cause of the divergent outcome.
+- **Example**: Two trials identical in every respect except one variable diverge in outcome — that variable is the cause of the divergence.
 
 ### Joint Method of Agreement and Difference
 - **Definition**: If two or more instances in which the phenomenon occurs
@@ -35,7 +34,7 @@ Five canons for inferring causal connection from observed regularities.
 - **Applies when**: Both positive and negative cases are observable.
 - **Strength**: Stronger than Agreement alone, weaker than Difference under
   controlled conditions.
-- **Example**: All failing hosts have the patch; all healthy hosts lack it.
+- **Example**: All affected cases share an exposure that all unaffected cases lack.
 
 ### Method of Residues
 - **Definition**: Subtract from a phenomenon the part known by prior induction
@@ -43,8 +42,7 @@ Five canons for inferring causal connection from observed regularities.
   remaining antecedents.
 - **Applies when**: Some causal contributions are already established.
 - **Strength**: Conditional on the prior inductions being correct.
-- **Example**: Latency rose 200ms; 150ms is explained by the known GC
-  regression, so the residual 50ms must be explained by something else.
+- **Example**: An observed rise of 200 units; 150 are explained by a known prior contributor; the residual 50 must be explained by something else.
 
 ### Method of Concomitant Variation
 - **Definition**: Whatever phenomenon varies in any manner whenever another
@@ -52,7 +50,7 @@ Five canons for inferring causal connection from observed regularities.
   or connected through some fact of causation.
 - **Applies when**: Variables are continuous and co-vary.
 - **Strength**: Useful when removal is impossible. Vulnerable to confounding.
-- **Example**: Error rate rises monotonically with request volume.
+- **Example**: The magnitude of the effect rises monotonically with the level of the candidate cause.
 
 ## 2. Popper Falsificationism (Popper, 1959)
 
