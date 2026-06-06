@@ -12,8 +12,9 @@
  *   create <problem>              - Create a new tree
  *   decompose <id> <child1> | <child2> | ...   - Decompose into children
  *   evidence <id> supports|refutes|neutral <content>  - Add evidence
- *   eliminate <id> <reason>       - Eliminate hypothesis
- *   confirm <id> <reason>         - Confirm hypothesis
+ *   eliminate <id> <reason>       - Eliminate hypothesis (refuted)
+ *   corroborate <id> <reason>     - Mark hypothesis as corroborated (provisionally retained)
+ *   oos <id> <reason>             - Set hypothesis out-of-scope (terminal, no refutation)
  *   score <id> <0-1>             - Score hypothesis
  *   add <parentId> <content>     - Add single hypothesis
  *   tree                          - Show tree (compact)
@@ -159,13 +160,22 @@ async function handleCommand(input: string) {
         console.log(`  ✓ Eliminated`);
         break;
       }
-      case 'confirm': {
+      case 'corroborate': case 'confirm': {
         const id = resolveId(parts[1]);
-        if (!id) { console.log('  Usage: confirm <id|0|1|2...> <reason>'); break; }
-        const reason = parts.slice(2).join(' ') || 'Confirmed';
-        const result = await callTool('confirm_hypothesis', { hypothesisId: id, reason });
+        if (!id) { console.log('  Usage: corroborate <id|0|1|2...> <reason>'); break; }
+        const reason = parts.slice(2).join(' ') || 'Corroborated';
+        const result = await callTool('corroborate_hypothesis', { hypothesisId: id, reason });
         if (result.isError) { console.log(`  Error: ${result.text}`); break; }
-        console.log(`  ✓ Confirmed!`);
+        console.log(`  ✓ Corroborated`);
+        break;
+      }
+      case 'oos': case 'out-of-scope': {
+        const id = resolveId(parts[1]);
+        if (!id) { console.log('  Usage: oos <id|0|1|2...> <reason>'); break; }
+        const reason = parts.slice(2).join(' ') || 'Set aside';
+        const result = await callTool('set_out_of_scope', { hypothesisId: id, reason });
+        if (result.isError) { console.log(`  Error: ${result.text}`); break; }
+        console.log(`  ✓ Out of scope`);
         break;
       }
       case 'score': {
@@ -222,8 +232,9 @@ async function handleCommand(input: string) {
     create <problem>                    - Create new tree
     decompose <id|.> A | B | C          - MECE decompose (pipe-separated)
     evidence <id|0> supports <text>     - Add evidence
-    eliminate <id|0> <reason>           - Eliminate hypothesis
-    confirm <id|0> <reason>             - Confirm hypothesis
+    eliminate <id|0> <reason>           - Eliminate hypothesis (refuted)
+    corroborate <id|0> <reason>         - Mark hypothesis as corroborated
+    oos <id|0> <reason>                 - Set hypothesis out-of-scope
     score <id|0> <0-1>                  - Set confidence score
     add <id|.> <content>                - Add single hypothesis
     tree [full|compact]                 - Show tree
