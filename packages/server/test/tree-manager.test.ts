@@ -397,6 +397,37 @@ describe('TreeManager', () => {
       expect(a2.conclusion?.verdict).toBe('corroborated');
     });
 
+    it('cascades demotion up corroborated ancestors when a corroborated child is refuted', () => {
+      // The corroboration gate requires every child terminal at the moment
+      // of the verdict. When a corroborated descendant later demotes via
+      // refute, the ancestor's verdict is no longer earned — the demote
+      // must climb the corroborated spine until it reaches a non-
+      // corroborated parent.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      const [a1, a2] = tm.decompose(a.id, ['A1', 'A2']);
+      tm.addEvidence(a1.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a1.id, 'gone');
+      tm.addEvidence(a2.id, 'supports', 'good');
+      tm.corroborateHypothesis(a2.id, 'A2 wins');
+      tm.addEvidence(a.id, 'supports', 'good');
+      tm.corroborateHypothesis(a.id, 'A wins via A2');
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'gone');
+      expect(session.status).toBe('resolved');
+      expect(a.status).toBe('corroborated');
+      expect(a2.status).toBe('corroborated');
+      // Refute A2 — A2 demotes, and A's verdict is no longer earned, so A
+      // also demotes. Session reopens.
+      tm.addEvidence(a2.id, 'refutes', 'counter-instance');
+      expect(a2.status).toBe('exploring');
+      expect(a.status).toBe('exploring');
+      expect(session.status).toBe('open');
+      // Audit trail intact on both ancestors.
+      expect(a.conclusion?.verdict).toBe('corroborated');
+      expect(a2.conclusion?.verdict).toBe('corroborated');
+    });
+
     it('rejects supports/neutral evidence on a corroborated leaf', () => {
       const { root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['A', 'B']);

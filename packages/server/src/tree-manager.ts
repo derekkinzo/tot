@@ -232,25 +232,18 @@ export class TreeManager extends EventEmitter {
     hypothesis.evidence.push(evidence);
     hypothesis.metadata.updatedAt = now;
 
-    // Three status-change paths reset the stagnation counter; everything
-    // else just bumps it. A refute against a corroborated leaf demotes the
-    // leaf to 'exploring' (the historical conclusion stays in the audit
-    // trail) and, when the session was terminal, reopens it. Both
-    // terminal states reflect a claimed closure that fresh refutation
-    // challenges.
+    // A refute against a corroborated hypothesis demotes it to 'exploring'
+    // (the historical conclusion stays in the audit trail) and, when the
+    // session was terminal, reopens it. Both terminal states reflect a
+    // claimed closure that fresh refutation challenges. The demotion
+    // cascades up corroborated ancestors because corroboration's contract
+    // requires every child to be terminal — once a descendant becomes
+    // non-terminal, the ancestor's verdict is no longer earned.
     const session = this.sessions.get(hypothesis.sessionId);
-    const reopensSession =
-      type === 'refutes' &&
-      hypothesis.status === 'corroborated' &&
-      Boolean(session) &&
-      session!.status !== 'open';
-    const demotesLeaf = type === 'refutes' && hypothesis.status === 'corroborated';
+    const demotesCorroborated = type === 'refutes' && hypothesis.status === 'corroborated';
+    const reopensSession = demotesCorroborated && session !== undefined && session.status !== 'open';
 
-    if (hypothesis.status === 'pending') {
-      hypothesis.status = 'exploring';
-      this.mutationsSinceStatusChange = 0;
-      this.touch();
-    } else if (demotesLeaf) {
+    if (hypothesis.status === 'pending' || demotesCorroborated) {
       hypothesis.status = 'exploring';
       this.mutationsSinceStatusChange = 0;
       this.touch();
@@ -261,10 +254,14 @@ export class TreeManager extends EventEmitter {
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
+    if (demotesCorroborated) {
+      this.demoteCorroboratedAncestors(hypothesis);
+    }
+
     if (reopensSession) {
-      session!.status = 'open';
-      session!.completedAt = undefined;
-      this.emit('event', { type: 'session-reopened', sessionId: session!.id } satisfies TreeEvent);
+      session.status = 'open';
+      session.completedAt = undefined;
+      this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
     }
 
     this.setCurrent(hypothesis.sessionId);
@@ -359,8 +356,10 @@ export class TreeManager extends EventEmitter {
     }
 
     // Decomposition is a structural commitment: the parent's truth is
-    // determined by the resolution of its children, so the parent cannot be
-    // corroborated until each child is terminal.
+    // determined by the resolution of its children. Direct children must
+    // be terminal; pending grandchildren are tolerated when they hide
+    // under a pruned intermediate (elimination does not cascade, so the
+    // hidden work is moot under the closure rule and stays moot here).
     for (const childId of hypothesis.children) {
       const child = this.hypotheses.get(childId);
       if (child && !isTerminal(child.status)) {
@@ -736,6 +735,23 @@ export class TreeManager extends EventEmitter {
       return false;
     }
     return true;
+  }
+
+  /**
+   * Walks up corroborated ancestors and demotes each to 'exploring'. The
+   * corroboration gate requires every child to be terminal at the moment
+   * of the verdict; once a descendant becomes non-terminal (via demote on
+   * refute), the ancestor's verdict is no longer earned. The historical
+   * conclusion record stays as audit trail.
+   */
+  private demoteCorroboratedAncestors(start: Hypothesis): void {
+    let cursor = start.parentId ? this.hypotheses.get(start.parentId) : undefined;
+    while (cursor && cursor.status === 'corroborated') {
+      cursor.status = 'exploring';
+      cursor.metadata.updatedAt = new Date().toISOString();
+      this.emit('event', { type: 'hypothesis-updated', hypothesis: cursor } satisfies TreeEvent);
+      cursor = cursor.parentId ? this.hypotheses.get(cursor.parentId) : undefined;
+    }
   }
 
   /**
