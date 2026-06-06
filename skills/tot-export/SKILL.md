@@ -25,9 +25,9 @@ Export a completed (or in-progress) hypothesis tree as a structured Markdown rep
 
 ## Hypothesis Tree
 
-### Confirmed Root Cause
+### Corroborated Hypotheses
 - **{hypothesis content}** (confidence: {score})
-  - Reason: {confirmation reason}
+  - Reason: {corroboration reason}
   - Evidence:
     - [supports] {evidence content}
     - [supports] {evidence content}
@@ -44,8 +44,9 @@ Export a completed (or in-progress) hypothesis tree as a structured Markdown rep
 {chronological list of key evidence gathered}
 
 ## Methodology
-Investigation used Tree of Thought reasoning with MECE decomposition.
-{N} hypotheses explored, {M} eliminated with evidence, {K} confirmed.
+Investigation used Tree of Thought reasoning with sibling-level decomposition.
+{N} hypotheses explored, {M} eliminated with evidence, {K} corroborated.
+Corroboration is provisional retention pending falsification (Popper).
 ```
 
 3. Present the report to the user. Offer to:

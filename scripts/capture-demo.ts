@@ -137,8 +137,8 @@ async function main() {
   await sleep(1500);
   await capture(page);
 
-  // Confirm root cause
-  await callTool('confirm_hypothesis', { hypothesisId: l2[2], reason: 'Health endpoint renamed /health → /healthz in v2.1, gateway config not updated' });
+  // Corroborate root cause
+  await callTool('corroborate_hypothesis', { hypothesisId: l2[2], reason: 'Health endpoint renamed /health → /healthz in v2.1, gateway config not updated' });
   await sleep(1500);
   await capture(page);
 

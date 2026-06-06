@@ -8,7 +8,7 @@ import type { Evidence, Hypothesis, Session } from './types.js';
 export interface SessionIndex {
   id: string;
   problem: string;
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   filePath: string;
   nodeCount: number; // estimated from line count
@@ -88,6 +88,26 @@ export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypo
 }
 
 /**
+ * True iff the subtree rooted at rootId contains a corroborated hypothesis
+ * on a non-pruned lineage. Walks the tree from the root, skipping descendants
+ * of any eliminated or out-of-scope ancestor. Mirrors the engine's
+ * subtreeContainsCorroborated walker so replay agrees with the live decision.
+ */
+function subtreeContainsCorroborated(rootId: string, sessionHypotheses: Hypothesis[]): boolean {
+  const byId = new Map(sessionHypotheses.map((h) => [h.id, h] as const));
+  const stack: string[] = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    const node = byId.get(id);
+    if (!node) continue;
+    if (node.status === 'eliminated' || node.status === 'out-of-scope') continue;
+    if (node.status === 'corroborated') return true;
+    for (const childId of node.children) stack.push(childId);
+  }
+  return false;
+}
+
+/**
  * Scans session files and returns lightweight metadata without replaying events.
  * Reads only the first line (session-created event) + counts lines for nodeCount estimate.
  */
@@ -115,17 +135,50 @@ export function scanSessions(dataDir: string): SessionIndex[] {
 
       const session = firstEntry.payload as Session;
 
-      // Determine final status by scanning for session-completed event
-      let status = session.status;
-      for (let i = lines.length - 1; i >= 1; i--) {
+      // Determine final status by tracking the last session-level event.
+      // session-reopened wins over an earlier session-completed; the
+      // session-completed payload's terminalStatus disambiguates resolved
+      // from abandoned, and falls back to a pruning-aware spine walk if
+      // the field is missing.
+      let status: SessionIndex['status'] = session.status;
+      let lastSessionEvent: 'completed' | 'reopened' | null = null;
+      let lastTerminalStatus: 'resolved' | 'abandoned' | undefined;
+      const latestHypothesis = new Map<string, Hypothesis>();
+      for (let i = 1; i < lines.length; i++) {
         try {
           const entry: JournalEntry = JSON.parse(lines[i]);
           if (entry.type === 'session-completed') {
-            status = 'completed';
-            break;
+            lastSessionEvent = 'completed';
+            lastTerminalStatus = (entry.payload as { terminalStatus?: 'resolved' | 'abandoned' }).terminalStatus;
+          } else if (entry.type === 'session-reopened') {
+            lastSessionEvent = 'reopened';
+            lastTerminalStatus = undefined;
+          } else if (entry.type === 'hypothesis-added' || entry.type === 'hypothesis-updated') {
+            const h = entry.payload as Hypothesis;
+            latestHypothesis.set(h.id, h);
           }
         } catch {
           // skip corrupt lines
+        }
+      }
+      if (lastSessionEvent === 'reopened') {
+        status = 'open';
+      } else {
+        const reachedTerminal =
+          lastSessionEvent === 'completed' ||
+          (lastSessionEvent === null && status !== 'open');
+        if (reachedTerminal) {
+          if (lastTerminalStatus) {
+            status = lastTerminalStatus;
+          } else {
+            // Discriminate by the hypothesis tree's final state. The walker
+            // skips descendants of pruned ancestors so it agrees with the
+            // engine's closure choice: only a corroborated hypothesis on a
+            // non-pruned lineage counts as survival.
+            const sessionHypotheses = Array.from(latestHypothesis.values());
+            const hasCorroborated = subtreeContainsCorroborated(session.rootNodeId, sessionHypotheses);
+            status = hasCorroborated ? 'resolved' : 'abandoned';
+          }
         }
       }
 
@@ -174,7 +227,11 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
   }
 }
 
-function replayEntry(entry: JournalEntry, sessions: Session[], hypotheses: Hypothesis[]): void {
+function replayEntry(
+  entry: JournalEntry,
+  sessions: Session[],
+  hypotheses: Hypothesis[],
+): void {
   switch (entry.type) {
     case 'session-created': {
       sessions.push(entry.payload as Session);
@@ -198,11 +255,19 @@ function replayEntry(entry: JournalEntry, sessions: Session[], hypotheses: Hypot
       break;
     }
     case 'session-completed': {
+      const payload = entry.payload as { sessionId: string; terminalStatus: 'resolved' | 'abandoned' };
+      const s = sessions.find((sess) => sess.id === payload.sessionId);
+      if (!s) break;
+      s.status = payload.terminalStatus;
+      s.completedAt = entry.timestamp;
+      break;
+    }
+    case 'session-reopened': {
       const { sessionId } = entry.payload as { sessionId: string };
       const s = sessions.find((sess) => sess.id === sessionId);
       if (s) {
-        s.status = 'completed';
-        s.completedAt = entry.timestamp;
+        s.status = 'open';
+        s.completedAt = undefined;
       }
       break;
     }

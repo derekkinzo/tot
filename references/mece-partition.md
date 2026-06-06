@@ -23,6 +23,13 @@ When a set of categories, hypotheses, or causes is described as MECE, the claim
 is that those categories form (or approximate) a partition of the relevant
 universe.
 
+**Limit of strict partition for hypothesis sets.** Strict MECE is the wrong
+target for causal hypothesis sets — Heuer (2005) explicitly relaxed it for
+ACH, and Mackie's INUS account treats real causes as disjunctions of
+non-exclusive conjunctions. See `mece-limits.md` for the cases where the
+underlying property still applies (sibling-level structuring) and where the
+partition contract should be replaced with independence + comprehensiveness.
+
 ## 3. Cognitive Provenance
 
 The discipline of carving a hypothesis space into disjoint, exhaustive

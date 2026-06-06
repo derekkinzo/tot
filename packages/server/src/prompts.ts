@@ -2,84 +2,87 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 export function registerPrompts(server: McpServer): void {
-  server.registerPrompt('debug-mece', {
-    title: 'MECE Debugging',
-    description: 'Systematically debug a problem using MECE (Mutually Exclusive, Collectively Exhaustive) decomposition. Creates a hypothesis tree and guides structured elimination.',
+  server.registerPrompt('tot-investigate', {
+    title: 'Tree of Thought Investigation',
+    description: 'Systematically investigate a problem using a hypothesis tree grounded in falsificationism and eliminative induction. Creates a tree, decomposes into competing hypotheses, and guides structured elimination and corroboration.',
     argsSchema: {
-      problem: z.string().describe('The problem to debug (e.g., "API returns 500 for 5% of requests")'),
+      problem: z.string().describe('The problem, question, or decision to investigate'),
     },
   }, ({ problem }) => ({
     messages: [{
       role: 'user',
       content: {
         type: 'text',
-        text: buildDebugPrompt(problem),
+        text: buildInvestigatePrompt(problem),
       },
     }],
   }));
 }
 
-function buildDebugPrompt(problem: string): string {
-  return `Debug this problem using structured MECE reasoning with the tot-mcp tools:
+function buildInvestigatePrompt(problem: string): string {
+  return `Investigate this problem using a structured hypothesis tree with the tot-mcp tools:
 
 **Problem:** ${problem}
 
 ## Methodology
 
-Follow this systematic approach:
+This protocol applies wherever rival hypotheses must be weighed against evidence — root cause analysis, differential diagnosis, scientific inquiry, intelligence analysis, or any multi-factor decision. Follow this systematic approach:
 
 ### Step 1: Create the tree
 Call \`create_tree\` with the problem statement.
 
-### Step 2: Decompose into MECE hypotheses
-Call \`decompose\` to split the problem into 2-5 **mutually exclusive, collectively exhaustive** categories.
+### Step 2: Decompose into competing hypotheses
+Call \`decompose\` to split the problem into 2-5 sibling hypotheses that are comparable along a single framing axis.
 
-Good decomposition strategies:
-- **By system layer**: network, application, data, infrastructure
-- **By time**: before deploy, during deploy, after deploy
-- **By component**: service A, service B, database, cache
-- **By causality**: code bug, configuration, data issue, external dependency
+Common framing axes (pick one that suits the domain):
+- **By mechanism**: distinct causal pathways that could produce the same effect
+- **By location or layer**: where in the system the cause sits
+- **By stage or time**: phase of the process or moment in time
+- **By actor or population**: who or what is affected, or who is acting
+- **By category**: type of object, condition, or class of agent
 
-Rules:
-- Each hypothesis must be DISTINCT (no overlap between categories)
-- Together they must COVER ALL possibilities (nothing missed)
-- If unsure about exhaustiveness, add an "Other/Unknown" catch-all
-- 2-5 hypotheses per level is ideal
+Aim for the underlying set-partition property — overlap is acceptable when the domain genuinely co-instantiates multiple factors:
+- **Distinct siblings**: each hypothesis covers a different possibility unless co-occurrence is real (Mackie's INUS conditions describe this).
+- **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain.
+- **2-5 siblings per level** keeps the tree legible.
 
 ### Step 3: Gather evidence systematically
 For each hypothesis, call \`add_evidence\` with observations that either:
-- **support** the hypothesis (makes it more likely)
-- **refute** the hypothesis (makes it less likely)
-- **neutral** (relevant but doesn't distinguish)
+- **support** the hypothesis (raises its standing)
+- **refute** the hypothesis (falsifies or weakens it)
+- **neutral** (relevant but not discriminating)
 
-After each piece of evidence, consider: does this also affect sibling hypotheses?
+After each piece of evidence, ask: does this also bear on sibling hypotheses?
 
-### Step 4: Eliminate dead ends
-When evidence clearly refutes a hypothesis, call \`eliminate_hypothesis\` with the reason.
-Move on — don't spend more time on eliminated branches.
+### Step 4: Eliminate refuted branches
+When refuting evidence is decisive, call \`eliminate_hypothesis\` with the reason and the supporting refuting-evidence ids. Eliminated branches stop drawing investigation effort.
 
-### Step 5: Go deeper
-For the remaining hypotheses, call \`decompose\` again to create sub-hypotheses.
-Repeat the evidence → eliminate cycle at each level.
+To set a branch aside without claiming refutation, use \`set_out_of_scope\` instead — appropriate when the branch is plausible but outside the scope of this investigation.
 
-### Step 6: Confirm root cause
-When you have strong evidence pointing to a specific cause, call \`confirm_hypothesis\`.
-Ask yourself: does this explain ALL observed symptoms?
+### Step 5: Go deeper on surviving branches
+For remaining live branches, call \`decompose\` again to create sub-hypotheses. Repeat the evidence → eliminate cycle at each level.
+
+### Step 6: Corroborate surviving hypotheses
+When a hypothesis has survived the refutation tests applied to it, call \`corroborate_hypothesis\`. Per Popper, corroboration is provisional retention — the verdict can be reopened by later refuting evidence. Ask: does this account for all the relevant observations?
+
+The session resolves only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope).
 
 ## Key Principles
 
-- **Never explore a single path linearly.** Always decompose first, then investigate.
+- **Never pursue a single path linearly.** Decompose first, then investigate competing hypotheses in parallel (Chamberlin's method of multiple working hypotheses).
+- **Prefer discriminating evidence.** A test that separates two hypotheses is worth more than a test that confirms a favored one (Platt's strong inference).
 - **Eliminate broadly before going deep.** Rule out entire categories before drilling into one.
-- **Track your confidence.** Use \`score_hypothesis\` to maintain relative rankings.
-- **Watch for stagnation.** If you're not making progress, restructure your decomposition.
-- **Evidence must be discriminating.** Prefer evidence that distinguishes between hypotheses over evidence that confirms what you already suspect.
+- **Track confidence.** Use \`score_hypothesis\` to maintain relative rankings among live siblings.
+- **Watch for stagnation.** If progress stalls, restructure the decomposition or relax the framing axis.
+- **Allow multiple survivors.** Many real-world causes are compound (Mackie's INUS conditions); corroborating one hypothesis does not refute the others.
 
 ## Anti-patterns to avoid
 
 - Going down a rabbit hole on the first plausible hypothesis
-- Ignoring evidence that contradicts your favorite theory
-- Decomposing into overlapping categories (e.g., "code bug" and "null pointer" are not exclusive)
-- Stopping investigation after finding one issue without checking if it explains everything
+- Ignoring evidence that contradicts a favored theory (confirmation bias)
+- Decomposing into overlapping siblings (e.g., a category and one of its instances at the same level)
+- Stopping investigation after finding one factor without checking that it explains everything observed
+- Treating corroboration as proof — it is provisional retention, not verification
 
-Begin by calling \`create_tree\` with the problem statement, then \`decompose\` into your initial MECE hypotheses.`;
+Begin by calling \`create_tree\` with the problem statement, then \`decompose\` into your initial competing hypotheses.`;
 }

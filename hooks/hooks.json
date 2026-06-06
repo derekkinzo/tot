@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ls .tot/sessions/*.jsonl 2>/dev/null | head -1 | grep -q . && node -p \"const fs=require('fs'),p=require('path');const d='.tot/sessions';const files=fs.readdirSync(d).filter(f=>f.endsWith('.jsonl'));const active=files.filter(f=>{const lines=fs.readFileSync(p.join(d,f),'utf8').split('\\n').filter(Boolean);const last=JSON.parse(lines[lines.length-1]);return last.payload?.status==='active'||lines.some(l=>JSON.parse(l).type==='session-created'&&!lines.some(l2=>JSON.parse(l2).type==='session-completed'))});if(active.length)console.log('[tot-mcp] Active reasoning session detected. Use /tot-inspect to view or /tot-reason to continue.')\" 2>/dev/null || true"
+            "command": "ls .tot/sessions/*.jsonl 2>/dev/null | head -1 | grep -q . && node -p \"const fs=require('fs'),p=require('path');const d='.tot/sessions';const files=fs.readdirSync(d).filter(f=>f.endsWith('.jsonl'));const active=files.filter(f=>{const lines=fs.readFileSync(p.join(d,f),'utf8').split('\\n').filter(Boolean);let open=false;for(const l of lines){try{const t=JSON.parse(l).type;if(t==='session-created'||t==='session-reopened')open=true;else if(t==='session-completed')open=false;}catch{}}return open;});if(active.length)console.log('[tot-mcp] Active reasoning session detected. Use /tot-inspect to view or /tot-reason to continue.')\" 2>/dev/null || true"
           }
         ]
       }

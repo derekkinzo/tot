@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -7,7 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
-import { loadActiveSessions } from '../src/persistence.js';
+import { loadActiveSessions, scanSessions } from '../src/persistence.js';
 
 function parseResult(result: any): any {
   const text = result.content?.find((c: any) => c.type === 'text')?.text;
@@ -58,6 +58,10 @@ describe('Persistence Roundtrip', () => {
     await c1.callTool({
       name: 'score_hypothesis',
       arguments: { hypothesisId: childIds[0], score: 0.7 },
+    });
+    await c1.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'B is ruled out' },
     });
     await c1.callTool({
       name: 'eliminate_hypothesis',
@@ -128,7 +132,7 @@ describe('Persistence Roundtrip', () => {
     require('fs').writeFileSync(filePath, corrupted);
 
     // Should load without throwing
-    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    const { sessions } = loadActiveSessions(tempDir);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe(sessionId);
   });
@@ -177,24 +181,213 @@ describe('Persistence Roundtrip', () => {
     expect(existsSync(gitignorePath)).toBe(false);
   });
 
-  it('confirmed session persists as completed', async () => {
+  it('scanSessions honors a later session-reopened over an earlier session-completed', () => {
+    const sessionId = '00000000-0000-4000-8000-eeeeeeeeeeff';
+    const rootId = '00000000-0000-4000-8000-ffffffffffaa';
+    const ts = '2024-03-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Reopened test', rootNodeId: rootId,
+        status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
+        status: 'corroborated', score: null, evidence: [],
+        conclusion: { verdict: 'corroborated', reason: 'survived', timestamp: ts, refutingEvidenceIds: [] },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+      { timestamp: ts, type: 'session-completed', payload: { sessionId, terminalStatus: 'resolved' } },
+      { timestamp: ts, type: 'session-reopened', payload: { sessionId } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('open');
+  });
+
+  it('terminal session with mix of eliminated and out-of-scope replays as abandoned', async () => {
+    // No corroborated leaf survived, so the closure has no answer to point at.
+    // Eliminated and out-of-scope are both pruning verdicts; the
+    // discriminator must classify the session as abandoned, not resolved.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Mixed pruning test' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: childIds[1], reason: 'aside' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
+  it('buried-corroborated under a pruned top-level branch round-trips as abandoned', async () => {
+    // Engine closes the session as 'abandoned' (the only corroborated leaf
+    // sits under an out-of-scope ancestor and so does not count as survival
+    // on a non-pruned lineage). The wire event records terminalStatus.
+    // Replay must defer to the wire AND the post-replay discriminator must
+    // not flat-scan and silently flip the verdict back to 'resolved'.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Buried corroboration test' },
+    }));
+    const decompA = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    const decompA1 = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'supports', content: 'survives' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'A1' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: decompA.childIds[0], reason: 'aside' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: decompA.childIds[1], reason: 'aside' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
+  it('abandoned session round-trips: every-eliminated journal replays as abandoned, not resolved', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Abandon test' },
+    }));
+    await client.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: rootId, type: 'refutes', content: 'no' },
+    });
+    await client.callTool({
+      name: 'eliminate_hypothesis',
+      arguments: { hypothesisId: rootId, reason: 'dead' },
+    });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
+  it('eliminate-driven resolution round-trips as resolved', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Resolve via elimination' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('resolved');
+  });
+
+  it('set_out_of_scope-driven closure round-trips', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Resolve via out-of-scope' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: childIds[1], reason: 'aside' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('resolved');
+  });
+
+  it('reopen-on-refute round-trips: session-reopened journal restores open status', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Reopen test' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
+    // Session is now resolved. Refute the corroborated leaf to reopen.
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'counter-instance' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('open');
+  });
+
+  it('session-completed journal entry carries terminalStatus on disk', async () => {
+    // The terminalStatus field on session-completed must be persisted, not
+    // only emitted on SSE. Replay paths can then trust the explicit value
+    // instead of reconstructing terminal status from hypothesis state.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Wire test' },
+    }));
+    await client.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: rootId, type: 'supports', content: 'yes' },
+    });
+    await client.callTool({
+      name: 'corroborate_hypothesis',
+      arguments: { hypothesisId: rootId, reason: 'survives' },
+    });
+    await cleanup();
+
+    const files = require('fs').readdirSync(tempDir).filter((f: string) => f.endsWith('.jsonl'));
+    const content = readFileSync(join(tempDir, files[0]), 'utf-8');
+    const lines = content.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const completed = lines.find((l) => l.type === 'session-completed');
+    expect(completed?.payload?.terminalStatus).toBe('resolved');
+  });
+
+  it('corroborated session persists as resolved', async () => {
     const { client, cleanup } = await createServerWithClient(tempDir);
 
     const { rootId } = parseResult(await client.callTool({
       name: 'create_tree',
-      arguments: { problem: 'Confirm test' },
+      arguments: { problem: 'Corroborate test' },
     }));
     await client.callTool({
       name: 'add_evidence',
       arguments: { hypothesisId: rootId, type: 'supports', content: 'proof' },
     });
     await client.callTool({
-      name: 'confirm_hypothesis',
+      name: 'corroborate_hypothesis',
       arguments: { hypothesisId: rootId, reason: 'Root cause found' },
     });
     await cleanup();
 
     const { sessions } = loadActiveSessions(tempDir);
-    expect(sessions[0].status).toBe('completed');
+    expect(sessions[0].status).toBe('resolved');
   });
 });

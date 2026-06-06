@@ -18,7 +18,8 @@ type Action =
   | { type: 'clear-recent' }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
   | { type: 'session-created'; session: Session }
-  | { type: 'session-completed'; sessionId: string };
+  | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
+  | { type: 'session-reopened'; sessionId: string };
 
 function reducer(state: TreeState, action: Action): TreeState {
   switch (action.type) {
@@ -55,7 +56,13 @@ function reducer(state: TreeState, action: Action): TreeState {
     }
     case 'session-completed': {
       if (!state.session || state.session.id !== action.sessionId) return state;
-      return { ...state, session: { ...state.session, status: 'completed' } };
+      return { ...state, session: { ...state.session, status: action.terminalStatus } };
+    }
+    case 'session-reopened': {
+      if (!state.session || state.session.id !== action.sessionId) return state;
+      const next = { ...state.session, status: 'open' as const };
+      delete next.completedAt;
+      return { ...state, session: next };
     }
     case 'clear-recent':
       return { ...state, recentlyChanged: new Set(), lastAddedId: null };
@@ -154,7 +161,10 @@ export function useTreeStream(projectDir?: string) {
             dispatch({ type: 'evidence-added', hypothesisId: data.hypothesisId, evidence: data.evidence });
             break;
           case 'session-completed':
-            dispatch({ type: 'session-completed', sessionId: data.sessionId });
+            dispatch({ type: 'session-completed', sessionId: data.sessionId, terminalStatus: data.terminalStatus });
+            break;
+          case 'session-reopened':
+            dispatch({ type: 'session-reopened', sessionId: data.sessionId });
             break;
         }
       } catch {

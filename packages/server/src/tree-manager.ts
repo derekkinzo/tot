@@ -48,7 +48,7 @@ export class TreeManager extends EventEmitter {
       id: sessionId,
       problem,
       rootNodeId: rootId,
-      status: 'active',
+      status: 'open',
       createdAt: now,
     };
 
@@ -79,17 +79,19 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Decomposes a hypothesis into MECE sub-hypotheses, creating child nodes.
+   * Decomposes a hypothesis into sibling sub-hypotheses, creating child nodes.
+   * Aim for non-overlapping siblings that collectively cover the parent's
+   * claim — strict mutual exclusivity is not required (Heuer 2005).
    * Auto-transitions the parent from 'pending' to 'exploring'.
    * @param parentId - ID of the hypothesis to decompose
    * @param childContents - Array of sub-hypothesis descriptions (2+)
    * @returns The created child hypothesis nodes
-   * @throws TreeError if parent is eliminated/confirmed, fewer than 2 children, depth exceeded, or count exceeded
+   * @throws TreeError if parent is in a terminal status, fewer than 2 children, depth exceeded, or count exceeded
    */
   decompose(parentId: string, childContents: string[]): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
 
-    if (parent.status === 'eliminated' || parent.status === 'confirmed') {
+    if (parent.status === 'eliminated' || parent.status === 'corroborated' || parent.status === 'out-of-scope') {
       throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
     }
     if (childContents.length < 2) {
@@ -141,17 +143,20 @@ export class TreeManager extends EventEmitter {
 
   /**
    * Adds a single hypothesis as a child of an existing node.
-   * Use when a MECE decomposition is missing a possibility.
+   * Use when a sibling-level decomposition is missing a possibility.
    * @param parentId - ID of the parent hypothesis
    * @param content - Description of the new hypothesis
    * @returns The newly created hypothesis
-   * @throws TreeError if parent is eliminated, depth exceeded, or count exceeded
+   * @throws TreeError if parent is in a terminal status, depth exceeded, or count exceeded
    */
   addHypothesis(parentId: string, content: string): Hypothesis {
     const parent = this.getHypothesisOrThrow(parentId);
 
-    if (parent.status === 'eliminated') {
-      throw new TreeError('Cannot add hypothesis to an eliminated node');
+    // Mirror decompose's terminal-parent guard. Without this, a new pending
+    // child can appear under a terminal ancestor, leaving structural debt
+    // that the closure predicate would silently overlook.
+    if (parent.status === 'eliminated' || parent.status === 'corroborated' || parent.status === 'out-of-scope') {
+      throw new TreeError(`Cannot add hypothesis to a ${parent.status} node`);
     }
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
@@ -203,8 +208,15 @@ export class TreeManager extends EventEmitter {
   ): Evidence {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
-    if (hypothesis.status === 'eliminated' || hypothesis.status === 'confirmed') {
+    if (hypothesis.status === 'eliminated' || hypothesis.status === 'out-of-scope') {
       throw new TreeError(`Cannot add evidence to a ${hypothesis.status} hypothesis`);
+    }
+    // Corroboration is provisional: a refuting observation may legitimately
+    // arrive later and reopen the verdict. Only refutes is admitted on a
+    // corroborated leaf — supports/neutral on a settled verdict would be
+    // accumulating positive evidence, the satisficing trap Popper rejects.
+    if (hypothesis.status === 'corroborated' && type !== 'refutes') {
+      throw new TreeError('Only refuting evidence is admitted on a corroborated hypothesis');
     }
 
     const now = new Date().toISOString();
@@ -229,102 +241,182 @@ export class TreeManager extends EventEmitter {
 
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
+
+    // A refute against a corroborated leaf reopens the session: the verdict
+    // remains in the audit trail, but the closure is no longer claimed.
+    const session = this.sessions.get(hypothesis.sessionId);
+    if (
+      type === 'refutes' &&
+      hypothesis.status === 'corroborated' &&
+      session && session.status === 'resolved'
+    ) {
+      session.status = 'open';
+      session.completedAt = undefined;
+      this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
+    }
+
     this.setCurrent(hypothesis.sessionId);
 
     return evidence;
   }
 
   /**
-   * Marks a hypothesis as eliminated (dead end), recording the reason.
+   * Marks a hypothesis as eliminated (dead end), grounded in refuting
+   * evidence. Per Popper, elimination is the operational form of
+   * falsification (modus tollens) — a counter-instance must exist on the
+   * hypothesis's evidence ledger.
+   *
    * @param hypothesisId - ID of the hypothesis to eliminate
    * @param reason - Justification for elimination (creates audit trail)
+   * @param refutingEvidenceIds - Optional explicit refutes-typed evidence
+   *   ids that ground the verdict. When omitted, the call binds implicitly
+   *   to every refutes-typed record on the target.
    * @returns The updated hypothesis
-   * @throws TreeError if already eliminated or confirmed
+   * @throws TreeError if already terminal, or no refuting record exists
    */
-  eliminateHypothesis(hypothesisId: string, reason: string): Hypothesis {
+  eliminateHypothesis(hypothesisId: string, reason: string, refutingEvidenceIds?: string[]): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
     if (hypothesis.status === 'eliminated') {
       throw new TreeError('Hypothesis is already eliminated');
     }
-    if (hypothesis.status === 'confirmed') {
-      throw new TreeError('Cannot eliminate a confirmed hypothesis');
+    if (hypothesis.status === 'corroborated' || hypothesis.status === 'out-of-scope') {
+      throw new TreeError(`Cannot eliminate a ${hypothesis.status} hypothesis`);
+    }
+
+    const refutesOnTarget = hypothesis.evidence.filter((e) => e.type === 'refutes');
+    let groundedIds: string[];
+    if (refutingEvidenceIds && refutingEvidenceIds.length > 0) {
+      const refutesIds = new Set(refutesOnTarget.map((e) => e.id));
+      for (const id of refutingEvidenceIds) {
+        if (!refutesIds.has(id)) {
+          throw new TreeError(`Evidence id ${id} is not a refutes-typed record on this hypothesis`);
+        }
+      }
+      groundedIds = refutingEvidenceIds;
+    } else {
+      if (refutesOnTarget.length === 0) {
+        throw new TreeError(
+          'Cannot eliminate without recorded refuting evidence — call add_evidence(type=refutes) first, or use set_out_of_scope to mark this branch uninvestigated',
+        );
+      }
+      groundedIds = refutesOnTarget.map((e) => e.id);
     }
 
     const now = new Date().toISOString();
     hypothesis.status = 'eliminated';
-    hypothesis.conclusion = { verdict: 'eliminated', reason, timestamp: now };
+    hypothesis.conclusion = { verdict: 'eliminated', reason, timestamp: now, refutingEvidenceIds: groundedIds };
     hypothesis.metadata.updatedAt = now;
     this.mutationsSinceStatusChange = 0;
     this.touch();
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
-    // If every hypothesis in the session is now eliminated, the session is a
-    // dead end — mark it abandoned so it stops appearing as active. Without
-    // this, getActiveSession would keep returning a session the agent can no
-    // longer make progress in.
+    // An elimination can complete the disposition of the last open top-level
+    // branch. tryCloseSession decides resolved vs abandoned based on whether
+    // a corroborated answer survives on a non-pruned lineage.
     const session = this.sessions.get(hypothesis.sessionId);
-    if (session && session.status === 'active' && this.allHypothesesEliminated(session.id)) {
-      session.status = 'abandoned';
-      session.completedAt = now;
-      this.emit('event', { type: 'session-completed', sessionId: session.id } satisfies TreeEvent);
-      if (this.currentSessionId === session.id) {
-        this.currentSessionId = null;
-      }
+    if (session && session.status === 'open') {
+      this.tryCloseSession(session, now);
     }
 
     // Eliminating a hypothesis is pruning, not investigative progress, so
     // currentSessionId is not promoted to this session unless it was already
-    // current and we just abandoned it (handled above).
+    // current and we just closed it (handled above).
     return hypothesis;
   }
 
   /**
-   * Marks a hypothesis as confirmed (the answer). Completes the session.
-   * @param hypothesisId - ID of the hypothesis to confirm
-   * @param reason - Justification for confirmation
+   * Marks a hypothesis as corroborated (provisionally retained — survived
+   * available refutation attempts). Per Popper, corroboration never amounts
+   * to verification; the verdict remains revisable by later refuting
+   * evidence. Resolves the session under the current closure rule.
+   * @param hypothesisId - ID of the hypothesis to corroborate
+   * @param reason - Justification for corroboration
    * @returns The updated hypothesis
-   * @throws TreeError if already confirmed, eliminated, or any child is unresolved
+   * @throws TreeError if already corroborated, eliminated, or any child is unresolved
    */
-  confirmHypothesis(hypothesisId: string, reason: string): Hypothesis {
+  corroborateHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
-    if (hypothesis.status === 'confirmed') {
-      throw new TreeError('Hypothesis is already confirmed');
+    if (hypothesis.status === 'corroborated') {
+      throw new TreeError('Hypothesis is already corroborated');
     }
-    if (hypothesis.status === 'eliminated') {
-      throw new TreeError('Cannot confirm an eliminated hypothesis');
+    if (hypothesis.status === 'eliminated' || hypothesis.status === 'out-of-scope') {
+      throw new TreeError(`Cannot corroborate a ${hypothesis.status} hypothesis`);
     }
 
     // Decomposition is a structural commitment: the parent's truth is
     // determined by the resolution of its children, so the parent cannot be
-    // confirmed until each child has been eliminated or confirmed.
+    // corroborated until each child is terminal.
     for (const childId of hypothesis.children) {
       const child = this.hypotheses.get(childId);
       if (child && (child.status === 'pending' || child.status === 'exploring')) {
-        throw new TreeError('Cannot confirm a hypothesis with unresolved children');
+        throw new TreeError('Cannot corroborate a hypothesis with unresolved children');
       }
     }
 
     const now = new Date().toISOString();
-    hypothesis.status = 'confirmed';
-    hypothesis.conclusion = { verdict: 'confirmed', reason, timestamp: now };
+    hypothesis.status = 'corroborated';
+    hypothesis.conclusion = { verdict: 'corroborated', reason, timestamp: now };
     hypothesis.metadata.updatedAt = now;
     this.mutationsSinceStatusChange = 0;
     this.touch();
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
+    // Resolution does not follow a single corroboration. Per Mackie INUS, a
+    // corroborated leaf may be one of several co-instantiated contributors;
+    // per Popper, untested siblings cannot be discarded by association. The
+    // session resolves only when every other top-level branch is terminal.
     const session = this.sessions.get(hypothesis.sessionId);
-    if (session) {
-      session.status = 'completed';
-      session.completedAt = now;
-      this.emit('event', { type: 'session-completed', sessionId: session.id } satisfies TreeEvent);
+    if (session && session.status === 'open' && this.tryCloseSession(session, now)) {
+      // closed
+    } else {
+      this.setCurrent(hypothesis.sessionId);
     }
 
-    if (this.currentSessionId === hypothesis.sessionId) {
-      this.currentSessionId = null;
+    return hypothesis;
+  }
+
+  /**
+   * Marks a hypothesis as out-of-scope: terminal but no refutation claimed.
+   * Use to set aside a branch without investigating it. Distinct from
+   * elimination, which asserts a refuting record. Closure treats both as
+   * pruning.
+   * @throws TreeError if hypothesis is already terminal
+   */
+  setOutOfScope(hypothesisId: string, reason: string): Hypothesis {
+    const hypothesis = this.getHypothesisOrThrow(hypothesisId);
+    if (hypothesis.status !== 'pending' && hypothesis.status !== 'exploring') {
+      throw new TreeError(`Cannot set out-of-scope a ${hypothesis.status} hypothesis`);
+    }
+    // The root carries the session's problem statement; setting it
+    // out-of-scope would abandon the entire investigation by fiat without
+    // touching live work below it. To abandon a session, dispose of every
+    // top-level branch — closure infers abandonment from the absence of a
+    // surviving answer.
+    if (hypothesis.parentId === null) {
+      throw new TreeError('Cannot set the root hypothesis out-of-scope; dispose of every top-level branch instead');
+    }
+
+    const now = new Date().toISOString();
+    hypothesis.status = 'out-of-scope';
+    hypothesis.conclusion = { verdict: 'out-of-scope', reason, timestamp: now };
+    hypothesis.metadata.updatedAt = now;
+    // A status change is real progress on tree disposition; sibling
+    // status-changing mutators (eliminate, corroborate) reset the counter
+    // for the same reason.
+    this.mutationsSinceStatusChange = 0;
+    this.touch();
+
+    this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
+
+    // Setting a branch out-of-scope can complete the disposition of the last
+    // open top-level branch.
+    const session = this.sessions.get(hypothesis.sessionId);
+    if (session && session.status === 'open') {
+      this.tryCloseSession(session, now);
     }
 
     return hypothesis;
@@ -386,11 +478,20 @@ export class TreeManager extends EventEmitter {
       catchAllPatterns.some((p) => l.includes(p)),
     );
 
+    let abstractionMismatch = false;
+    if (children.length >= 2) {
+      const wordCounts = children.map((c) => c.content.split(/\s+/).length);
+      const minLen = Math.min(...wordCounts);
+      const maxLen = Math.max(...wordCounts);
+      abstractionMismatch = maxLen > minLen * 3;
+    }
+
     return {
       childCount: children.length,
       substringOverlaps,
       duplicateLabels,
       hasCatchAll,
+      abstractionMismatch,
     };
   }
 
@@ -426,10 +527,10 @@ export class TreeManager extends EventEmitter {
   } {
     const state = this.getTree();
     if (!state) {
-      return { session: null, counts: { pending: 0, exploring: 0, eliminated: 0, confirmed: 0 }, stagnant: false, unexplored: [], bestLead: null };
+      return { session: null, counts: { pending: 0, exploring: 0, eliminated: 0, corroborated: 0, 'out-of-scope': 0 }, stagnant: false, unexplored: [], bestLead: null };
     }
 
-    const counts: Record<HypothesisStatus, number> = { pending: 0, exploring: 0, eliminated: 0, confirmed: 0 };
+    const counts: Record<HypothesisStatus, number> = { pending: 0, exploring: 0, eliminated: 0, corroborated: 0, 'out-of-scope': 0 };
     const unexplored: Hypothesis[] = [];
     let bestLead: Hypothesis | null = null;
 
@@ -473,9 +574,9 @@ export class TreeManager extends EventEmitter {
   getActiveSession(): Session | undefined {
     if (this.currentSessionId) {
       const tracked = this.sessions.get(this.currentSessionId);
-      if (tracked && tracked.status === 'active') return tracked;
+      if (tracked && tracked.status === 'open') return tracked;
     }
-    return Array.from(this.sessions.values()).find((s) => s.status === 'active');
+    return Array.from(this.sessions.values()).find((s) => s.status === 'open');
   }
 
   /**
@@ -540,22 +641,123 @@ export class TreeManager extends EventEmitter {
   /**
    * Marks `sessionId` as the agent's current working session. Called from
    * mutation methods AFTER validation succeeds, so a rejected call cannot
-   * leak state. Refuses to track a non-active session so the next status
+   * leak state. Refuses to track a non-open session so the next status
    * read falls through to the active-session scan.
    */
   private setCurrent(sessionId: string): void {
     const session = this.sessions.get(sessionId);
-    if (session && session.status === 'active') {
+    if (session && session.status === 'open') {
       this.currentSessionId = sessionId;
     }
   }
 
-  private allHypothesesEliminated(sessionId: string): boolean {
-    const ids = this.sessionHypotheses.get(sessionId);
-    if (!ids || ids.size === 0) return false;
-    for (const id of ids) {
-      const h = this.hypotheses.get(id);
-      if (h && h.status !== 'eliminated') return false;
+  /**
+   * Closes a session in either terminal state. Single chokepoint so every
+   * mutator goes through the same release of the current-session pointer
+   * and emits the same wire event.
+   */
+  private closeSession(session: Session, terminal: 'resolved' | 'abandoned', timestamp: string): void {
+    session.status = terminal;
+    session.completedAt = timestamp;
+    this.emit('event', { type: 'session-completed', sessionId: session.id, terminalStatus: terminal } satisfies TreeEvent);
+    if (this.currentSessionId === session.id) {
+      this.currentSessionId = null;
+    }
+  }
+
+  /**
+   * Trigger called from every terminal-status mutation (corroborate,
+   * eliminate, set_out_of_scope). Closes the session when every top-level
+   * branch is disposed of — resolved if at least one corroborated answer
+   * lives on a non-pruned lineage, abandoned otherwise. Corroborations
+   * buried under an eliminated or out-of-scope ancestor are moot under
+   * the same pruning rule the closure walker applies. Returns true if
+   * the session was closed.
+   */
+  private tryCloseSession(session: Session, timestamp: string): boolean {
+    if (!this.allTopLevelBranchesDisposed(session)) return false;
+    const root = this.hypotheses.get(session.rootNodeId);
+    if (!root) return false;
+    const terminal: 'resolved' | 'abandoned' =
+      this.subtreeContainsCorroborated(root.id) ? 'resolved' : 'abandoned';
+    this.closeSession(session, terminal, timestamp);
+    return true;
+  }
+
+  /**
+   * Returns true if the subtree rooted at id contains a corroborated node
+   * reachable through non-pruned ancestors. Pruned subtrees (eliminated or
+   * out-of-scope) are not descended — descendants of a pruned branch are
+   * moot under the same rule the closure walker applies.
+   */
+  private subtreeContainsCorroborated(rootId: string): boolean {
+    const stack: string[] = [rootId];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      const node = this.hypotheses.get(id);
+      if (!node) continue;
+      if (node.status === 'eliminated' || node.status === 'out-of-scope') continue;
+      if (node.status === 'corroborated') return true;
+      for (const childId of node.children) stack.push(childId);
+    }
+    return false;
+  }
+
+  /**
+   * Closure predicate. Returns true when every top-level branch of the
+   * session tree has been disposed of, where disposition splits into:
+   *
+   *   - eliminated / out-of-scope: pruning. The branch is refuted or set
+   *     aside; its descendants are moot. Do not descend.
+   *   - corroborated: resolution. corroborateHypothesis enforces a one-hop
+   *     terminal-children gate, but accepts an eliminated direct child.
+   *     Through such an intermediate a corroborated top-level can today
+   *     legally sit over a pending grandchild, so terminality must be
+   *     verified by walking the corroborated subtree.
+   *
+   * Multiple corroborated leaves are first-class (Mackie INUS). pending /
+   * exploring at any visited node fails the predicate.
+   */
+  private allTopLevelBranchesDisposed(session: Session): boolean {
+    const root = this.hypotheses.get(session.rootNodeId);
+    if (!root) return false;
+
+    for (const childId of root.children) {
+      const child = this.hypotheses.get(childId);
+      if (!child) continue;
+
+      if (child.status === 'eliminated' || child.status === 'out-of-scope') {
+        continue; // pruning — descendants are moot
+      }
+
+      if (child.status === 'corroborated') {
+        if (!this.subtreeFullyTerminal(childId)) return false;
+        continue;
+      }
+
+      // pending / exploring: undisposed
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Returns true when every descendant in the subtree (inclusive) carries a
+   * terminal status. Pruned intermediates do not short-circuit the walk: the
+   * one-hop terminal-children gate on corroborateHypothesis accepts an
+   * eliminated direct child, and elimination/out-of-scope never cascade, so
+   * a pending grandchild can legally hide under a pruned intermediate. The
+   * closure rule requires every reachable node to be terminal, so the walk
+   * descends through every status that has children.
+   */
+  private subtreeFullyTerminal(rootId: string): boolean {
+    const stack: string[] = [rootId];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      const node = this.hypotheses.get(id);
+      if (!node) continue;
+      if (node.status === 'pending' || node.status === 'exploring') return false;
+      for (const childId of node.children) stack.push(childId);
     }
     return true;
   }

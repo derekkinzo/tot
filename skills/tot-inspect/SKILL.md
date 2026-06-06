@@ -33,7 +33,7 @@ View and interpret the current hypothesis tree state.
 - **Pending** (blue): Not yet investigated — needs evidence
 - **Exploring** (yellow): Evidence gathered, not yet resolved
 - **Eliminated** (red/dimmed): Refuted with documented reasoning
-- **Confirmed** (green): Root cause identified with verification
+- **Corroborated** (green): Surviving hypothesis — has withstood the refutation tests applied to it. Provisional, not verified.
 
 ## Resuming Investigation
 
