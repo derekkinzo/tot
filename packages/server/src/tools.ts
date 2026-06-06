@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { TreeError, type TreeManager } from './tree-manager.js';
 import { Persistence } from './persistence.js';
 import * as fmt from './responses.js';
+import { STATUS_ICONS } from './types.js';
 
 // ─── Types ───
 
@@ -30,14 +31,14 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   decompose: {
-    description: 'Decompose a hypothesis into mutually exclusive, collectively exhaustive sub-hypotheses. Use at any depth to drill deeper into a branch.',
+    description: 'Decompose a hypothesis into sibling sub-hypotheses comparable along a single framing axis. 2-5 keeps the tree legible; up to 20 are accepted when the domain genuinely warrants more. Aim for non-overlapping siblings unless the domain co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
     schema: {
       parentId: z.string().min(1).describe('ID of the hypothesis to decompose'),
       children: z.array(z.string().min(1)).min(2).max(20).describe('Array of sub-hypothesis content strings'),
     },
   },
   add_hypothesis: {
-    description: 'Add a single hypothesis to the tree. Use when you realize a MECE decomposition is missing a possibility.',
+    description: 'Add a single sibling hypothesis to the tree. Use when an existing decomposition is missing a possibility.',
     schema: {
       parentId: z.string().min(1).describe('ID of the parent hypothesis'),
       content: z.string().min(1).max(10000).describe('Description of the new hypothesis'),
@@ -183,7 +184,10 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     if (!nextStatus || nextStatus === priorStatus) return;
     if (nextStatus === 'resolved' || nextStatus === 'abandoned') {
       await p.append('session-completed', { sessionId, terminalStatus: nextStatus });
-    } else if (priorStatus === 'resolved' && nextStatus === 'open') {
+    } else if (priorStatus !== 'open' && nextStatus === 'open') {
+      // Both terminal states (resolved, abandoned) can transition back to
+      // open via reopen-on-refute on a corroborated leaf; either path
+      // produces the same wire event.
       await p.append('session-reopened', { sessionId });
     }
   }
@@ -417,16 +421,8 @@ function renderCompactTree(hypotheses: Map<string, import('./types.js').Hypothes
   const node = hypotheses.get(nodeId);
   if (!node) return '';
 
-  const statusIcon = {
-    pending: '○',
-    exploring: '◉',
-    eliminated: '✗',
-    corroborated: '✓',
-    'out-of-scope': '⊘',
-  }[node.status];
-
   const scoreStr = node.score !== null ? ` (${node.score.toFixed(2)})` : '';
-  let line = `${indent}${statusIcon} ${node.content}${scoreStr}\n`;
+  let line = `${indent}${STATUS_ICONS[node.status]} ${node.content}${scoreStr}\n`;
 
   for (const childId of node.children) {
     line += renderCompactTree(hypotheses, childId, indent + '  ');

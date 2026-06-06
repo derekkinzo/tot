@@ -322,6 +322,43 @@ describe('Persistence Roundtrip', () => {
     expect(sessions[0].status).toBe('resolved');
   });
 
+  it('abandoned-reopen round-trips: refute on a corroborated leaf in an abandoned session journals session-reopened', async () => {
+    // Both terminal states reopen on refute against a corroborated leaf;
+    // the persistence side must journal session-reopened for the abandoned
+    // case as well, otherwise daemon restart reads the prior
+    // session-completed and silently disagrees with the live engine.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Abandoned reopen test' },
+    }));
+    const decompA = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    const decompA1 = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+    }));
+    // A2 corroborated under A; A then eliminated (A2 buried under pruned A);
+    // B eliminated. Session abandons (no live corroboration on the spine).
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: decompA1.childIds[1], reason: 'gone' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'supports', content: 'survives' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'A2' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA.childIds[0], type: 'refutes', content: 'whole branch wrong' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: decompA.childIds[0], reason: 'pruned' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA.childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: decompA.childIds[1], reason: 'gone' } });
+    // Session is now abandoned. Refute the buried-corroborated leaf —
+    // engine reopens; persistence must record it so reload agrees.
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'refutes', content: 'counter-instance' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('open');
+  });
+
   it('reopen-on-refute round-trips: session-reopened journal restores open status', async () => {
     const { client, cleanup } = await createServerWithClient(tempDir);
     const { rootId } = parseResult(await client.callTool({

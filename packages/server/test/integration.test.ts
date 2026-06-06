@@ -405,7 +405,7 @@ describe('MCP Integration', () => {
       expect(result.isError).toBeFalsy();
       const text = getText(result);
       expect(text).toContain('Corroborated');
-      expect(text).toContain('explain ALL observed symptoms');
+      expect(text).toContain('account for ALL the relevant observations');
     });
 
     it('error: corroborate eliminated hypothesis', async () => {
@@ -566,6 +566,30 @@ describe('MCP Integration', () => {
       expect(text).toContain('eliminated');
       expect(text).toContain('H2');
       expect(text).toContain('H3');
+    });
+
+    it('separates resolved and active counts in the progress breakdown', async () => {
+      const { rootId } = parseResult(
+        await client.callTool({ name: 'create_tree', arguments: { problem: 'Topic' } }),
+      );
+      const { childIds } = parseResult(
+        await client.callTool({
+          name: 'decompose',
+          arguments: { parentId: rootId, children: ['A', 'B', 'C'] },
+        }),
+      );
+      await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+      await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+      await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+      // childIds[1] is now 'exploring'; childIds[2] stays 'pending'.
+
+      const result = await client.callTool({ name: 'get_status', arguments: {} });
+      const text = getText(result);
+      // Resolved parenthetical lists only resolved sub-counts.
+      expect(text).toMatch(/Progress: 1\/4 resolved \(1 eliminated, 0 corroborated\)/);
+      // Active line lists exploring and pending separately (root is exploring,
+      // childIds[1] is exploring after evidence, childIds[2] stays pending).
+      expect(text).toContain('Active: 2 exploring, 1 pending');
     });
 
     it('detects stagnation', async () => {

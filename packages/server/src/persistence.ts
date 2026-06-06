@@ -1,6 +1,7 @@
 import { appendFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { subtreeContainsCorroborated } from './closure.js';
 import type { Evidence, Hypothesis, Session } from './types.js';
 
 // ─── Session Index (lightweight metadata for lazy loading) ───
@@ -88,26 +89,6 @@ export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypo
 }
 
 /**
- * True iff the subtree rooted at rootId contains a corroborated hypothesis
- * on a non-pruned lineage. Walks the tree from the root, skipping descendants
- * of any eliminated or out-of-scope ancestor. Mirrors the engine's
- * subtreeContainsCorroborated walker so replay agrees with the live decision.
- */
-function subtreeContainsCorroborated(rootId: string, sessionHypotheses: Hypothesis[]): boolean {
-  const byId = new Map(sessionHypotheses.map((h) => [h.id, h] as const));
-  const stack: string[] = [rootId];
-  while (stack.length > 0) {
-    const id = stack.pop()!;
-    const node = byId.get(id);
-    if (!node) continue;
-    if (node.status === 'eliminated' || node.status === 'out-of-scope') continue;
-    if (node.status === 'corroborated') return true;
-    for (const childId of node.children) stack.push(childId);
-  }
-  return false;
-}
-
-/**
  * Scans session files and returns lightweight metadata without replaying events.
  * Reads only the first line (session-created event) + counts lines for nodeCount estimate.
  */
@@ -175,8 +156,10 @@ export function scanSessions(dataDir: string): SessionIndex[] {
             // skips descendants of pruned ancestors so it agrees with the
             // engine's closure choice: only a corroborated hypothesis on a
             // non-pruned lineage counts as survival.
-            const sessionHypotheses = Array.from(latestHypothesis.values());
-            const hasCorroborated = subtreeContainsCorroborated(session.rootNodeId, sessionHypotheses);
+            const hasCorroborated = subtreeContainsCorroborated(
+              session.rootNodeId,
+              (id) => latestHypothesis.get(id),
+            );
             status = hasCorroborated ? 'resolved' : 'abandoned';
           }
         }
