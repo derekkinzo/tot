@@ -168,11 +168,11 @@ This tool implements concepts from:
 
 - Bacon, F. (1620). *Novum Organum* — inductive method and systematic elimination of false causes
 - Mill, J. S. (1843). *A System of Logic* — methods of agreement, difference, and elimination for causal inference
-- Chamberlin, T. C. (1890). *The Method of Multiple Working Hypotheses.* *Science*, 15(366), 92–96 — entertaining several competing hypotheses simultaneously to counter parental affection for a single theory
-- Popper, K. R. (1959). *The Logic of Scientific Discovery* — falsification-first approach
-- Platt, J. R. (1964). *Strong Inference.* Science, 146(3642), 347–353
-- Hill, A. B. (1965). *The Environment and Disease: Association or Causation?* Proceedings of the Royal Society of Medicine, 58(5), 295–300
-- Heuer, R. J. (1999). *Psychology of Intelligence Analysis* — Analysis of Competing Hypotheses (ACH) methodology
+- Popper, K. R. (1959). *The Logic of Scientific Discovery* — falsification-first approach; corroboration as provisional retention
+- Mackie, J. L. (1965). *Causes and Conditions.* American Philosophical Quarterly, 2(4), 245–264 — INUS conditions for compound causation
+- Heuer, R. J. (1999, 2005). *Psychology of Intelligence Analysis* — Analysis of Competing Hypotheses (ACH) methodology
+- cf. Chamberlin, T. C. (1890). *The Method of Multiple Working Hypotheses.* *Science*, 15(366) — entertaining several competing hypotheses simultaneously
+- cf. Platt, J. R. (1964). *Strong Inference.* *Science*, 146(3642) — crucial-experiment design for hypothesis discrimination
 - Yao, S. et al. (2023). *Tree of Thoughts: Deliberate Problem Solving with Large Language Models.* NeurIPS 2023. [arXiv:2305.10601](https://arxiv.org/abs/2305.10601)
 - Lightman, H. et al. (2023). *Let's Verify Step by Step.* [arXiv:2305.20050](https://arxiv.org/abs/2305.20050) — process supervision
 
