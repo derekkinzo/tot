@@ -24,7 +24,7 @@ export interface ToolSchema {
  */
 export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   create_tree: {
-    description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — especially debugging, root cause analysis, or multi-factor decisions.',
+    description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — root cause analysis, differential diagnosis, hypothesis-driven inquiry, or multi-factor decisions across any domain.',
     schema: {
       problem: z.string().min(1).max(10000).describe('The problem statement to investigate'),
     },
@@ -53,17 +53,25 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   eliminate_hypothesis: {
-    description: 'Mark a hypothesis as eliminated (dead end). Provide the reason — this creates an audit trail.',
+    description: 'Mark a hypothesis as eliminated, grounded in refuting evidence. Per Popper, elimination is the operational form of falsification — a counter-instance must exist on the hypothesis. Call add_evidence(type=refutes) first, or use set_out_of_scope to mark a branch as uninvestigated without claiming refutation.',
     schema: {
       hypothesisId: z.string().min(1).describe('ID of the hypothesis to eliminate'),
       reason: z.string().min(1).max(10000).describe('Why this hypothesis is being eliminated'),
+      refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional().describe('Optional explicit ids of refutes-typed evidence records that ground this verdict. When omitted, all refutes-typed records on the hypothesis are bound.'),
     },
   },
-  confirm_hypothesis: {
-    description: 'Mark a hypothesis as confirmed (the answer/root cause). This completes the session.',
+  corroborate_hypothesis: {
+    description: 'Mark a hypothesis as corroborated — it has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification: the verdict can be reopened by later refuting evidence. Resolves the session only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope).',
     schema: {
-      hypothesisId: z.string().min(1).describe('ID of the hypothesis to confirm'),
-      reason: z.string().min(1).max(10000).describe('Why this hypothesis is confirmed as the answer'),
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis to corroborate'),
+      reason: z.string().min(1).max(10000).describe('Why this hypothesis has survived refutation'),
+    },
+  },
+  set_out_of_scope: {
+    description: 'Mark a hypothesis as out-of-scope: terminal but no refutation claimed. Use to set aside a branch the agent does not want to investigate. Distinct from elimination, which asserts a refuting record. Closure treats both as pruning — descendants of an out-of-scope node are not required to be terminal.',
+    schema: {
+      hypothesisId: z.string().min(1).describe('ID of the hypothesis to set out-of-scope'),
+      reason: z.string().min(1).max(10000).describe('Why this branch is being set aside without investigation'),
     },
   },
   score_hypothesis: {
@@ -113,8 +121,13 @@ const schemas = {
   eliminate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
     reason: z.string().min(1).max(10000),
+    refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional(),
   }),
-  confirm_hypothesis: z.object({
+  corroborate_hypothesis: z.object({
+    hypothesisId: z.string().min(1),
+    reason: z.string().min(1).max(10000),
+  }),
+  set_out_of_scope: z.object({
     hypothesisId: z.string().min(1),
     reason: z.string().min(1).max(10000),
   }),
@@ -152,6 +165,27 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       persistenceMap.set(sessionId, p);
     }
     return p;
+  }
+
+  /**
+   * Journals the wire event corresponding to a session-status transition.
+   * 'session-completed' covers both terminal transitions (resolved and
+   * abandoned); 'session-reopened' covers a corroborated leaf returning
+   * to open after refuting evidence. Callers compute the prior status
+   * before the mutation so the helper sees the transition direction.
+   */
+  async function journalSessionTransition(
+    p: Persistence,
+    sessionId: string,
+    priorStatus: 'open' | 'resolved' | 'abandoned' | undefined,
+    nextStatus: 'open' | 'resolved' | 'abandoned' | undefined,
+  ): Promise<void> {
+    if (!nextStatus || nextStatus === priorStatus) return;
+    if (nextStatus === 'resolved' || nextStatus === 'abandoned') {
+      await p.append('session-completed', { sessionId, terminalStatus: nextStatus });
+    } else if (priorStatus === 'resolved' && nextStatus === 'open') {
+      await p.append('session-reopened', { sessionId });
+    }
   }
 
   function toolResult(text: string, isError = false) {
@@ -214,10 +248,17 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('add_evidence', async (args) => {
     try {
       const { hypothesisId, type, content, source } = schemas.add_evidence.parse(args);
-      const evidence = tm.addEvidence(hypothesisId, type, content, source);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
+      tm.addEvidence(hypothesisId, type, content, source);
       const hypothesis = tm.getHypothesis(hypothesisId)!;
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatAddEvidence(hypothesisId, hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -229,10 +270,17 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
 
   handlers.set('eliminate_hypothesis', async (args) => {
     try {
-      const { hypothesisId, reason } = schemas.eliminate_hypothesis.parse(args);
-      const hypothesis = tm.eliminateHypothesis(hypothesisId, reason);
+      const { hypothesisId, reason, refutingEvidenceIds } = schemas.eliminate_hypothesis.parse(args);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
+      const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatEliminate(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -242,14 +290,42 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     }
   });
 
-  handlers.set('confirm_hypothesis', async (args) => {
+  handlers.set('corroborate_hypothesis', async (args) => {
     try {
-      const { hypothesisId, reason } = schemas.confirm_hypothesis.parse(args);
-      const hypothesis = tm.confirmHypothesis(hypothesisId, reason);
+      const { hypothesisId, reason } = schemas.corroborate_hypothesis.parse(args);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
+      const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
-      await p.append('session-completed', { sessionId: hypothesis.sessionId });
-      return toolResult(fmt.formatConfirm(hypothesis, tm));
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
+      return toolResult(fmt.formatCorroborate(hypothesis, tm));
+    } catch (e) {
+      if (e instanceof z.ZodError) {
+        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+      }
+      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
+    }
+  });
+
+  handlers.set('set_out_of_scope', async (args) => {
+    try {
+      const { hypothesisId, reason } = schemas.set_out_of_scope.parse(args);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
+      const hypothesis = tm.setOutOfScope(hypothesisId, reason);
+      const p = getPersistence(hypothesis.sessionId);
+      await p.append('hypothesis-updated', hypothesis);
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
+      return toolResult(fmt.formatSetOutOfScope(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
         return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
@@ -277,7 +353,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     try {
       const { format } = schemas.get_tree.parse(args);
       const state = tm.getTree();
-      if (!state) return toolResult('No active session. Call create_tree to start.');
+      if (!state) return toolResult('No open session. Call create_tree to start.');
 
       if (format === 'full') {
         const hypotheses = Object.fromEntries(state.hypotheses);
@@ -345,7 +421,8 @@ function renderCompactTree(hypotheses: Map<string, import('./types.js').Hypothes
     pending: '○',
     exploring: '◉',
     eliminated: '✗',
-    confirmed: '✓',
+    corroborated: '✓',
+    'out-of-scope': '⊘',
   }[node.status];
 
   const scoreStr = node.score !== null ? ` (${node.score.toFixed(2)})` : '';

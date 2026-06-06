@@ -2,18 +2,20 @@
  * Adaptive response formatters for tool results.
  *
  * Signals are grounded in established reasoning methodologies:
- * - Eliminative Induction (Bacon 1620, Novum Organum): tables of presence/absence,
- *   exclusion of alternatives as the engine of inference
- * - Methods of Agreement and Difference (Mill 1843, System of Logic): comparative
- *   evidence across cases to isolate causal factors
- * - Multiple Working Hypotheses (Chamberlin 1890): parallel hypothesis families
- *   guard against parental affection for a single explanation
- * - Falsificationism (Popper 1959): severity of tests, asymmetry of refutation
- * - Strong Inference (Platt 1964): crucial experiment design, recycling discipline
- * - Causal Inference (Hill 1965): temporality, specificity, reproducibility
- * - Analysis of Competing Hypotheses (Heuer 1999): diagnosticity, red team, sensitivity
- * - Scientific Debugging (Zeller 2009): hypothesize-test-eliminate cycle
- * - Expert Debugging Studies (Ko & Myers 2004, Parnin & Orso 2011): depth limits
+ * - Eliminative induction: tables of presence/absence, exclusion of alternatives
+ *   as the engine of inference (Bacon, Novum Organum, 1620)
+ * - Methods of Agreement and Difference: comparative evidence across cases to
+ *   isolate causal factors (Mill, A System of Logic, 1843)
+ * - Multiple working hypotheses: parallel hypothesis families guard against
+ *   premature commitment to a single explanation (cf. Chamberlin, 1890)
+ * - Falsificationism: severity of tests, asymmetry of refutation, corroboration
+ *   as provisional retention (Popper, The Logic of Scientific Discovery, 1959)
+ * - Strong inference: crucial experiment design, recycling discipline
+ *   (cf. Platt, 1964)
+ * - Compound causation: real causes are often clusters of jointly sufficient
+ *   conditions (Mackie, "Causes and Conditions", 1965)
+ * - Analysis of Competing Hypotheses: diagnosticity, red team, sensitivity
+ *   (Heuer, Psychology of Intelligence Analysis, 1999; revised 2005)
  *
  * Design principles:
  * - Signals fire conditionally based on tree state (avoid prompt fatigue)
@@ -27,39 +29,40 @@
  * - Tie detection: top-2 within 0.15 gap
  * - Diagnosticity: supports added with no siblings refuted (non-discriminating)
  * - Premature decomposition: parent has 0 evidence items
- * - Depth caution: children at depth >= 3 (Parnin & Orso 2011)
+ * - Depth caution: children at depth >= 3 (heuristic; deeper trees fragment
+ *   investigation across many shallow leaves rather than pursuing few testable ones)
  * - Inference detection: 2+ keywords (suggests/implies/could/might/possibly/likely)
  */
 
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
-export function formatCreateTree(sessionId: string, rootId: string, problem: string): string {
-  const lowerProblem = problem.toLowerCase();
-  let domainHint = '';
-  if (lowerProblem.match(/500|error|crash|fail|bug|exception/)) {
-    domainHint = `Suggested frames: by layer (code/data/infra/external), by scope (all/subset), by time (before/after change)\n`;
-  } else if (lowerProblem.match(/slow|latency|timeout|performance/)) {
-    domainHint = `Suggested frames: by resource (CPU/memory/IO/network), by stage (request lifecycle), by scope\n`;
-  } else if (lowerProblem.match(/intermittent|flaky|sometimes|random/)) {
-    domainHint = `Suggested frames: by determinism (timing/data/state), by trigger (load/input/sequence)\n`;
-  }
+/**
+ * A hypothesis is "live" when it is still drawing investigation effort —
+ * pending, exploring, or corroborated (which may be reopened). Eliminated
+ * and out-of-scope are both pruning verdicts and are excluded from sibling
+ * counts, evidence matrices, ranking, and unexplored nudges.
+ */
+function isLive(status: Hypothesis['status']): boolean {
+  return status !== 'eliminated' && status !== 'out-of-scope';
+}
 
+export function formatCreateTree(sessionId: string, rootId: string, problem: string): string {
   return JSON.stringify({ sessionId, rootId }) + '\n\n' +
     `✓ Tree created: "${truncate(problem, 70)}"\n\n` +
     `── Domain Investigation ──\n` +
     `BEFORE decomposing, investigate the problem domain:\n` +
-    `1. Gather context: What is the system architecture? What changed recently?\n` +
-    `2. Characterize symptoms: When did it start? Who/what is affected? What is the scope?\n` +
+    `1. Gather context: What is the relevant background? What is already known?\n` +
+    `2. Characterize the question: What observations are being explained or what decision is being made? What is the scope?\n` +
     `3. Identify boundaries: What is IN scope vs OUT of scope for this investigation?\n` +
     `Fan out subagents to research the domain from multiple angles simultaneously.\n\n` +
     `── Decomposition ──\n` +
-    `Once you understand the domain, decompose into 2-5 MECE hypotheses.\n` +
-    (domainHint ? domainHint : '') +
-    `MECE criteria:\n` +
-    `  ME (Mutually Exclusive): Each hypothesis covers a DISTINCT failure mode — no overlaps.\n` +
-    `  CE (Collectively Exhaustive): Together they cover ALL plausible explanations.\n` +
-    `For EACH hypothesis, define what TEST would REFUTE it.\n` +
+    `Once you understand the domain, decompose into 2-5 sibling hypotheses.\n` +
+    `Choose a framing axis that suits the domain — by mechanism, by location, by stage, by actor, by time, or by population. Whichever axis you pick, make the siblings comparable along it.\n` +
+    `Aim for (the underlying set-partition property — overlap is acceptable when it reflects domain co-occurrence):\n` +
+    `  Non-overlapping siblings: each hypothesis covers a distinct possibility unless the domain genuinely co-instantiates them.\n` +
+    `  Collective coverage: together they cover the plausible space; an explicit catch-all branch is first-class.\n` +
+    `For EACH hypothesis, define what observation would REFUTE it.\n` +
     `Execute the most discriminating test first (one that separates hypotheses).\n\n` +
     `── Tree ──\n` +
     `0 hypotheses | Session: ${sessionId.slice(0, 8)}`;
@@ -89,7 +92,7 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   const minLen = Math.min(...lengths);
   const maxLen = Math.max(...lengths);
   if (maxLen > minLen * 3) {
-    result += `⚠ Abstraction mismatch: labels range from ${minLen} to ${maxLen} words\n`;
+    result += `level-mismatch-advisory: labels range from ${minLen} to ${maxLen} words — uneven abstraction\n`;
   }
 
   if (check.substringOverlaps.length === 0 && check.childCount >= 2 && maxLen <= minLen * 3) {
@@ -111,23 +114,24 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     }
   }
 
-  // Depth warning (Parnin & Orso 2011)
+  // Depth warning: deeper than three levels often indicates fragmentation
+  // rather than productive drilling.
   if (children[0] && children[0].depth >= 3) {
     result += `\nDepth ${children[0].depth}: Deep decompositions risk fragmenting the problem. Consider whether the parent is specific enough to test directly.\n`;
   }
 
-  // MECE review and protocol guidance
-  result += `\n── MECE Review ──\n`;
-  result += `STOP and review this decomposition before proceeding:\n`;
-  result += `  ME: Could a single root cause belong to TWO of these categories? If yes, refine the boundaries.\n`;
-  result += `  CE: Can you imagine a plausible cause NOT covered by ANY of these? If yes, add it.\n`;
-  result += `  Level: Are all hypotheses at the same level of abstraction?\n`;
-  // Dispatch the mece-evaluator subagent with content inlined (not bare UUIDs)
-  // so the validator can run its four checks without an extra get_tree call.
-  // Each child is prefixed with an 8-char ID so the agent can map findings
-  // back to a specific node when it follows up with add_evidence/eliminate.
+  // Decomposition advisory and protocol guidance
+  result += `\n── Decomposition Review ──\n`;
+  result += `Stop and review this decomposition before proceeding:\n`;
+  result += `  Overlap: could a single root cause belong to two of these? If accidental, refine the boundaries; if it reflects domain co-occurrence, consider an explicit "A and B" combined child.\n`;
+  result += `  Coverage: imagine a plausible cause NOT covered by ANY of these. If yes, add it (catch-all branches are first-class).\n`;
+  result += `  Level: are all hypotheses at the same level of abstraction?\n`;
+  // Dispatch the decomposition-evaluator subagent with content inlined (not
+  // bare UUIDs) so the validator can run its checks without an extra
+  // get_tree call. Each child is prefixed with an 8-char ID so the agent
+  // can map findings back to a specific node when it follows up.
   if (parent) {
-    result += `\nDispatch the \`mece-evaluator\` subagent (mutual exclusivity, collective exhaustiveness, level alignment, testability):\n`;
+    result += `\nDispatch the \`decomposition-evaluator\` subagent (overlap, coverage, level, testability):\n`;
     result += `  Parent: "${truncate(parent.content, 80)}"\n`;
     for (const c of children) {
       result += `  - ${c.id.slice(0, 8)}: "${truncate(c.content, 80)}"\n`;
@@ -143,16 +147,16 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
 
 export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): string {
   const siblings = tm.getSiblings(hypothesis.id);
-  const activeSiblings = siblings.filter((s) => s.status !== 'eliminated');
+  const activeSiblings = siblings.filter((s) => isLive(s.status));
 
   let result = JSON.stringify({ hypothesisId: hypothesis.id }) + '\n\n' +
     `✓ Added hypothesis: "${truncate(hypothesis.content, 60)}"\n\n`;
 
-  result += `── MECE Validation ──\n`;
+  result += `── Sibling Review ──\n`;
   result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
-  result += `  ME: Does this new hypothesis overlap with any existing sibling?\n`;
-  result += `  CE: Does adding this close a gap, or is there still something missing?\n`;
-  result += `Fan out subagents to challenge whether this hypothesis is truly distinct from its siblings.\n\n`;
+  result += `  Overlap: does this overlap acknowledge a domain co-occurrence (e.g., an INUS cluster), or is it accidental redundancy?\n`;
+  result += `  Coverage: does adding this close a gap, or is there still something missing?\n`;
+  result += `Fan out subagents to challenge whether this hypothesis is genuinely distinct or whether it should be merged with a sibling.\n\n`;
 
   result += `── Protocol ──\n`;
   result += `What is the fastest path to REFUTE this hypothesis? Define the test before investigating.\n`;
@@ -166,14 +170,14 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   const refuting = hypothesis.evidence.filter((e) => e.type === 'refutes').length;
 
   const siblings = tm.getSiblings(hypothesisId);
-  const activeSiblings = siblings.filter((s) => s.status !== 'eliminated');
+  const activeSiblings = siblings.filter((s) => isLive(s.status));
 
   let result = JSON.stringify({ hypothesisId, evidenceCount: hypothesis.evidence.length }) + '\n\n' +
     `✓ Evidence added to "${truncate(hypothesis.content, 50)}"\n\n`;
 
   // Evidence matrix across siblings
   result += `── Evidence Matrix ──\n`;
-  const allHypotheses = [hypothesis, ...siblings].filter((h) => h.status !== 'eliminated');
+  const allHypotheses = [hypothesis, ...siblings].filter((h) => isLive(h.status));
   for (const h of allHypotheses) {
     const s = h.evidence.filter((e) => e.type === 'supports').length;
     const r = h.evidence.filter((e) => e.type === 'refutes').length;
@@ -196,7 +200,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     }
   }
 
-  // Confirmation bias detection + confounder check (Mill 1843, Hill 1965)
+  // Confirmation bias detection + confounder check (Mill 1843)
   if (supporting >= 3 && refuting === 0 && activeSiblings.length > 0) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
@@ -262,7 +266,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
 
 export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string {
   const siblings = tm.getSiblings(hypothesis.id);
-  const remaining = siblings.filter((s) => s.status !== 'eliminated');
+  const remaining = siblings.filter((s) => isLive(s.status));
 
   let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'eliminated' }) + '\n\n' +
     `✓ Eliminated "${truncate(hypothesis.content, 50)}"\n` +
@@ -276,8 +280,14 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
     result += `  Can you REPRODUCE the issue by triggering this cause?\n`;
     result += `  Fan out subagents to challenge this conclusion from different angles — what could you be missing?\n`;
   } else if (remaining.length === 0) {
-    result += `\n⚠ All siblings eliminated — hypothesis space may be incomplete.\n`;
-    result += `Fan out subagents to investigate what was missed. Add new hypotheses from fresh perspectives.\n`;
+    const allEliminated = siblings.length > 0 && siblings.every((s) => s.status === 'eliminated');
+    if (allEliminated) {
+      result += `\n⚠ All siblings eliminated — hypothesis space may be incomplete.\n`;
+      result += `Fan out subagents to investigate what was missed. Add new hypotheses from fresh perspectives.\n`;
+    } else {
+      result += `\n⚠ No live siblings remain (every sibling is eliminated or out-of-scope).\n`;
+      result += `If the out-of-scope branches were set aside without refutation, consider whether the answer might lie there before closing the investigation.\n`;
+    }
   } else {
     result += `\n── Protocol ──\n`;
     result += `What is the most discriminating test to distinguish the remaining ${remaining.length} hypotheses?\n`;
@@ -288,28 +298,61 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   return result;
 }
 
-export function formatConfirm(hypothesis: Hypothesis, tm: TreeManager): string {
-  const siblings = tm.getSiblings(hypothesis.id);
-  const eliminated = siblings.filter((s) => s.status === 'eliminated');
+export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): string {
+  const state = tm.getTree(hypothesis.sessionId);
+  const sessionResolved = state?.session.status === 'resolved';
 
-  let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'confirmed' }) + '\n\n' +
-    `✓ Confirmed "${truncate(hypothesis.content, 50)}"\n` +
+  let result = JSON.stringify({
+    hypothesisId: hypothesis.id,
+    status: 'corroborated',
+    sessionStatus: state?.session.status ?? 'open',
+  }) + '\n\n' +
+    `✓ Corroborated "${truncate(hypothesis.content, 50)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
 
-  result += `── Verification ──\n`;
+  if (sessionResolved) {
+    const corroboratedLeaves = state ? Array.from(state.hypotheses.values()).filter(
+      (h) => h.status === 'corroborated' && h.children.length === 0,
+    ) : [];
+    result += `── Session resolved ──\n`;
+    if (corroboratedLeaves.length > 1) {
+      result += `${corroboratedLeaves.length} corroborated leaves (multiple co-instantiated contributors are admissible — Mackie INUS):\n`;
+      for (const h of corroboratedLeaves) {
+        result += `  - ${h.id.slice(0, 8)}: "${truncate(h.content, 60)}"\n`;
+      }
+    }
+    result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
+  } else {
+    // List every still-pending or still-exploring hypothesis session-wide,
+    // not just direct siblings — the agent must dispose of every other
+    // top-level branch before resolution.
+    const open = state ? Array.from(state.hypotheses.values()).filter(
+      (h) => h.status === 'pending' || h.status === 'exploring',
+    ) : [];
+    result += `── Resolution pending ──\n`;
+    result += `${open.length} hypothes${open.length === 1 ? 'is' : 'es'} still open:\n`;
+    for (const h of open) {
+      result += `  - ${h.id.slice(0, 8)} [${h.status}]: "${truncate(h.content, 60)}"\n`;
+    }
+    result += `\nEach must be eliminated (with refuting evidence), corroborated, or set_out_of_scope before the session resolves.\n`;
+  }
+
+  result += `\n── Verification ──\n`;
   result += `1. Does this explain ALL observed symptoms?\n`;
   result += `2. Can you REPRODUCE the issue by triggering this cause?\n`;
-  result += `3. Were competing hypotheses eliminated with evidence (not just ignored)?\n`;
+  result += `3. Were competing hypotheses disposed of with evidence (not just ignored)?\n`;
   result += `4. TEMPORALITY: Did this cause precede the failure in time?\n`;
   result += `5. SPECIFICITY: Does this explain THIS failure pattern specifically, not just failures in general?\n`;
 
-  if (eliminated.length < siblings.length) {
-    const unresolved = siblings.filter((s) => s.status !== 'eliminated' && s.id !== hypothesis.id);
-    if (unresolved.length > 0) {
-      result += `\n⚠ ${unresolved.length} sibling(s) not eliminated: ${unresolved.map((u) => truncate(u.content, 25)).join(', ')}\n`;
-    }
-  }
+  result += '\n' + formatTreeSummary(tm);
+  return result;
+}
 
+export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): string {
+  let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'out-of-scope' }) + '\n\n' +
+    `⊘ Out-of-scope "${truncate(hypothesis.content, 50)}"\n` +
+    `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
+  result += `Branch set aside without investigation. The audit trail records the choice; closure treats this as pruning.\n`;
   result += '\n' + formatTreeSummary(tm);
   return result;
 }
@@ -317,7 +360,7 @@ export function formatConfirm(hypothesis: Hypothesis, tm: TreeManager): string {
 export function formatScore(hypothesis: Hypothesis, tm: TreeManager): string {
   const siblings = tm.getSiblings(hypothesis.id);
   const ranked = [hypothesis, ...siblings]
-    .filter((h) => h.score !== null && h.status !== 'eliminated')
+    .filter((h) => h.score !== null && isLive(h.status))
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
   const ranking = ranked.map((h, i) =>
@@ -345,13 +388,13 @@ export function formatScore(hypothesis: Hypothesis, tm: TreeManager): string {
     result += `What test would SEPARATE them?\n`;
   }
 
-  // Ready-for-confirmation signal
+  // Ready-for-corroboration signal
   if (hypothesis.score !== null && hypothesis.score >= 0.85) {
     const siblings = tm.getSiblings(hypothesis.id);
-    const allSiblingsWeak = siblings.every((s) => s.status === 'eliminated' || (s.score !== null && s.score < 0.3));
+    const allSiblingsWeak = siblings.every((s) => !isLive(s.status) || (s.score !== null && s.score < 0.3));
     const someRefutationAttempted = siblings.some((s) => s.evidence.some((e) => e.type === 'refutes'));
     if (allSiblingsWeak && someRefutationAttempted) {
-      result += `\n→ Evidence appears sufficient: strong support, alternatives eliminated, refutation attempted. Consider confirmation.\n`;
+      result += `\n→ Evidence appears sufficient: strong support, alternatives pruned (eliminated or out-of-scope), refutation attempted. Consider corroboration.\n`;
     }
   }
 
@@ -360,26 +403,44 @@ export function formatScore(hypothesis: Hypothesis, tm: TreeManager): string {
 }
 
 export function formatValidateDecomposition(parentId: string, check: StructuralCheck): string {
-  let result = JSON.stringify({ parentId, check }) + '\n\n' +
+  // Advisory output, not pass/fail. Strict mutual exclusivity is rejected
+  // for hypothesis sets (Heuer 2005); siblings can overlap when they
+  // reflect domain co-occurrence (Mackie INUS).
+  const advisories: string[] = [];
+  if (check.substringOverlaps.length > 0) advisories.push('overlap-advisory');
+  if (check.duplicateLabels.length > 0) advisories.push('overlap-advisory');
+  if (!check.hasCatchAll) advisories.push('coverage-gap-advisory');
+  if (check.abstractionMismatch) advisories.push('level-mismatch-advisory');
+  if (advisories.length === 0) advisories.push('no-issues-detected');
+
+  let result = JSON.stringify({ parentId, advisories: Array.from(new Set(advisories)), check }) + '\n\n' +
     `── Structural Checks ──\n` +
     `Children: ${check.childCount}\n`;
 
   if (check.substringOverlaps.length > 0) {
-    result += `⚠ Substring overlaps: ${check.substringOverlaps.length} pair(s)\n`;
+    result += `overlap-advisory: ${check.substringOverlaps.length} substring pair(s) — accidental redundancy, or domain co-occurrence (INUS)?\n`;
   } else {
-    result += `✓ No substring overlaps\n`;
+    result += `No substring overlaps detected.\n`;
   }
 
   if (check.duplicateLabels.length > 0) {
-    result += `⚠ Duplicates: ${check.duplicateLabels.join(', ')}\n`;
+    result += `overlap-advisory: duplicate labels: ${check.duplicateLabels.join(', ')}\n`;
   }
 
-  result += check.hasCatchAll ? `✓ Has catch-all category\n` : `Note: No catch-all\n`;
+  result += check.hasCatchAll
+    ? `Has explicit catch-all branch.\n`
+    : `coverage-gap-advisory: no explicit catch-all — closure of the cause space is being claimed by enumeration.\n`;
 
-  result += `\n── Validation Questions ──\n`;
-  result += `ME: Could a single observation belong to two of these hypotheses?\n`;
-  result += `CE: Is there a plausible cause not covered by any hypothesis?\n`;
-  result += `Level: Are all hypotheses at the same level of abstraction?\n`;
+  if (check.abstractionMismatch) {
+    result += `level-mismatch-advisory: child labels span uneven word-count ranges, suggesting mixed abstraction.\n`;
+  }
+
+  result += `\n── Review Questions ──\n`;
+  result += `\n(testability-advisory cases — unfalsifiable hypotheses — require semantic review; dispatch the decomposition-evaluator subagent for those.)\n`;
+  result += `Overlap: could a single observation belong to two of these by accident?\n`;
+  result += `Coverage: is there a plausible cause not covered by any sibling or catch-all?\n`;
+  result += `Level: are all hypotheses at the same level of abstraction?\n`;
+  result += `\nDispatch the \`decomposition-evaluator\` subagent for structural advice on ambiguous cases.\n`;
 
   return result;
 }
@@ -388,16 +449,20 @@ export function formatStatus(tm: TreeManager): string {
   const status = tm.getStatus();
 
   if (!status.session) {
-    return `No active session. Call create_tree to start.`;
+    return `No open session. Call create_tree to start.`;
   }
 
   const { session, counts, stagnant, unexplored, bestLead } = status;
-  const total = counts.pending + counts.exploring + counts.eliminated + counts.confirmed;
+  const outOfScope = counts['out-of-scope'] ?? 0;
+  const terminal = counts.eliminated + counts.corroborated + outOfScope;
+  const total = counts.pending + counts.exploring + terminal;
+
+  let breakdown = `${counts.eliminated} eliminated, ${counts.corroborated} corroborated, ${counts.exploring} exploring`;
+  if (outOfScope > 0) breakdown += `, ${outOfScope} out-of-scope`;
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +
     `Problem: "${truncate(session.problem, 70)}"\n` +
-    `Progress: ${counts.eliminated + counts.confirmed}/${total} resolved ` +
-    `(${counts.eliminated} eliminated, ${counts.confirmed} confirmed, ${counts.exploring} exploring)\n`;
+    `Progress: ${terminal}/${total} resolved (${breakdown})\n`;
 
   if (unexplored.length > 0) {
     result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
@@ -411,9 +476,9 @@ export function formatStatus(tm: TreeManager): string {
     result += `  This reframing often reveals overlooked tests.\n`;
   }
 
-  const activeSessions = tm.getAllSessions().filter((s) => s.status === 'active');
-  if (activeSessions.length > 1) {
-    result += `\nNote: ${activeSessions.length} active sessions. Use get_tree with sessionId to view others.`;
+  const openSessions = tm.getAllSessions().filter((s) => s.status === 'open');
+  if (openSessions.length > 1) {
+    result += `\nNote: ${openSessions.length} open sessions. Use get_tree with sessionId to view others.`;
   }
 
   return result;
@@ -424,10 +489,12 @@ function formatTreeSummary(tm: TreeManager): string {
   if (!status.session) return '';
 
   const { counts, stagnant, unexplored, bestLead } = status;
-  const total = counts.pending + counts.exploring + counts.eliminated + counts.confirmed;
+  const outOfScope = counts['out-of-scope'] ?? 0;
+  const terminal = counts.eliminated + counts.corroborated + outOfScope;
+  const total = counts.pending + counts.exploring + terminal;
 
   let summary = `── Tree ──\n`;
-  summary += `Progress: ${counts.eliminated + counts.confirmed}/${total} resolved`;
+  summary += `Progress: ${terminal}/${total} resolved`;
   if (counts.exploring > 0) summary += ` | Investigating: ${counts.exploring}`;
   if (unexplored.length > 0) summary += ` | Unexplored: ${unexplored.length}`;
   if (bestLead) summary += ` | Lead: "${truncate(bestLead.content, 20)}" (${bestLead.score!.toFixed(2)})`;

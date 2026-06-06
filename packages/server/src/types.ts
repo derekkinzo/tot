@@ -13,7 +13,15 @@ export interface Hypothesis {
   children: string[];
 }
 
-export type HypothesisStatus = 'pending' | 'exploring' | 'eliminated' | 'confirmed';
+// 'out-of-scope': terminal but no refutation claimed — the agent is set
+// aside this branch as not worth investigating, distinct from elimination
+// which asserts a refuting record. Closure treats both as pruning.
+export type HypothesisStatus =
+  | 'pending'
+  | 'exploring'
+  | 'eliminated'
+  | 'corroborated'
+  | 'out-of-scope';
 
 export interface Evidence {
   id: string;
@@ -24,9 +32,12 @@ export interface Evidence {
 }
 
 export interface Conclusion {
-  verdict: 'eliminated' | 'confirmed';
+  verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
   reason: string;
   timestamp: string;
+  // Ids of refutes-typed evidence that ground an 'eliminated' verdict.
+  // Empty array when replaying older journals that did not record this.
+  refutingEvidenceIds?: string[];
 }
 
 export interface HypothesisMetadata {
@@ -39,17 +50,20 @@ export interface Session {
   id: string;
   problem: string;
   rootNodeId: string;
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   completedAt?: string;
 }
 
+// 'session-completed' covers both terminal transitions (resolved and
+// abandoned); terminalStatus disambiguates which.
 export type TreeEvent =
   | { type: 'session-created'; session: Session }
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
-  | { type: 'session-completed'; sessionId: string }
+  | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
+  | { type: 'session-reopened'; sessionId: string }
   | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };
 
 export interface StructuralCheck {
@@ -57,6 +71,9 @@ export interface StructuralCheck {
   substringOverlaps: [string, string][];
   duplicateLabels: string[];
   hasCatchAll: boolean;
+  // True when sibling labels span uneven word-count ranges, surfacing the
+  // possibility of mixed abstraction levels.
+  abstractionMismatch: boolean;
 }
 
 export interface TreeState {

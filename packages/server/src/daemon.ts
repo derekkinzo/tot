@@ -73,7 +73,7 @@ function getOrCreateProject(projectDir: string): ProjectState {
     const sorted = [...sessionIndex].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-    const target = sorted.find((s) => s.status === 'active') ?? sorted[0];
+    const target = sorted.find((s) => s.status === 'open') ?? sorted[0];
     const loaded = loadSession(target.filePath);
     if (loaded) {
       tm.loadState([loaded.session], loaded.hypotheses);

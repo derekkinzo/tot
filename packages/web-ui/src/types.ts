@@ -4,13 +4,14 @@ export interface Hypothesis {
   sessionId: string;
   depth: number;
   content: string;
-  status: 'pending' | 'exploring' | 'eliminated' | 'confirmed';
+  status: 'pending' | 'exploring' | 'eliminated' | 'corroborated' | 'out-of-scope';
   score: number | null;
   evidence: Evidence[];
   conclusion?: {
-    verdict: 'eliminated' | 'confirmed';
+    verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
     reason: string;
     timestamp: string;
+    refutingEvidenceIds?: string[];
   };
   metadata: {
     createdAt: string;
@@ -32,7 +33,7 @@ export interface Session {
   id: string;
   problem: string;
   rootNodeId: string;
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   completedAt?: string;
 }
@@ -42,5 +43,6 @@ export type TreeEvent =
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
-  | { type: 'session-completed'; sessionId: string }
+  | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
+  | { type: 'session-reopened'; sessionId: string }
   | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };

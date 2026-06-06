@@ -1,7 +1,7 @@
 {
   "name": "tot-mcp",
   "version": "0.1.0",
-  "description": "Tree of Thoughts MCP Server — structured hypothesis reasoning with MECE decomposition and real-time visualization",
+  "description": "Tree of Thoughts MCP Server — structured hypothesis reasoning grounded in falsificationism and eliminative induction, with real-time visualization",
   "type": "module",
   "author": "Derek Kinzo",
   "license": "MIT",
@@ -35,9 +35,9 @@
     "mcp",
     "tree-of-thoughts",
     "reasoning",
-    "mece",
-    "debugging",
     "hypothesis",
+    "falsification",
+    "eliminative-induction",
     "structured-thinking"
   ],
   "dependencies": {

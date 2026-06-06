@@ -1,7 +1,7 @@
 {
   "name": "tot-mcp",
   "metadata": {
-    "description": "Structured hypothesis tree reasoning with MECE decomposition, scientific protocols, and real-time browser visualization"
+    "description": "Structured hypothesis tree reasoning grounded in falsificationism and eliminative induction, with real-time browser visualization"
   },
   "owner": {
     "name": "derekkinzo"

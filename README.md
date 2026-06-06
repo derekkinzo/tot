@@ -5,7 +5,7 @@
 
 **Structured hypothesis tree reasoning for AI agents** — with real-time browser visualization.
 
-Agents decompose problems into hypothesis trees, gather evidence, eliminate dead ends systematically, and confirm root causes — all visible live in your browser.
+Agents decompose problems into hypothesis trees, gather evidence, eliminate dead ends systematically, and corroborate surviving hypotheses — all visible live in your browser.
 
 ![tot-mcp demo](https://raw.githubusercontent.com/derekkinzo/tot/main/docs/demo.gif)
 
@@ -86,7 +86,8 @@ Add to your MCP configuration:
 | `add_hypothesis` | Add a missed hypothesis to the tree |
 | `add_evidence` | Attach supporting/refuting/neutral evidence |
 | `eliminate_hypothesis` | Mark a hypothesis as a dead end (with reason) |
-| `confirm_hypothesis` | Mark as the confirmed root cause |
+| `corroborate_hypothesis` | Mark a surviving hypothesis as corroborated (provisionally retained) |
+| `set_out_of_scope` | Mark a branch terminal without investigating it (no refutation claimed) |
 | `score_hypothesis` | Set confidence (0-1) based on evidence |
 | `get_tree` | View the current tree structure |
 | `get_status` | Progress summary + stagnation detection |
@@ -109,7 +110,7 @@ The plugin also includes agents for parallel investigation and adversarial revie
 |-------|---------|
 | `hypothesis-challenger` | Stress-tests a hypothesis from multiple angles, surfacing assumptions and missing alternatives |
 | `evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
-| `mece-evaluator` | Validates a decomposition for mutual exclusivity, collective exhaustiveness, level alignment, and testability |
+| `decomposition-evaluator` | Advises on decomposition structure: sibling overlap, coverage, level of abstraction, testability. Emits advisory categories, not pass/fail. |
 
 It also ships hooks that detect failure patterns.
 
@@ -120,7 +121,7 @@ It also ships hooks that detect failure patterns.
 3. For each hypothesis, the agent gathers evidence to **refute** it
 4. Hypotheses that fail the evidence test are **eliminated**
 5. Surviving hypotheses are decomposed further (deeper levels)
-6. When one hypothesis remains with strong evidence, it's **confirmed**
+6. When a hypothesis has survived the refutation tests applied to it, it is **corroborated** (Popper) — provisional retention, not verification
 
 The tool responses guide the agent through this process — prompting for refuting evidence, flagging confirmation bias, and suggesting discriminating tests.
 
@@ -129,7 +130,7 @@ The tool responses guide the agent through this process — prompting for refuti
 The browser UI at `localhost:6274` shows:
 
 - **Live tree updates** via Server-Sent Events (no polling)
-- **Color-coded status** — pending (blue), exploring (yellow), eliminated (dimmed), confirmed (green)
+- **Color-coded status** — pending (blue), exploring (yellow), eliminated (dimmed), corroborated (green)
 - **Path highlighting** — click a node to see the path from root
 - **Evidence detail panel** — click any node to see all attached evidence
 - **Follow mode** — auto-tracks agent activity (press F to toggle)

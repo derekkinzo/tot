@@ -46,14 +46,15 @@ describe('MCP Integration', () => {
   // ─── Tool Discovery ───
 
   describe('tool discovery', () => {
-    it('lists all 10 tools with correct names', async () => {
+    it('lists all 11 tools with correct names', async () => {
       const result = await client.listTools();
-      expect(result.tools).toHaveLength(10);
+      expect(result.tools).toHaveLength(11);
       const names = result.tools.map((t) => t.name).sort();
       expect(names).toEqual([
-        'add_evidence', 'add_hypothesis', 'confirm_hypothesis',
+        'add_evidence', 'add_hypothesis', 'corroborate_hypothesis',
         'create_tree', 'decompose', 'eliminate_hypothesis',
-        'get_status', 'get_tree', 'score_hypothesis', 'validate_decomposition',
+        'get_status', 'get_tree', 'score_hypothesis',
+        'set_out_of_scope', 'validate_decomposition',
       ]);
     });
 
@@ -87,7 +88,7 @@ describe('MCP Integration', () => {
         arguments: { problem: 'Memory leak in production' },
       });
       const text = getText(result);
-      expect(text).toContain('MECE');
+      expect(text).toContain('Decomposition');
       expect(text).toContain('REFUTE');
     });
 
@@ -125,7 +126,7 @@ describe('MCP Integration', () => {
         arguments: { parentId: rootId, children: ['Network layer', 'Application layer'] },
       });
       const text = getText(result);
-      expect(text).toContain('MECE Review');
+      expect(text).toContain('Decomposition Review');
     });
 
     it('supports multi-level decomposition', async () => {
@@ -375,7 +376,7 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: rootId, type: 'supports', content: 'good' },
       });
       await client.callTool({
-        name: 'confirm_hypothesis',
+        name: 'corroborate_hypothesis',
         arguments: { hypothesisId: rootId, reason: 'confirmed' },
       });
       const result = await client.callTool({
@@ -386,10 +387,10 @@ describe('MCP Integration', () => {
     });
   });
 
-  // ─── confirm_hypothesis ───
+  // ─── corroborate_hypothesis ───
 
-  describe('confirm_hypothesis', () => {
-    it('confirms and includes completeness prompt', async () => {
+  describe('corroborate_hypothesis', () => {
+    it('corroborates and includes completeness prompt', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
       );
@@ -398,16 +399,16 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: rootId, type: 'supports', content: 'proof' },
       });
       const result = await client.callTool({
-        name: 'confirm_hypothesis',
+        name: 'corroborate_hypothesis',
         arguments: { hypothesisId: rootId, reason: 'Root cause found' },
       });
       expect(result.isError).toBeFalsy();
       const text = getText(result);
-      expect(text).toContain('Confirmed');
+      expect(text).toContain('Corroborated');
       expect(text).toContain('explain ALL observed symptoms');
     });
 
-    it('error: confirm eliminated hypothesis', async () => {
+    it('error: corroborate eliminated hypothesis', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
       );
@@ -420,7 +421,7 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: rootId, reason: 'dead' },
       });
       const result = await client.callTool({
-        name: 'confirm_hypothesis',
+        name: 'corroborate_hypothesis',
         arguments: { hypothesisId: rootId, reason: 'actually yes' },
       });
       expect(result.isError).toBe(true);
@@ -533,7 +534,7 @@ describe('MCP Integration', () => {
         name: 'get_tree',
         arguments: { format: 'compact' },
       });
-      expect(getText(result)).toContain('No active session');
+      expect(getText(result)).toContain('No open session');
     });
   });
 
@@ -592,7 +593,7 @@ describe('MCP Integration', () => {
 
     it('no session returns informative message', async () => {
       const result = await client.callTool({ name: 'get_status', arguments: {} });
-      expect(getText(result)).toContain('No active session');
+      expect(getText(result)).toContain('No open session');
     });
   });
 
@@ -645,6 +646,44 @@ describe('MCP Integration', () => {
       });
       const text = getText(result);
       expect(text).toContain('No substring overlaps');
+    });
+
+    it('emits advisory categories rather than pass/fail', async () => {
+      const { rootId } = parseResult(
+        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
+      );
+      await client.callTool({
+        name: 'decompose',
+        arguments: { parentId: rootId, children: ['Network error', 'Network'] },
+      });
+      const result = await client.callTool({
+        name: 'validate_decomposition',
+        arguments: { parentId: rootId },
+      });
+      const text = getText(result);
+      // Output uses advisory vocabulary, not PASS/FAIL/NEEDS_REVISION
+      expect(text).not.toContain('PASS');
+      expect(text).not.toContain('FAIL');
+      expect(text).toContain('overlap-advisory');
+    });
+
+    it('detects abstraction mismatch and emits level-mismatch-advisory', async () => {
+      const { rootId } = parseResult(
+        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
+      );
+      await client.callTool({
+        name: 'decompose',
+        arguments: { parentId: rootId, children: [
+          'Layer issue',
+          'Persistent connection drift in long-lived TCP socket pool under concurrent reuse pressure',
+        ] },
+      });
+      const result = await client.callTool({
+        name: 'validate_decomposition',
+        arguments: { parentId: rootId },
+      });
+      const text = getText(result);
+      expect(text).toContain('level-mismatch-advisory');
     });
 
     it('error: non-existent parent', async () => {
@@ -744,16 +783,16 @@ describe('MCP Integration', () => {
         arguments: { hypothesisId: l2[0], score: 0.95 },
       });
 
-      // Confirm root cause
-      const confirmResult = await client.callTool({
-        name: 'confirm_hypothesis',
+      // Corroborate root cause
+      const corroborateResult = await client.callTool({
+        name: 'corroborate_hypothesis',
         arguments: {
           hypothesisId: l2[0],
           reason: 'v2.4.1 line 142: order.getGiftMessage().length() without null check. 5% of orders have null gift_message.',
         },
       });
-      expect(confirmResult.isError).toBeFalsy();
-      expect(getText(confirmResult)).toContain('Confirmed');
+      expect(corroborateResult.isError).toBeFalsy();
+      expect(getText(corroborateResult)).toContain('Corroborated');
     });
 
     it('agent adds missed hypothesis after initial decompose', async () => {
@@ -806,6 +845,10 @@ describe('MCP Integration', () => {
       });
       expect(getText(scoreResult)).toContain('Progress:');
 
+      await client.callTool({
+        name: 'add_evidence',
+        arguments: { hypothesisId: childIds[2], type: 'refutes', content: 'nope' },
+      });
       const elimResult = await client.callTool({
         name: 'eliminate_hypothesis',
         arguments: { hypothesisId: childIds[2], reason: 'nope' },
