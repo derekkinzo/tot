@@ -34,18 +34,9 @@
  * - Inference detection: 2+ keywords (suggests/implies/could/might/possibly/likely)
  */
 
+import { isLive } from './closure.js';
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
-
-/**
- * A hypothesis is "live" when it is still drawing investigation effort —
- * pending, exploring, or corroborated (which may be reopened). Eliminated
- * and out-of-scope are both pruning verdicts and are excluded from sibling
- * counts, evidence matrices, ranking, and unexplored nudges.
- */
-function isLive(status: Hypothesis['status']): boolean {
-  return status !== 'eliminated' && status !== 'out-of-scope';
-}
 
 export function formatCreateTree(sessionId: string, rootId: string, problem: string): string {
   return JSON.stringify({ sessionId, rootId }) + '\n\n' +
