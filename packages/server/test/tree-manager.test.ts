@@ -364,6 +364,32 @@ describe('TreeManager', () => {
       expect(a.status).toBe('corroborated');
     });
 
+    it('refuting evidence on a corroborated leaf reopens an abandoned session as well', () => {
+      // Both terminal states (resolved and abandoned) reflect a claimed
+      // closure that fresh refutation challenges; either reopens. Concrete
+      // path to abandoned-with-buried-corroboration: corroborate A2 under
+      // A, eliminate A, eliminate B → no live corroboration on a non-pruned
+      // lineage → session abandons. A2 stays corroborated.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      const [a1, a2] = tm.decompose(a.id, ['A1', 'A2']);
+      tm.addEvidence(a1.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a1.id, 'gone');
+      tm.addEvidence(a2.id, 'supports', 'good');
+      tm.corroborateHypothesis(a2.id, 'A2 wins');
+      tm.addEvidence(a.id, 'refutes', 'overall A is wrong');
+      tm.eliminateHypothesis(a.id, 'A pruned');
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'gone');
+      expect(session.status).toBe('abandoned');
+
+      const events: TreeEvent[] = [];
+      tm.on('event', (e) => events.push(e));
+      tm.addEvidence(a2.id, 'refutes', 'counter-instance');
+      expect(session.status).toBe('open');
+      expect(events.some((e) => e.type === 'session-reopened')).toBe(true);
+    });
+
     it('rejects supports/neutral evidence on a corroborated leaf', () => {
       const { root } = tm.createSession('Problem');
       const [a, b] = tm.decompose(root.id, ['A', 'B']);
@@ -683,6 +709,23 @@ describe('TreeManager', () => {
       const status = tm.getStatus();
       expect(status.bestLead?.id).toBe(children[1].id);
     });
+
+    it('does not pick a pruned hypothesis as best lead', () => {
+      // A pruning verdict (eliminated, out-of-scope) cannot accept further
+      // work, so it must not surface as the agent's "best lead".
+      const { root } = tm.createSession('Problem');
+      const children = tm.decompose(root.id, ['A', 'B', 'C']);
+      tm.scoreHypothesis(children[0].id, 0.3);
+      tm.scoreHypothesis(children[1].id, 0.9);
+      tm.scoreHypothesis(children[2].id, 0.5);
+      tm.addEvidence(children[1].id, 'refutes', 'no');
+      tm.eliminateHypothesis(children[1].id, 'gone');
+      const eliminatedLead = tm.getStatus().bestLead;
+      expect(eliminatedLead?.id).toBe(children[2].id);
+      tm.setOutOfScope(children[2].id, 'aside');
+      const oosLead = tm.getStatus().bestLead;
+      expect(oosLead?.id).toBe(children[0].id);
+    });
   });
 
   // --- Stagnation Detection ---
@@ -714,6 +757,37 @@ describe('TreeManager', () => {
       expect(tm.getStatus().stagnant).toBe(true);
       // Status change resets
       tm.addEvidence(children[0].id, 'supports', 'Progress');
+      expect(tm.getStatus().stagnant).toBe(false);
+    });
+
+    it('reopen-on-refute resets the stagnation counter (session-level transition is real progress)', () => {
+      // Resolve session A via corroborate+eliminate. Open a second session B
+      // so getActiveSession has a fallback (A is no longer open and would
+      // otherwise hide from getStatus). Reproduce stagnation on B via
+      // no-op scoring, then refute A's corroborated leaf — A reopens AND
+      // the counter must reset so the next get_status on B does not
+      // falsely warn about stagnation produced by unrelated activity.
+      const { session: sessionA, root: rootA } = tm.createSession('Problem A');
+      const [a, bA] = tm.decompose(rootA.id, ['A', 'B']);
+      tm.addEvidence(a.id, 'supports', 'good');
+      tm.corroborateHypothesis(a.id, 'A survives');
+      tm.addEvidence(bA.id, 'refutes', 'no');
+      tm.eliminateHypothesis(bA.id, 'gone');
+      expect(sessionA.status).toBe('resolved');
+
+      // Open session B and bump its stagnation counter via no-op scoring.
+      const { root: rootB } = tm.createSession('Problem B');
+      const [b1] = tm.decompose(rootB.id, ['B1', 'B2']);
+      tm.scoreHypothesis(b1.id, 0.1);
+      tm.scoreHypothesis(b1.id, 0.2);
+      tm.scoreHypothesis(b1.id, 0.3);
+      tm.scoreHypothesis(b1.id, 0.4);
+      expect(tm.getStatus().stagnant).toBe(true);
+
+      // Refute A's corroborated leaf — sessionA reopens. The counter is
+      // shared engine-wide; the session-level transition resets it.
+      tm.addEvidence(a.id, 'refutes', 'counter-instance');
+      expect(sessionA.status).toBe('open');
       expect(tm.getStatus().stagnant).toBe(false);
     });
 

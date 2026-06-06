@@ -243,15 +243,21 @@ export class TreeManager extends EventEmitter {
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
     // A refute against a corroborated leaf reopens the session: the verdict
-    // remains in the audit trail, but the closure is no longer claimed.
+    // remains in the audit trail, but the closure is no longer claimed. Both
+    // terminal states (resolved and abandoned) reflect a claimed closure
+    // that fresh refutation challenges; either reopens.
     const session = this.sessions.get(hypothesis.sessionId);
     if (
       type === 'refutes' &&
       hypothesis.status === 'corroborated' &&
-      session && session.status === 'resolved'
+      session && session.status !== 'open'
     ) {
       session.status = 'open';
       session.completedAt = undefined;
+      // Session-level transitions are real disposition progress; reset the
+      // stagnation counter so a legitimate reopen does not register as a tick.
+      this.mutationsSinceStatusChange = 0;
+      this.touch();
       this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
     }
 
@@ -537,7 +543,10 @@ export class TreeManager extends EventEmitter {
     for (const h of state.hypotheses.values()) {
       counts[h.status]++;
       if (h.status === 'pending') unexplored.push(h);
-      if (h.score !== null && (bestLead === null || h.score > bestLead.score!)) {
+      // Pruning verdicts (eliminated, out-of-scope) cannot accept further work
+      // and must not surface as the agent's "best lead".
+      const isLive = h.status !== 'eliminated' && h.status !== 'out-of-scope';
+      if (isLive && h.score !== null && (bestLead === null || h.score > bestLead.score!)) {
         bestLead = h;
       }
     }
