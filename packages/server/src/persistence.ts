@@ -20,39 +20,6 @@ interface JournalEntry {
   payload: unknown;
 }
 
-// Translates legacy status literals on read so older JSONL files replay into
-// the current vocabulary. The on-disk bytes are never rewritten — every read
-// path passes payloads through one of these before they become typed records.
-// Session and hypothesis vocabularies are translated separately because their
-// legacy and current value sets do not overlap.
-function translateLegacySessionStatus<T extends { status?: string }>(payload: T): T {
-  if (!payload || typeof payload !== 'object' || !payload.status) return payload;
-  switch (payload.status) {
-    case 'active':    payload.status = 'open'; break;
-    case 'completed': payload.status = 'resolved'; break;
-  }
-  return payload;
-}
-
-function translateLegacyHypothesisStatus<T extends { status?: string }>(payload: T): T {
-  if (!payload || typeof payload !== 'object' || !payload.status) return payload;
-  if (payload.status === 'confirmed') payload.status = 'corroborated';
-  return payload;
-}
-
-function translateLegacyVerdict<T extends { conclusion?: { verdict?: string; refutingEvidenceIds?: string[] } }>(payload: T): T {
-  if (payload?.conclusion?.verdict === 'confirmed') {
-    payload.conclusion.verdict = 'corroborated';
-  }
-  // Legacy eliminated records carry no refutingEvidenceIds. Fill an empty
-  // array so the in-memory shape is consistent; the audit trail is genuinely
-  // absent for these records.
-  if (payload?.conclusion?.verdict === 'eliminated' && payload.conclusion.refutingEvidenceIds === undefined) {
-    payload.conclusion.refutingEvidenceIds = [];
-  }
-  return payload;
-}
-
 export class Persistence {
   private filePath: string;
   private onError?: (err: Error) => void;
@@ -90,10 +57,6 @@ export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypo
 
   const sessions: Session[] = [];
   const hypotheses: Hypothesis[] = [];
-  // Sessions whose terminal status was authoritatively recorded on the wire
-  // event are not subject to post-replay discrimination — the engine had the
-  // full pruning-aware tree at close time and its decision is canonical.
-  const wireTerminalSet = new Set<string>();
 
   let files: string[];
   try {
@@ -111,7 +74,7 @@ export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypo
       for (const line of lines) {
         try {
           const entry: JournalEntry = JSON.parse(line);
-          replayEntry(entry, sessions, hypotheses, wireTerminalSet);
+          replayEntry(entry, sessions, hypotheses);
         } catch {
           console.error(`[tot-mcp] Warning: skipping corrupt JSONL line in ${file}`);
         }
@@ -121,35 +84,7 @@ export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypo
     }
   }
 
-  discriminateTerminalSessions(sessions, hypotheses, wireTerminalSet);
   return { sessions, hypotheses };
-}
-
-/**
- * Post-replay discriminator for sessions whose terminal status was NOT
- * authoritatively recorded on the wire. Sessions reaching this pass include
- * legacy journals that wrote terminal status only on the session-created
- * payload (translated to 'resolved' by the legacy shim above) and any
- * pre-terminalStatus 'session-completed' wire entries.
- *
- * The rule mirrors the engine's closure choice: a session is resolved iff
- * at least one corroborated hypothesis sits on a non-pruned lineage from
- * the root. Corroborated leaves buried under an eliminated or out-of-scope
- * ancestor do not count as survival — they were superseded by their
- * ancestor's pruning verdict and the engine would have closed as abandoned.
- */
-function discriminateTerminalSessions(
-  sessions: Session[],
-  hypotheses: Hypothesis[],
-  skipSessionIds: Set<string>,
-): void {
-  for (const s of sessions) {
-    if (s.status !== 'resolved' && s.status !== 'abandoned') continue;
-    if (skipSessionIds.has(s.id)) continue;
-    const sessionHypotheses = hypotheses.filter((h) => h.sessionId === s.id);
-    if (sessionHypotheses.length === 0) continue;
-    s.status = subtreeContainsCorroborated(s.rootNodeId, sessionHypotheses) ? 'resolved' : 'abandoned';
-  }
 }
 
 /**
@@ -198,15 +133,13 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       const firstEntry: JournalEntry = JSON.parse(lines[0]);
       if (firstEntry.type !== 'session-created') continue;
 
-      const session = translateLegacySessionStatus(firstEntry.payload as Session);
+      const session = firstEntry.payload as Session;
 
-      // Determine final status by tracking the LAST session-level event.
-      // The wire identifier session-completed covers both terminal
-      // transitions; resolved vs abandoned is discriminated from the
-      // hypothesis state at the moment of the event (every-eliminated
-      // implies abandoned, otherwise a corroborated answer drove the
-      // closure). A later session-reopened wins over an earlier
-      // session-completed.
+      // Determine final status by tracking the last session-level event.
+      // session-reopened wins over an earlier session-completed; the
+      // session-completed payload's terminalStatus disambiguates resolved
+      // from abandoned, and falls back to a pruning-aware spine walk if
+      // the field is missing.
       let status: SessionIndex['status'] = session.status;
       let lastSessionEvent: 'completed' | 'reopened' | null = null;
       let lastTerminalStatus: 'resolved' | 'abandoned' | undefined;
@@ -221,17 +154,13 @@ export function scanSessions(dataDir: string): SessionIndex[] {
             lastSessionEvent = 'reopened';
             lastTerminalStatus = undefined;
           } else if (entry.type === 'hypothesis-added' || entry.type === 'hypothesis-updated') {
-            const h = translateLegacyVerdict(translateLegacyHypothesisStatus(entry.payload as Hypothesis));
+            const h = entry.payload as Hypothesis;
             latestHypothesis.set(h.id, h);
           }
         } catch {
           // skip corrupt lines
         }
       }
-      // Legacy files may have written a terminal status directly on the
-      // session-created payload (translated from 'completed' to 'resolved'
-      // above) rather than emitting a session-completed event. Either path
-      // into terminal state must be discriminated by hypothesis content.
       if (lastSessionEvent === 'reopened') {
         status = 'open';
       } else {
@@ -281,19 +210,17 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
 
     const sessions: Session[] = [];
     const hypotheses: Hypothesis[] = [];
-    const wireTerminalSet = new Set<string>();
 
     for (const line of lines) {
       try {
         const entry: JournalEntry = JSON.parse(line);
-        replayEntry(entry, sessions, hypotheses, wireTerminalSet);
+        replayEntry(entry, sessions, hypotheses);
       } catch {
         // skip corrupt lines
       }
     }
 
     if (sessions.length === 0) return null;
-    discriminateTerminalSessions(sessions, hypotheses, wireTerminalSet);
     return { session: sessions[0], hypotheses };
   } catch {
     return null;
@@ -304,21 +231,18 @@ function replayEntry(
   entry: JournalEntry,
   sessions: Session[],
   hypotheses: Hypothesis[],
-  wireTerminalSet: Set<string>,
 ): void {
   switch (entry.type) {
     case 'session-created': {
-      const session = translateLegacySessionStatus(entry.payload as Session);
-      sessions.push(session);
+      sessions.push(entry.payload as Session);
       break;
     }
     case 'hypothesis-added': {
-      const h = translateLegacyVerdict(translateLegacyHypothesisStatus(entry.payload as Hypothesis));
-      hypotheses.push(h);
+      hypotheses.push(entry.payload as Hypothesis);
       break;
     }
     case 'hypothesis-updated': {
-      const updated = translateLegacyVerdict(translateLegacyHypothesisStatus(entry.payload as Hypothesis));
+      const updated = entry.payload as Hypothesis;
       const idx = hypotheses.findIndex((h) => h.id === updated.id);
       if (idx >= 0) hypotheses[idx] = updated;
       else hypotheses.push(updated);
@@ -331,33 +255,11 @@ function replayEntry(
       break;
     }
     case 'session-completed': {
-      const payload = entry.payload as { sessionId: string; terminalStatus?: 'resolved' | 'abandoned' };
+      const payload = entry.payload as { sessionId: string; terminalStatus: 'resolved' | 'abandoned' };
       const s = sessions.find((sess) => sess.id === payload.sessionId);
       if (!s) break;
-      // Replay must overwrite a previously resolved session as well. A
-      // session can transition resolved → open (via session-reopened) and
-      // back to a terminal status; only a session already at this exact
-      // terminal status should be skipped to avoid clobbering completedAt.
-      if (s.status === 'open' || s.status !== (payload.terminalStatus ?? s.status)) {
-        // Newer journals carry terminalStatus on the wire event and the
-        // engine had the full pruning-aware tree when it chose; the
-        // post-replay discriminator must defer to this decision. Older
-        // journals omit it, in which case the post-replay walker
-        // reconstructs the verdict from the hypothesis tree.
-        let terminal: 'resolved' | 'abandoned';
-        if (payload.terminalStatus) {
-          terminal = payload.terminalStatus;
-          wireTerminalSet.add(payload.sessionId);
-        } else {
-          terminal = subtreeContainsCorroborated(s.rootNodeId, hypotheses.filter((h) => h.sessionId === payload.sessionId))
-            ? 'resolved'
-            : 'abandoned';
-        }
-        s.status = terminal;
-        s.completedAt = entry.timestamp;
-      } else if (payload.terminalStatus) {
-        wireTerminalSet.add(payload.sessionId);
-      }
+      s.status = payload.terminalStatus;
+      s.completedAt = entry.timestamp;
       break;
     }
     case 'session-reopened': {
@@ -366,9 +268,6 @@ function replayEntry(
       if (s) {
         s.status = 'open';
         s.completedAt = undefined;
-        // Session is back open; any prior wire-terminal authority is moot
-        // until a new session-completed records a fresh terminalStatus.
-        wireTerminalSet.delete(sessionId);
       }
       break;
     }

@@ -43,6 +43,6 @@ export type TreeEvent =
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
-  | { type: 'session-completed'; sessionId: string; terminalStatus?: 'resolved' | 'abandoned' }
+  | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
   | { type: 'session-reopened'; sessionId: string }
   | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };

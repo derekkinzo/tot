@@ -132,7 +132,7 @@ describe('Persistence Roundtrip', () => {
     require('fs').writeFileSync(filePath, corrupted);
 
     // Should load without throwing
-    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    const { sessions } = loadActiveSessions(tempDir);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe(sessionId);
   });
@@ -181,34 +181,6 @@ describe('Persistence Roundtrip', () => {
     expect(existsSync(gitignorePath)).toBe(false);
   });
 
-  it('legacy session-created with status=completed and an eliminated hypothesis replays as abandoned', () => {
-    // The legacy translator collapses a session-created with status='completed'
-    // to 'resolved'. The discriminator must still inspect the hypothesis tree
-    // and reclassify as abandoned when no hypothesis survived.
-    const sessionId = '00000000-0000-4000-8000-aabbccddeeff';
-    const rootId = '00000000-0000-4000-8000-112233445566';
-    const ts = '2024-04-01T00:00:00.000Z';
-    const lines = [
-      { timestamp: ts, type: 'session-created', payload: {
-        id: sessionId, problem: 'Legacy abandon', rootNodeId: rootId,
-        status: 'completed', createdAt: ts,
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
-        status: 'eliminated', score: null, evidence: [],
-        conclusion: { verdict: 'eliminated', reason: 'legacy', timestamp: ts, refutingEvidenceIds: [] },
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
-      } },
-    ];
-    const filePath = join(tempDir, `${sessionId}.jsonl`);
-    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-
-    const { sessions } = loadActiveSessions(tempDir);
-    expect(sessions[0].status).toBe('abandoned');
-    const index = scanSessions(tempDir);
-    expect(index[0].status).toBe('abandoned');
-  });
-
   it('scanSessions honors a later session-reopened over an earlier session-completed', () => {
     const sessionId = '00000000-0000-4000-8000-eeeeeeeeeeff';
     const rootId = '00000000-0000-4000-8000-ffffffffffaa';
@@ -224,42 +196,12 @@ describe('Persistence Roundtrip', () => {
         conclusion: { verdict: 'corroborated', reason: 'survived', timestamp: ts, refutingEvidenceIds: [] },
         metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
       } },
-      { timestamp: ts, type: 'session-completed', payload: { sessionId } },
+      { timestamp: ts, type: 'session-completed', payload: { sessionId, terminalStatus: 'resolved' } },
       { timestamp: ts, type: 'session-reopened', payload: { sessionId } },
     ];
     const filePath = join(tempDir, `${sessionId}.jsonl`);
     writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
-    const index = scanSessions(tempDir);
-    expect(index[0].status).toBe('open');
-  });
-
-  it('legacy session-created with terminal status, then session-reopened, surfaces as open', () => {
-    // The legacy translator collapses 'completed' → 'resolved' on read.
-    // A subsequent session-reopened must override that translated status
-    // and surface the session as open. scanSessions and loadActiveSessions
-    // must agree.
-    const sessionId = '00000000-0000-4000-8000-aaaa11112222';
-    const rootId = '00000000-0000-4000-8000-aaaa33334444';
-    const ts = '2024-05-01T00:00:00.000Z';
-    const lines = [
-      { timestamp: ts, type: 'session-created', payload: {
-        id: sessionId, problem: 'Legacy reopen', rootNodeId: rootId,
-        status: 'completed', createdAt: ts,
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
-        status: 'corroborated', score: null, evidence: [],
-        conclusion: { verdict: 'corroborated', reason: 'survived', timestamp: ts },
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
-      } },
-      { timestamp: ts, type: 'session-reopened', payload: { sessionId } },
-    ];
-    const filePath = join(tempDir, `${sessionId}.jsonl`);
-    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-
-    const { sessions } = loadActiveSessions(tempDir);
-    expect(sessions[0].status).toBe('open');
     const index = scanSessions(tempDir);
     expect(index[0].status).toBe('open');
   });
@@ -312,56 +254,6 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: decompA.childIds[0], reason: 'aside' } });
     await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: decompA.childIds[1], reason: 'aside' } });
     await cleanup();
-
-    const { sessions } = loadActiveSessions(tempDir);
-    expect(sessions[0].status).toBe('abandoned');
-    const index = scanSessions(tempDir);
-    expect(index[0].status).toBe('abandoned');
-  });
-
-  it('legacy journal without terminalStatus uses pruning-aware spine walk', () => {
-    // A pre-terminalStatus journal: session-completed payload omits the
-    // field and the post-replay discriminator must reconstruct the verdict
-    // by walking the spine. A corroborated grandchild buried under a
-    // pruned ancestor must NOT be counted as survival.
-    const sessionId = '00000000-0000-4000-8000-cafe00000001';
-    const rootId = '00000000-0000-4000-8000-cafe00000002';
-    const aId = '00000000-0000-4000-8000-cafe00000003';
-    const a1Id = '00000000-0000-4000-8000-cafe00000004';
-    const bId = '00000000-0000-4000-8000-cafe00000005';
-    const ts = '2024-06-01T00:00:00.000Z';
-    const lines = [
-      { timestamp: ts, type: 'session-created', payload: {
-        id: sessionId, problem: 'Legacy buried', rootNodeId: rootId,
-        status: 'open', createdAt: ts,
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
-        status: 'exploring', score: null, evidence: [],
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [aId, bId],
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: aId, parentId: rootId, sessionId, depth: 1, content: 'A',
-        status: 'out-of-scope', score: null, evidence: [],
-        conclusion: { verdict: 'out-of-scope', reason: 'aside', timestamp: ts },
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [a1Id],
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: a1Id, parentId: aId, sessionId, depth: 2, content: 'A1',
-        status: 'corroborated', score: null, evidence: [],
-        conclusion: { verdict: 'corroborated', reason: 'survives', timestamp: ts, refutingEvidenceIds: [] },
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: bId, parentId: rootId, sessionId, depth: 1, content: 'B',
-        status: 'out-of-scope', score: null, evidence: [],
-        conclusion: { verdict: 'out-of-scope', reason: 'aside', timestamp: ts },
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
-      } },
-      { timestamp: ts, type: 'session-completed', payload: { sessionId } },
-    ];
-    const filePath = join(tempDir, `${sessionId}.jsonl`);
-    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
     const { sessions } = loadActiveSessions(tempDir);
     expect(sessions[0].status).toBe('abandoned');
@@ -450,74 +342,6 @@ describe('Persistence Roundtrip', () => {
 
     const { sessions } = loadActiveSessions(tempDir);
     expect(sessions[0].status).toBe('open');
-  });
-
-  it('legacy eliminated records without refutingEvidenceIds replay with an empty array', () => {
-    const sessionId = '00000000-0000-4000-8000-dddddddddddd';
-    const rootId = '00000000-0000-4000-8000-eeeeeeeeeeee';
-    const ts = '2024-02-01T00:00:00.000Z';
-    const lines = [
-      { timestamp: ts, type: 'session-created', payload: {
-        id: sessionId, problem: 'Legacy elim', rootNodeId: rootId,
-        status: 'open', createdAt: ts,
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
-        status: 'eliminated', score: null, evidence: [],
-        // Older journals omit refutingEvidenceIds on the conclusion record.
-        conclusion: { verdict: 'eliminated', reason: 'legacy', timestamp: ts },
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
-      } },
-    ];
-    const filePath = join(tempDir, `${sessionId}.jsonl`);
-    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-
-    const { hypotheses } = loadActiveSessions(tempDir);
-    expect(hypotheses[0].conclusion?.refutingEvidenceIds).toEqual([]);
-  });
-
-  it('legacy JSONL with confirmed/active/completed literals replays under the new vocabulary', () => {
-    // Hand-write a JSONL file using the pre-rename literals to simulate a
-    // session written by an older binary. Read paths must translate without
-    // mutating the bytes on disk.
-    const sessionId = '00000000-0000-4000-8000-aaaaaaaaaaaa';
-    const rootId = '00000000-0000-4000-8000-bbbbbbbbbbbb';
-    const childId = '00000000-0000-4000-8000-cccccccccccc';
-    const ts = '2024-01-01T00:00:00.000Z';
-    const lines = [
-      { timestamp: ts, type: 'session-created', payload: {
-        id: sessionId, problem: 'Legacy', rootNodeId: rootId,
-        status: 'active', createdAt: ts,
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: rootId, parentId: null, sessionId, depth: 0, content: 'Legacy',
-        status: 'pending', score: null, evidence: [],
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [childId],
-      } },
-      { timestamp: ts, type: 'hypothesis-added', payload: {
-        id: childId, parentId: rootId, sessionId, depth: 1, content: 'Old child',
-        status: 'confirmed', score: null, evidence: [],
-        conclusion: { verdict: 'confirmed', reason: 'legacy', timestamp: ts },
-        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
-      } },
-      { timestamp: ts, type: 'session-completed', payload: { sessionId } },
-    ];
-    const filePath = join(tempDir, `${sessionId}.jsonl`);
-    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-
-    const { sessions, hypotheses } = loadActiveSessions(tempDir);
-    expect(sessions[0].status).toBe('resolved');
-    expect(hypotheses.find((h) => h.id === childId)?.status).toBe('corroborated');
-    expect(hypotheses.find((h) => h.id === childId)?.conclusion?.verdict).toBe('corroborated');
-
-    const index = scanSessions(tempDir);
-    expect(index[0].status).toBe('resolved');
-
-    // Bytes on disk are unchanged
-    const reread = readFileSync(filePath, 'utf-8');
-    expect(reread).toContain('"status":"active"');
-    expect(reread).toContain('"status":"confirmed"');
-    expect(reread).toContain('"verdict":"confirmed"');
   });
 
   it('session-completed journal entry carries terminalStatus on disk', async () => {

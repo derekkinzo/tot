@@ -56,14 +56,13 @@ export interface Session {
 }
 
 // 'session-completed' covers both terminal transitions (resolved and
-// abandoned). The terminalStatus field disambiguates; it is optional so
-// older journals without it still replay.
+// abandoned); terminalStatus disambiguates which.
 export type TreeEvent =
   | { type: 'session-created'; session: Session }
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
-  | { type: 'session-completed'; sessionId: string; terminalStatus?: 'resolved' | 'abandoned' }
+  | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
   | { type: 'session-reopened'; sessionId: string }
   | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };
 

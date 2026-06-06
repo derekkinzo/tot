@@ -18,7 +18,7 @@ type Action =
   | { type: 'clear-recent' }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
   | { type: 'session-created'; session: Session }
-  | { type: 'session-completed'; sessionId: string; terminalStatus?: 'resolved' | 'abandoned' }
+  | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
   | { type: 'session-reopened'; sessionId: string };
 
 function reducer(state: TreeState, action: Action): TreeState {
@@ -56,12 +56,7 @@ function reducer(state: TreeState, action: Action): TreeState {
     }
     case 'session-completed': {
       if (!state.session || state.session.id !== action.sessionId) return state;
-      // The wire event covers both terminal transitions. New servers send
-      // terminalStatus; older servers omit it, in which case 'resolved' is
-      // the safe default since callers can refetch via loadSession to
-      // reconcile.
-      const status = action.terminalStatus ?? 'resolved';
-      return { ...state, session: { ...state.session, status } };
+      return { ...state, session: { ...state.session, status: action.terminalStatus } };
     }
     case 'session-reopened': {
       if (!state.session || state.session.id !== action.sessionId) return state;
