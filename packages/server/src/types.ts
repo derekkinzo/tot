@@ -35,8 +35,8 @@ export interface Conclusion {
   verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
   reason: string;
   timestamp: string;
-  // Refuting evidence ids that grounded the verdict. Only populated for
-  // 'eliminated'. Empty array on legacy replay where no audit trail exists.
+  // Ids of refutes-typed evidence that ground an 'eliminated' verdict.
+  // Empty array when replaying older journals that did not record this.
   refutingEvidenceIds?: string[];
 }
 
@@ -55,15 +55,15 @@ export interface Session {
   completedAt?: string;
 }
 
-// 'session-completed' is retained as a stable wire identifier for both the
-// resolved and abandoned terminal transitions; renaming would break replay
-// of existing JSONL files and external SSE consumers.
+// 'session-completed' covers both terminal transitions (resolved and
+// abandoned). The terminalStatus field disambiguates; it is optional so
+// older journals without it still replay.
 export type TreeEvent =
   | { type: 'session-created'; session: Session }
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
-  | { type: 'session-completed'; sessionId: string }
+  | { type: 'session-completed'; sessionId: string; terminalStatus?: 'resolved' | 'abandoned' }
   | { type: 'session-reopened'; sessionId: string }
   | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };
 

@@ -72,6 +72,16 @@ describe('TreeManager', () => {
       expect(() => tm.decompose(root.id, ['A', 'B'])).toThrow(TreeError);
     });
 
+    it('rejects decompose on out-of-scope hypothesis', () => {
+      // Decompose under a pruned ancestor would create children the closure
+      // walker silently skips, leaving structural debt. Out-of-scope is a
+      // pruning verdict and must reject decomposition the same as eliminated.
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, ['A', 'B']);
+      tm.setOutOfScope(a.id, 'set aside');
+      expect(() => tm.decompose(a.id, ['A1', 'A2'])).toThrow(TreeError);
+    });
+
     it('rejects non-existent parent', () => {
       tm.createSession('Problem');
       expect(() => tm.decompose('fake-id', ['A', 'B'])).toThrow(TreeError);
@@ -119,6 +129,13 @@ describe('TreeManager', () => {
       tm.addEvidence(root.id, 'supports', 'good');
       tm.corroborateHypothesis(root.id, 'done');
       expect(() => tm.addHypothesis(root.id, 'Too late')).toThrow(TreeError);
+    });
+
+    it('rejects when parent is out-of-scope', () => {
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, ['A', 'B']);
+      tm.setOutOfScope(a.id, 'set aside');
+      expect(() => tm.addHypothesis(a.id, 'Late add')).toThrow(TreeError);
     });
 
     it('rejects non-existent parent', () => {
@@ -699,6 +716,18 @@ describe('TreeManager', () => {
       tm.addEvidence(children[0].id, 'supports', 'Progress');
       expect(tm.getStatus().stagnant).toBe(false);
     });
+
+    it('setOutOfScope resets the stagnation counter (it is real disposition progress)', () => {
+      const { root } = tm.createSession('Problem');
+      const children = tm.decompose(root.id, ['A', 'B', 'C']);
+      tm.scoreHypothesis(children[0].id, 0.1);
+      tm.scoreHypothesis(children[0].id, 0.2);
+      tm.scoreHypothesis(children[0].id, 0.3);
+      tm.scoreHypothesis(children[0].id, 0.4);
+      expect(tm.getStatus().stagnant).toBe(true);
+      tm.setOutOfScope(children[0].id, 'set aside');
+      expect(tm.getStatus().stagnant).toBe(false);
+    });
   });
 
   // --- Load State ---
@@ -883,6 +912,17 @@ describe('TreeManager', () => {
       // corroborated answer — the session abandons.
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
+      expect(session.status).toBe('abandoned');
+    });
+
+    it('marks a session abandoned when every top-level branch is terminal but none corroborated (mixed eliminated + out-of-scope)', () => {
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['cause A', 'cause B']);
+      tm.addEvidence(a.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a.id, 'no');
+      tm.setOutOfScope(b.id, 'set aside');
+      // Both top-level branches are terminal (eliminated, out-of-scope) but
+      // neither claims survival. The session has no answer to point at.
       expect(session.status).toBe('abandoned');
     });
 

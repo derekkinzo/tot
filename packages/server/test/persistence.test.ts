@@ -182,8 +182,9 @@ describe('Persistence Roundtrip', () => {
   });
 
   it('legacy session-created with status=completed and an eliminated hypothesis replays as abandoned', () => {
-    // Adv 3 regression: the legacy translator collapsed 'completed' to
-    // 'resolved' before the all-eliminated discriminator could fire.
+    // The legacy translator collapses a session-created with status='completed'
+    // to 'resolved'. The discriminator must still inspect the hypothesis tree
+    // and reclassify as abandoned when no hypothesis survived.
     const sessionId = '00000000-0000-4000-8000-aabbccddeeff';
     const rootId = '00000000-0000-4000-8000-112233445566';
     const ts = '2024-04-01T00:00:00.000Z';
@@ -263,6 +264,111 @@ describe('Persistence Roundtrip', () => {
     expect(index[0].status).toBe('open');
   });
 
+  it('terminal session with mix of eliminated and out-of-scope replays as abandoned', async () => {
+    // No corroborated leaf survived, so the closure has no answer to point at.
+    // Eliminated and out-of-scope are both pruning verdicts; the
+    // discriminator must classify the session as abandoned, not resolved.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Mixed pruning test' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: childIds[1], reason: 'aside' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
+  it('buried-corroborated under a pruned top-level branch round-trips as abandoned', async () => {
+    // Engine closes the session as 'abandoned' (the only corroborated leaf
+    // sits under an out-of-scope ancestor and so does not count as survival
+    // on a non-pruned lineage). The wire event records terminalStatus.
+    // Replay must defer to the wire AND the post-replay discriminator must
+    // not flat-scan and silently flip the verdict back to 'resolved'.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Buried corroboration test' },
+    }));
+    const decompA = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    const decompA1 = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'supports', content: 'survives' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'A1' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: decompA.childIds[0], reason: 'aside' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: decompA.childIds[1], reason: 'aside' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
+  it('legacy journal without terminalStatus uses pruning-aware spine walk', () => {
+    // A pre-terminalStatus journal: session-completed payload omits the
+    // field and the post-replay discriminator must reconstruct the verdict
+    // by walking the spine. A corroborated grandchild buried under a
+    // pruned ancestor must NOT be counted as survival.
+    const sessionId = '00000000-0000-4000-8000-cafe00000001';
+    const rootId = '00000000-0000-4000-8000-cafe00000002';
+    const aId = '00000000-0000-4000-8000-cafe00000003';
+    const a1Id = '00000000-0000-4000-8000-cafe00000004';
+    const bId = '00000000-0000-4000-8000-cafe00000005';
+    const ts = '2024-06-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Legacy buried', rootNodeId: rootId,
+        status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
+        status: 'exploring', score: null, evidence: [],
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [aId, bId],
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: aId, parentId: rootId, sessionId, depth: 1, content: 'A',
+        status: 'out-of-scope', score: null, evidence: [],
+        conclusion: { verdict: 'out-of-scope', reason: 'aside', timestamp: ts },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [a1Id],
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: a1Id, parentId: aId, sessionId, depth: 2, content: 'A1',
+        status: 'corroborated', score: null, evidence: [],
+        conclusion: { verdict: 'corroborated', reason: 'survives', timestamp: ts, refutingEvidenceIds: [] },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: bId, parentId: rootId, sessionId, depth: 1, content: 'B',
+        status: 'out-of-scope', score: null, evidence: [],
+        conclusion: { verdict: 'out-of-scope', reason: 'aside', timestamp: ts },
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+      { timestamp: ts, type: 'session-completed', payload: { sessionId } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('abandoned');
+    const index = scanSessions(tempDir);
+    expect(index[0].status).toBe('abandoned');
+  });
+
   it('abandoned session round-trips: every-eliminated journal replays as abandoned, not resolved', async () => {
     const { client, cleanup } = await createServerWithClient(tempDir);
     const { rootId } = parseResult(await client.callTool({
@@ -285,6 +391,67 @@ describe('Persistence Roundtrip', () => {
     expect(index[0].status).toBe('abandoned');
   });
 
+  it('eliminate-driven resolution round-trips as resolved', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Resolve via elimination' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('resolved');
+  });
+
+  it('set_out_of_scope-driven closure round-trips', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Resolve via out-of-scope' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
+    await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: childIds[1], reason: 'aside' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('resolved');
+  });
+
+  it('reopen-on-refute round-trips: session-reopened journal restores open status', async () => {
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Reopen test' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
+    // Session is now resolved. Refute the corroborated leaf to reopen.
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'counter-instance' } });
+    await cleanup();
+
+    const { sessions } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('open');
+  });
+
   it('legacy eliminated records without refutingEvidenceIds replay with an empty array', () => {
     const sessionId = '00000000-0000-4000-8000-dddddddddddd';
     const rootId = '00000000-0000-4000-8000-eeeeeeeeeeee';
@@ -297,7 +464,7 @@ describe('Persistence Roundtrip', () => {
       { timestamp: ts, type: 'hypothesis-added', payload: {
         id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
         status: 'eliminated', score: null, evidence: [],
-        // Pre-rework conclusion shape: no refutingEvidenceIds field.
+        // Older journals omit refutingEvidenceIds on the conclusion record.
         conclusion: { verdict: 'eliminated', reason: 'legacy', timestamp: ts },
         metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
       } },
@@ -351,6 +518,32 @@ describe('Persistence Roundtrip', () => {
     expect(reread).toContain('"status":"active"');
     expect(reread).toContain('"status":"confirmed"');
     expect(reread).toContain('"verdict":"confirmed"');
+  });
+
+  it('session-completed journal entry carries terminalStatus on disk', async () => {
+    // The terminalStatus field on session-completed must be persisted, not
+    // only emitted on SSE. Replay paths can then trust the explicit value
+    // instead of reconstructing terminal status from hypothesis state.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Wire test' },
+    }));
+    await client.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: rootId, type: 'supports', content: 'yes' },
+    });
+    await client.callTool({
+      name: 'corroborate_hypothesis',
+      arguments: { hypothesisId: rootId, reason: 'survives' },
+    });
+    await cleanup();
+
+    const files = require('fs').readdirSync(tempDir).filter((f: string) => f.endsWith('.jsonl'));
+    const content = readFileSync(join(tempDir, files[0]), 'utf-8');
+    const lines = content.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const completed = lines.find((l) => l.type === 'session-completed');
+    expect(completed?.payload?.terminalStatus).toBe('resolved');
   });
 
   it('corroborated session persists as resolved', async () => {

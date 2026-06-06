@@ -24,7 +24,7 @@ export interface ToolSchema {
  */
 export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   create_tree: {
-    description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — especially debugging, root cause analysis, or multi-factor decisions.',
+    description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — root cause analysis, differential diagnosis, hypothesis-driven inquiry, or multi-factor decisions across any domain.',
     schema: {
       problem: z.string().min(1).max(10000).describe('The problem statement to investigate'),
     },
@@ -167,6 +167,27 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return p;
   }
 
+  /**
+   * Journals the wire event corresponding to a session-status transition.
+   * 'session-completed' covers both terminal transitions (resolved and
+   * abandoned); 'session-reopened' covers a corroborated leaf returning
+   * to open after refuting evidence. Callers compute the prior status
+   * before the mutation so the helper sees the transition direction.
+   */
+  async function journalSessionTransition(
+    p: Persistence,
+    sessionId: string,
+    priorStatus: 'open' | 'resolved' | 'abandoned' | undefined,
+    nextStatus: 'open' | 'resolved' | 'abandoned' | undefined,
+  ): Promise<void> {
+    if (!nextStatus || nextStatus === priorStatus) return;
+    if (nextStatus === 'resolved' || nextStatus === 'abandoned') {
+      await p.append('session-completed', { sessionId, terminalStatus: nextStatus });
+    } else if (priorStatus === 'resolved' && nextStatus === 'open') {
+      await p.append('session-reopened', { sessionId });
+    }
+  }
+
   function toolResult(text: string, isError = false) {
     return { content: [{ type: 'text' as const, text }], isError };
   }
@@ -227,10 +248,17 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('add_evidence', async (args) => {
     try {
       const { hypothesisId, type, content, source } = schemas.add_evidence.parse(args);
-      const evidence = tm.addEvidence(hypothesisId, type, content, source);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
+      tm.addEvidence(hypothesisId, type, content, source);
       const hypothesis = tm.getHypothesis(hypothesisId)!;
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatAddEvidence(hypothesisId, hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -243,18 +271,16 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('eliminate_hypothesis', async (args) => {
     try {
       const { hypothesisId, reason, refutingEvidenceIds } = schemas.eliminate_hypothesis.parse(args);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
       const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
-      // If this elimination abandoned the session, journal the terminal
-      // event so replay reconstructs the same state. The session-completed
-      // wire identifier covers both terminal transitions; the resolved vs
-      // abandoned discriminator is recovered at replay from the hypothesis
-      // statuses present in the file.
       const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
-      if (session && session.status === 'abandoned') {
-        await p.append('session-completed', { sessionId: hypothesis.sessionId });
-      }
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatEliminate(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -267,16 +293,16 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('corroborate_hypothesis', async (args) => {
     try {
       const { hypothesisId, reason } = schemas.corroborate_hypothesis.parse(args);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
       const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
-      // Only emit session-completed if the closure predicate flipped the
-      // session to resolved. The TreeManager owns that decision; checking
-      // session.status here keeps the wire log consistent with the runtime.
       const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
-      if (session && session.status === 'resolved') {
-        await p.append('session-completed', { sessionId: hypothesis.sessionId });
-      }
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatCorroborate(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -289,9 +315,16 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('set_out_of_scope', async (args) => {
     try {
       const { hypothesisId, reason } = schemas.set_out_of_scope.parse(args);
+      const target = tm.getHypothesis(hypothesisId);
+      const sessionIdForPrior = target?.sessionId;
+      const priorStatus = sessionIdForPrior
+        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        : undefined;
       const hypothesis = tm.setOutOfScope(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatSetOutOfScope(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {

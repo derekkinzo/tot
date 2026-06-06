@@ -86,12 +86,12 @@ export class TreeManager extends EventEmitter {
    * @param parentId - ID of the hypothesis to decompose
    * @param childContents - Array of sub-hypothesis descriptions (2+)
    * @returns The created child hypothesis nodes
-   * @throws TreeError if parent is eliminated/corroborated, fewer than 2 children, depth exceeded, or count exceeded
+   * @throws TreeError if parent is in a terminal status, fewer than 2 children, depth exceeded, or count exceeded
    */
   decompose(parentId: string, childContents: string[]): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
 
-    if (parent.status === 'eliminated' || parent.status === 'corroborated') {
+    if (parent.status === 'eliminated' || parent.status === 'corroborated' || parent.status === 'out-of-scope') {
       throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
     }
     if (childContents.length < 2) {
@@ -147,15 +147,15 @@ export class TreeManager extends EventEmitter {
    * @param parentId - ID of the parent hypothesis
    * @param content - Description of the new hypothesis
    * @returns The newly created hypothesis
-   * @throws TreeError if parent is eliminated/corroborated, depth exceeded, or count exceeded
+   * @throws TreeError if parent is in a terminal status, depth exceeded, or count exceeded
    */
   addHypothesis(parentId: string, content: string): Hypothesis {
     const parent = this.getHypothesisOrThrow(parentId);
 
     // Mirror decompose's terminal-parent guard. Without this, a new pending
-    // child can appear under a corroborated ancestor, leaving structural
-    // debt that the closure predicate would silently overlook.
-    if (parent.status === 'eliminated' || parent.status === 'corroborated') {
+    // child can appear under a terminal ancestor, leaving structural debt
+    // that the closure predicate would silently overlook.
+    if (parent.status === 'eliminated' || parent.status === 'corroborated' || parent.status === 'out-of-scope') {
       throw new TreeError(`Cannot add hypothesis to a ${parent.status} node`);
     }
     if (parent.depth + 1 > this.maxDepth) {
@@ -404,7 +404,11 @@ export class TreeManager extends EventEmitter {
     hypothesis.status = 'out-of-scope';
     hypothesis.conclusion = { verdict: 'out-of-scope', reason, timestamp: now };
     hypothesis.metadata.updatedAt = now;
-    this.incrementMutationCounter();
+    // A status change is real progress on tree disposition; sibling
+    // status-changing mutators (eliminate, corroborate) reset the counter
+    // for the same reason.
+    this.mutationsSinceStatusChange = 0;
+    this.touch();
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
@@ -655,7 +659,7 @@ export class TreeManager extends EventEmitter {
   private closeSession(session: Session, terminal: 'resolved' | 'abandoned', timestamp: string): void {
     session.status = terminal;
     session.completedAt = timestamp;
-    this.emit('event', { type: 'session-completed', sessionId: session.id } satisfies TreeEvent);
+    this.emit('event', { type: 'session-completed', sessionId: session.id, terminalStatus: terminal } satisfies TreeEvent);
     if (this.currentSessionId === session.id) {
       this.currentSessionId = null;
     }
