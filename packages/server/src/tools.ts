@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { TreeError, type TreeManager } from './tree-manager.js';
 import { Persistence } from './persistence.js';
 import * as fmt from './responses.js';
+import { STATUS_ICONS } from './types.js';
 
 // ─── Types ───
 
@@ -417,16 +418,8 @@ function renderCompactTree(hypotheses: Map<string, import('./types.js').Hypothes
   const node = hypotheses.get(nodeId);
   if (!node) return '';
 
-  const statusIcon = {
-    pending: '○',
-    exploring: '◉',
-    eliminated: '✗',
-    corroborated: '✓',
-    'out-of-scope': '⊘',
-  }[node.status];
-
   const scoreStr = node.score !== null ? ` (${node.score.toFixed(2)})` : '';
-  let line = `${indent}${statusIcon} ${node.content}${scoreStr}\n`;
+  let line = `${indent}${STATUS_ICONS[node.status]} ${node.content}${scoreStr}\n`;
 
   for (const childId of node.children) {
     line += renderCompactTree(hypotheses, childId, indent + '  ');
