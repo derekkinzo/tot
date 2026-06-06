@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { v4 as uuid } from 'uuid';
+import { subtreeContainsCorroborated } from './closure.js';
 import type {
   Evidence,
   Hypothesis,
@@ -693,23 +694,8 @@ export class TreeManager extends EventEmitter {
     return true;
   }
 
-  /**
-   * Returns true if the subtree rooted at id contains a corroborated node
-   * reachable through non-pruned ancestors. Pruned subtrees (eliminated or
-   * out-of-scope) are not descended — descendants of a pruned branch are
-   * moot under the same rule the closure walker applies.
-   */
   private subtreeContainsCorroborated(rootId: string): boolean {
-    const stack: string[] = [rootId];
-    while (stack.length > 0) {
-      const id = stack.pop()!;
-      const node = this.hypotheses.get(id);
-      if (!node) continue;
-      if (node.status === 'eliminated' || node.status === 'out-of-scope') continue;
-      if (node.status === 'corroborated') return true;
-      for (const childId of node.children) stack.push(childId);
-    }
-    return false;
+    return subtreeContainsCorroborated(rootId, (id) => this.hypotheses.get(id));
   }
 
   /**
