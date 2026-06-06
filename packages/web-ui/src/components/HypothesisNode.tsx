@@ -18,6 +18,9 @@ export type HypothesisData = {
 
 function HypothesisNode({ id: nodeId, data }: NodeProps) {
   const d = data as unknown as HypothesisData;
+  // Eliminated and out-of-scope are pruning verdicts; render both dimmed
+  // and struck through so the canvas signals "no further work here".
+  const isPruned = d.status === 'eliminated' || d.status === 'out-of-scope';
   const style = STATUS_NODE_STYLES[d.status as keyof typeof STATUS_NODE_STYLES] ?? STATUS_NODE_STYLES.pending;
   const [showTooltip, setShowTooltip] = useState(false);
   const textRef = useRef<HTMLDivElement>(null);
@@ -47,7 +50,7 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           minWidth: 160,
           maxWidth: 240,
           width: 220,
-          opacity: d.status === 'eliminated' ? 0.5 : 1,
+          opacity: isPruned ? 0.5 : 1,
           boxShadow: d.onPath ? '0 0 12px rgba(88, 166, 255, 0.3)' : undefined,
           cursor: 'pointer',
         }}
@@ -71,8 +74,8 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           style={{
             fontSize: 13,
             lineHeight: 1.3,
-            color: d.status === 'eliminated' ? '#6b7280' : '#e1e4e8',
-            textDecoration: d.status === 'eliminated' ? 'line-through' : 'none',
+            color: isPruned ? '#6b7280' : '#e1e4e8',
+            textDecoration: isPruned ? 'line-through' : 'none',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             display: '-webkit-box',

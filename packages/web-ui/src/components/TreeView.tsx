@@ -524,7 +524,11 @@ function computeLayout(
         source: h.parentId,
         target: id,
         style: {
-          stroke: isEdgeOnPath ? HIGHLIGHT_COLORS.pathEdge : h.status === 'eliminated' ? HIGHLIGHT_COLORS.eliminatedEdge : HIGHLIGHT_COLORS.defaultEdge,
+          stroke: isEdgeOnPath
+            ? HIGHLIGHT_COLORS.pathEdge
+            : (h.status === 'eliminated' || h.status === 'out-of-scope')
+              ? HIGHLIGHT_COLORS.prunedEdge
+              : HIGHLIGHT_COLORS.defaultEdge,
           strokeWidth: isEdgeOnPath ? 2.5 : 1.5,
         },
         animated: h.status === 'exploring',
