@@ -35,6 +35,8 @@ export const EVIDENCE_TYPE_COLORS: Record<EvidenceType, string> = {
 
 export const HIGHLIGHT_COLORS = {
   pathEdge: '#58a6ff',
-  eliminatedEdge: '#4b5563',
+  // Edges into pruned nodes (eliminated, out-of-scope) share this muted
+  // stroke to signal that the lineage is no longer drawing investigation.
+  prunedEdge: '#4b5563',
   defaultEdge: '#6b7280',
 } as const;

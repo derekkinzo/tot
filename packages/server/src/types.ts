@@ -23,6 +23,19 @@ export type HypothesisStatus =
   | 'corroborated'
   | 'out-of-scope';
 
+/**
+ * Glyphs used to render each status in text and markdown output. The web UI
+ * mirrors these in theme.STATUS_NODE_STYLES; keep both in lockstep when
+ * adjusting for accessibility or visual refresh.
+ */
+export const STATUS_ICONS: Record<HypothesisStatus, string> = {
+  pending: '○',
+  exploring: '◉',
+  eliminated: '✗',
+  corroborated: '✓',
+  'out-of-scope': '⊘',
+};
+
 export interface Evidence {
   id: string;
   type: 'supports' | 'refutes' | 'neutral';

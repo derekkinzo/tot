@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Hypothesis, Session } from '../types';
+import { STATUS_NODE_STYLES } from '../theme';
 
 interface Props {
   session: Session | null;
@@ -81,13 +82,15 @@ function generateMarkdown(session: Session, hypotheses: Map<string, Hypothesis>)
 
 function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines: string[], depth: number): void {
   const indent = '  '.repeat(depth);
-  const icon = { pending: '○', exploring: '◉', eliminated: '✗', corroborated: '✓', 'out-of-scope': '⊘' }[node.status] ?? '?';
+  const icon = STATUS_NODE_STYLES[node.status]?.icon ?? '?';
   const score = node.score !== null ? ` (${(node.score * 100).toFixed(0)}%)` : '';
 
   lines.push(`${indent}- ${icon} **${node.content}**${score} [${node.status}]`);
 
   if (node.conclusion) {
-    lines.push(`${indent}  > ${node.conclusion.verdict}: ${node.conclusion.reason}`);
+    const isHistorical = node.status !== node.conclusion.verdict;
+    const prefix = isHistorical ? `historically ${node.conclusion.verdict}` : node.conclusion.verdict;
+    lines.push(`${indent}  > ${prefix}: ${node.conclusion.reason}`);
   }
 
   for (const ev of node.evidence) {

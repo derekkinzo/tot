@@ -33,7 +33,8 @@ partition contract should be replaced with independence + comprehensiveness.
 ## 3. Cognitive Provenance
 
 The discipline of carving a hypothesis space into disjoint, exhaustive
-alternatives long predates the MECE label. Three primary sources:
+alternatives long predates the MECE label. Two primary sources, plus a
+closely related method:
 
 - **Bacon, F. (1620). *Novum Organum*.** Bacon's eliminative induction presumes
   candidate forms are laid out as competing alternatives to be pruned.
@@ -44,13 +45,13 @@ alternatives long predates the MECE label. Three primary sources:
   attributed to residual antecedents only when known causes have been
   subtracted from a closed enumeration.
 
-- **Chamberlin, T. C. (1890). "The Method of Multiple Working Hypotheses,"
-  *Science*, 15(366), 92–96** (reprinted *Journal of Geology*, 1897). Chamberlin
-  argues that a single ruling hypothesis biases observation, and that the
-  investigator should hold a family of competing hypotheses simultaneously,
-  testing evidence against each. The method's effectiveness depends on the
-  family being broad enough to include the true cause (exhaustive) and on the
-  hypotheses being distinguishable by evidence (exclusive).
+- cf. **Chamberlin, T. C. (1890). "The Method of Multiple Working Hypotheses,"
+  *Science*, 15(366)**. Chamberlin argues that a single ruling hypothesis
+  biases observation and that the investigator should hold a family of
+  competing hypotheses simultaneously, testing evidence against each. The
+  method's effectiveness depends on the family being broad enough to include
+  the true cause (exhaustive) and on the hypotheses being distinguishable by
+  evidence (non-overlapping at the relevant grain).
 
 ## 4. Why MECE Matters for Hypothesis Search
 

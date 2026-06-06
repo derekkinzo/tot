@@ -57,7 +57,7 @@ After decomposing, STOP and review:
 For EACH hypothesis, seek REFUTING evidence (falsification-first per Popper):
 
 1. Define what observation would REFUTE this hypothesis.
-2. Execute the most discriminating test first (one whose outcome is predicted by one sibling but not the others — Platt's strong inference).
+2. Execute the most discriminating test first (one whose outcome is predicted by one sibling but not the others — cf. Platt's strong inference, 1964).
 3. Call `add_evidence` with type `supports`, `refutes`, or `neutral`.
 4. Fan out subagents to investigate from independent data sources.
 
@@ -92,7 +92,7 @@ The tree is visible in real-time at `http://localhost:6274`. Open it to see:
 
 ## Tips
 
-- Never investigate linearly — always maintain multiple competing hypotheses (Chamberlin's method of multiple working hypotheses).
+- Never investigate linearly — always maintain multiple competing hypotheses (cf. Chamberlin's method of multiple working hypotheses, 1890).
 - If stuck (stagnation), apply devil's advocate: assume your LOWEST-scored hypothesis is correct and look for evidence that would corroborate it.
 - Deep decompositions (depth 3+) risk fragmenting — ask if the parent is directly testable instead.
 - Always seek the CRUCIAL EXPERIMENT: one observation that gives different results under different hypotheses.
