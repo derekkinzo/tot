@@ -4,7 +4,7 @@ export interface Hypothesis {
   sessionId: string;
   depth: number;
   content: string;
-  status: 'pending' | 'exploring' | 'eliminated' | 'corroborated';
+  status: 'pending' | 'exploring' | 'eliminated' | 'corroborated' | 'out-of-scope';
   score: number | null;
   evidence: Evidence[];
   conclusion?: {
@@ -43,5 +43,6 @@ export type TreeEvent =
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
-  | { type: 'session-completed'; sessionId: string }
+  | { type: 'session-completed'; sessionId: string; terminalStatus?: 'resolved' | 'abandoned' }
+  | { type: 'session-reopened'; sessionId: string }
   | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };

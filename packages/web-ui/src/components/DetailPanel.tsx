@@ -61,28 +61,36 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
       </div>
 
       {/* Conclusion */}
-      {hypothesis.conclusion && (
-        <div style={{
-          padding: '14px 16px',
-          background: hypothesis.conclusion.verdict === 'corroborated' ? '#052e1620' : '#1c1f26',
-          borderRadius: 8,
-          borderLeft: `3px solid ${hypothesis.conclusion.verdict === 'corroborated' ? '#22c55e' : '#ef4444'}`,
-        }}>
+      {hypothesis.conclusion && (() => {
+        const verdict = hypothesis.conclusion.verdict;
+        const accent = STATUS_COLORS[verdict] ?? STATUS_COLORS.eliminated;
+        const tint =
+          verdict === 'corroborated' ? '#052e1620' :
+          verdict === 'out-of-scope' ? '#1f1b3a20' :
+          '#1c1f26';
+        return (
           <div style={{
-            fontSize: 11,
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: 0.5,
-            color: hypothesis.conclusion.verdict === 'corroborated' ? '#22c55e' : '#ef4444',
-            marginBottom: 6,
+            padding: '14px 16px',
+            background: tint,
+            borderRadius: 8,
+            borderLeft: `3px solid ${accent}`,
           }}>
-            {hypothesis.conclusion.verdict === 'corroborated' ? 'Corroborated' : 'Eliminated'}
+            <div style={{
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+              color: accent,
+              marginBottom: 6,
+            }}>
+              {STATUS_LABELS[verdict] ?? verdict}
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.5, color: '#e1e4e8' }}>
+              {hypothesis.conclusion.reason}
+            </div>
           </div>
-          <div style={{ fontSize: 14, lineHeight: 1.5, color: '#e1e4e8' }}>
-            {hypothesis.conclusion.reason}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Evidence */}
       {hypothesis.evidence.length > 0 && (

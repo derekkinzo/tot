@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { Hypothesis, Session } from '../types';
 import ExportButton from './ExportButton';
-import { STATUS_COLORS } from '../theme';
+import { STATUS_COLORS, STATUS_LABELS } from '../theme';
 
 interface Props {
   hypotheses: Map<string, Hypothesis>;
@@ -10,16 +10,17 @@ interface Props {
 
 export default function StatusSummary({ hypotheses, session }: Props) {
   const counts = useMemo(() => {
-    let pending = 0, exploring = 0, eliminated = 0, corroborated = 0;
+    let pending = 0, exploring = 0, eliminated = 0, corroborated = 0, outOfScope = 0;
     for (const [, h] of hypotheses) {
       switch (h.status) {
         case 'pending': pending++; break;
         case 'exploring': exploring++; break;
         case 'eliminated': eliminated++; break;
         case 'corroborated': corroborated++; break;
+        case 'out-of-scope': outOfScope++; break;
       }
     }
-    return { pending, exploring, eliminated, corroborated, total: hypotheses.size };
+    return { pending, exploring, eliminated, corroborated, outOfScope, total: hypotheses.size };
   }, [hypotheses]);
 
   if (counts.total === 0) return null;
@@ -30,10 +31,11 @@ export default function StatusSummary({ hypotheses, session }: Props) {
       gap: 12,
       fontSize: 12,
     }}>
-      {counts.pending > 0 && <Pill color={STATUS_COLORS.pending} label="Pending" count={counts.pending} />}
-      {counts.exploring > 0 && <Pill color={STATUS_COLORS.exploring} label="Exploring" count={counts.exploring} />}
-      {counts.eliminated > 0 && <Pill color={STATUS_COLORS.eliminated} label="Eliminated" count={counts.eliminated} />}
-      {counts.corroborated > 0 && <Pill color={STATUS_COLORS.corroborated} label="Corroborated" count={counts.corroborated} />}
+      {counts.pending > 0 && <Pill color={STATUS_COLORS.pending} label={STATUS_LABELS.pending} count={counts.pending} />}
+      {counts.exploring > 0 && <Pill color={STATUS_COLORS.exploring} label={STATUS_LABELS.exploring} count={counts.exploring} />}
+      {counts.eliminated > 0 && <Pill color={STATUS_COLORS.eliminated} label={STATUS_LABELS.eliminated} count={counts.eliminated} />}
+      {counts.corroborated > 0 && <Pill color={STATUS_COLORS.corroborated} label={STATUS_LABELS.corroborated} count={counts.corroborated} />}
+      {counts.outOfScope > 0 && <Pill color={STATUS_COLORS['out-of-scope']} label={STATUS_LABELS['out-of-scope']} count={counts.outOfScope} />}
       <span style={{ color: '#6b7280', borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
         {counts.total} total
       </span>

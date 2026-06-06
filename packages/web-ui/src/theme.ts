@@ -8,13 +8,15 @@ export const STATUS_COLORS: Record<HypothesisStatus, string> = {
   exploring: '#eab308',
   eliminated: '#ef4444',
   corroborated: '#22c55e',
+  'out-of-scope': '#a78bfa',
 };
 
 export const STATUS_NODE_STYLES: Record<HypothesisStatus, { bg: string; border: string; icon: string }> = {
-  pending:      { bg: '#1e293b', border: '#3b82f6', icon: '○' },
-  exploring:    { bg: '#1c1917', border: '#eab308', icon: '◉' },
-  eliminated:   { bg: '#1c1917', border: '#4b5563', icon: '✗' },
-  corroborated: { bg: '#052e16', border: '#22c55e', icon: '✓' },
+  pending:        { bg: '#1e293b', border: '#3b82f6', icon: '○' },
+  exploring:      { bg: '#1c1917', border: '#eab308', icon: '◉' },
+  eliminated:     { bg: '#1c1917', border: '#4b5563', icon: '✗' },
+  corroborated:   { bg: '#052e16', border: '#22c55e', icon: '✓' },
+  'out-of-scope': { bg: '#1f1b3a', border: '#a78bfa', icon: '⊘' },
 };
 
 export const STATUS_LABELS: Record<HypothesisStatus, string> = {
@@ -22,6 +24,7 @@ export const STATUS_LABELS: Record<HypothesisStatus, string> = {
   exploring: 'Exploring',
   eliminated: 'Eliminated',
   corroborated: 'Corroborated',
+  'out-of-scope': 'Out of scope',
 };
 
 export const EVIDENCE_TYPE_COLORS: Record<EvidenceType, string> = {
