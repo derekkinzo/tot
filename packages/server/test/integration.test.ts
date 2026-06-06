@@ -405,7 +405,7 @@ describe('MCP Integration', () => {
       expect(result.isError).toBeFalsy();
       const text = getText(result);
       expect(text).toContain('Corroborated');
-      expect(text).toContain('explain ALL observed symptoms');
+      expect(text).toContain('account for ALL the relevant observations');
     });
 
     it('error: corroborate eliminated hypothesis', async () => {

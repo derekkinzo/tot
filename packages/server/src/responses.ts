@@ -196,7 +196,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     const inferenceKeywords = /\b(suggests?|impl(y|ies)|could|might|possibly|consistent with|indicates?|likely|appears?)\b/gi;
     const matches = lastEvidence.content.match(inferenceKeywords);
     if (matches && matches.length >= 2) {
-      result += `\nThis reads as inference rather than direct observation. What specific command, log entry, or metric would DIRECTLY show the state you're inferring?\n`;
+      result += `\nThis reads as inference rather than direct observation. What specific record, measurement, or test would DIRECTLY show the state you're inferring?\n`;
     }
   }
 
@@ -276,8 +276,8 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   result += `Remaining: ${remaining.length} (${remaining.map((r) => truncate(r.content, 25)).join(', ')})\n`;
 
   if (remaining.length === 1) {
-    result += `\n→ Only 1 hypothesis remains. Before confirming, apply a SEVERE TEST:\n`;
-    result += `  Can you REPRODUCE the issue by triggering this cause?\n`;
+    result += `\n→ Only 1 hypothesis remains. Before corroborating, apply a SEVERE TEST:\n`;
+    result += `  Can you REPRODUCE the outcome by instantiating this cause, or predict a previously unobserved consequence and check it?\n`;
     result += `  Fan out subagents to challenge this conclusion from different angles — what could you be missing?\n`;
   } else if (remaining.length === 0) {
     const allEliminated = siblings.length > 0 && siblings.every((s) => s.status === 'eliminated');
@@ -338,11 +338,11 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
   }
 
   result += `\n── Verification ──\n`;
-  result += `1. Does this explain ALL observed symptoms?\n`;
-  result += `2. Can you REPRODUCE the issue by triggering this cause?\n`;
+  result += `1. Does this account for ALL the relevant observations?\n`;
+  result += `2. Can you REPRODUCE the outcome by instantiating this cause, or predict a new consequence and check it?\n`;
   result += `3. Were competing hypotheses disposed of with evidence (not just ignored)?\n`;
-  result += `4. TEMPORALITY: Did this cause precede the failure in time?\n`;
-  result += `5. SPECIFICITY: Does this explain THIS failure pattern specifically, not just failures in general?\n`;
+  result += `4. TEMPORALITY: Did this cause precede the outcome in time?\n`;
+  result += `5. SPECIFICITY: Does this explain THIS observed pattern specifically, not just outcomes of this kind in general?\n`;
 
   result += '\n' + formatTreeSummary(tm);
   return result;
@@ -457,12 +457,16 @@ export function formatStatus(tm: TreeManager): string {
   const terminal = counts.eliminated + counts.corroborated + outOfScope;
   const total = counts.pending + counts.exploring + terminal;
 
-  let breakdown = `${counts.eliminated} eliminated, ${counts.corroborated} corroborated, ${counts.exploring} exploring`;
-  if (outOfScope > 0) breakdown += `, ${outOfScope} out-of-scope`;
+  const resolvedParts = [`${counts.eliminated} eliminated`, `${counts.corroborated} corroborated`];
+  if (outOfScope > 0) resolvedParts.push(`${outOfScope} out-of-scope`);
+  const activeParts: string[] = [];
+  if (counts.exploring > 0) activeParts.push(`${counts.exploring} exploring`);
+  if (counts.pending > 0) activeParts.push(`${counts.pending} pending`);
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +
     `Problem: "${truncate(session.problem, 70)}"\n` +
-    `Progress: ${terminal}/${total} resolved (${breakdown})\n`;
+    `Progress: ${terminal}/${total} resolved (${resolvedParts.join(', ')})\n`;
+  if (activeParts.length > 0) result += `Active: ${activeParts.join(', ')}\n`;
 
   if (unexplored.length > 0) {
     result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
@@ -488,15 +492,17 @@ function formatTreeSummary(tm: TreeManager): string {
   const status = tm.getStatus();
   if (!status.session) return '';
 
-  const { counts, stagnant, unexplored, bestLead } = status;
+  const { counts, stagnant, bestLead } = status;
   const outOfScope = counts['out-of-scope'] ?? 0;
   const terminal = counts.eliminated + counts.corroborated + outOfScope;
   const total = counts.pending + counts.exploring + terminal;
 
   let summary = `── Tree ──\n`;
   summary += `Progress: ${terminal}/${total} resolved`;
-  if (counts.exploring > 0) summary += ` | Investigating: ${counts.exploring}`;
-  if (unexplored.length > 0) summary += ` | Unexplored: ${unexplored.length}`;
+  const active: string[] = [];
+  if (counts.exploring > 0) active.push(`${counts.exploring} exploring`);
+  if (counts.pending > 0) active.push(`${counts.pending} pending`);
+  if (active.length > 0) summary += ` | ${active.join(', ')}`;
   if (bestLead) summary += ` | Lead: "${truncate(bestLead.content, 20)}" (${bestLead.score!.toFixed(2)})`;
   if (stagnant) summary += `\n⚠ Stagnation — devil's advocate: what if your lowest-scored hypothesis is correct?`;
 
