@@ -21,7 +21,7 @@ import Legend from './Legend';
 import FollowIndicator from './FollowIndicator';
 import SessionSelector from './SessionSelector';
 import ProjectSelector from './ProjectSelector';
-import type { Hypothesis, Session } from '../types';
+import { isPruned, type Hypothesis, type Session } from '../types';
 import type { ProjectInfo } from '../hooks/useTreeStream';
 import { STATUS_COLORS, HIGHLIGHT_COLORS } from '../theme';
 
@@ -526,7 +526,7 @@ function computeLayout(
         style: {
           stroke: isEdgeOnPath
             ? HIGHLIGHT_COLORS.pathEdge
-            : (h.status === 'eliminated' || h.status === 'out-of-scope')
+            : isPruned(h.status)
               ? HIGHLIGHT_COLORS.prunedEdge
               : HIGHLIGHT_COLORS.defaultEdge,
           strokeWidth: isEdgeOnPath ? 2.5 : 1.5,
