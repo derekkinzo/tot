@@ -89,7 +89,10 @@ function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines
 
   if (node.conclusion) {
     const supersededBy = node.conclusion.supersededBy;
-    const prefix = supersededBy === undefined
+    // supersededBy is the explicit signal; the status/verdict mismatch is
+    // the legacy fallback for journals written before the field existed.
+    const isHistorical = supersededBy !== undefined || node.status !== node.conclusion.verdict;
+    const prefix = !isHistorical
       ? node.conclusion.verdict
       : supersededBy === 'descendant'
         ? `historically ${node.conclusion.verdict} (reopened by refuted descendant)`
