@@ -51,6 +51,11 @@ export interface Conclusion {
   // Ids of refutes-typed evidence that ground an 'eliminated' verdict.
   // Empty array when replaying older journals that did not record this.
   refutingEvidenceIds?: string[];
+  // Set when the verdict has been superseded by a later refute. 'self'
+  // marks a direct refute against this hypothesis; 'descendant' marks a
+  // cascade demote triggered by a refute on a corroborated descendant.
+  // Renderers use this to distinguish the historical-conclusion banner.
+  supersededBy?: 'self' | 'descendant';
 }
 
 export interface HypothesisMetadata {
