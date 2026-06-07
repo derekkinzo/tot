@@ -61,17 +61,24 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
       </div>
 
       {/* Conclusion. A reopen-on-refute leaves the conclusion record on the
-          hypothesis but demotes status back to 'exploring'; in that case the
-          banner is annotated as historical so the live status pill is the
-          current source of truth. */}
+          hypothesis but demotes status back to 'exploring'; the banner is
+          annotated as historical so the live status pill is the current
+          source of truth. supersededBy distinguishes a direct refute from
+          a cascade demote triggered by a refute on a descendant. */}
       {hypothesis.conclusion && (() => {
         const verdict = hypothesis.conclusion.verdict;
-        const isHistorical = hypothesis.status !== verdict;
+        const supersededBy = hypothesis.conclusion.supersededBy;
+        const isHistorical = supersededBy !== undefined || hypothesis.status !== verdict;
         const accent = STATUS_COLORS[verdict] ?? STATUS_COLORS.eliminated;
         const tint =
           verdict === 'corroborated' ? '#052e1620' :
           verdict === 'out-of-scope' ? '#1f1b3a20' :
           '#1c1f26';
+        const label = !isHistorical
+          ? (STATUS_LABELS[verdict] ?? verdict)
+          : supersededBy === 'descendant'
+            ? `Reopened (refuted descendant)`
+            : `Reopened from ${STATUS_LABELS[verdict] ?? verdict}`;
         return (
           <div style={{
             padding: '14px 16px',
@@ -88,7 +95,7 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
               color: accent,
               marginBottom: 6,
             }}>
-              {isHistorical ? `Reopened from ${STATUS_LABELS[verdict] ?? verdict}` : (STATUS_LABELS[verdict] ?? verdict)}
+              {label}
             </div>
             <div style={{ fontSize: 14, lineHeight: 1.5, color: '#e1e4e8' }}>
               {hypothesis.conclusion.reason}

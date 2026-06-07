@@ -27,6 +27,9 @@ export interface Hypothesis {
     reason: string;
     timestamp: string;
     refutingEvidenceIds?: string[];
+    // 'self' = direct refute against this hypothesis; 'descendant' = cascade
+    // demote triggered by a refute on a corroborated descendant.
+    supersededBy?: 'self' | 'descendant';
   };
   metadata: {
     createdAt: string;

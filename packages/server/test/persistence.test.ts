@@ -322,6 +322,51 @@ describe('Persistence Roundtrip', () => {
     expect(sessions[0].status).toBe('resolved');
   });
 
+  it('cascade demote round-trips: refute on a corroborated child journals demoted ancestors so replay agrees', async () => {
+    // The cascade demotes corroborated ancestors when a corroborated
+    // descendant is refuted. Both the descendant and every ancestor must
+    // be journaled so a daemon restart reconstructs the same in-memory
+    // tree the live engine produced.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'Cascade journal test' },
+    }));
+    const decompA = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    const decompA1 = parseResult(await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+    }));
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'gone' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[1], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: decompA1.childIds[1], reason: 'A2 wins' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA.childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: decompA.childIds[0], reason: 'A wins via A2' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA.childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: decompA.childIds[1], reason: 'gone' } });
+    // Session is now resolved with A and A2 corroborated. Refute A2 —
+    // engine demotes A2 to exploring, cascades and demotes A to exploring,
+    // and reopens the session.
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[1], type: 'refutes', content: 'counter-instance' } });
+    await cleanup();
+
+    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    expect(sessions[0].status).toBe('open');
+    const a2 = hypotheses.find((h) => h.id === decompA1.childIds[1]);
+    const a = hypotheses.find((h) => h.id === decompA.childIds[0]);
+    // Both descendant and ancestor reload as 'exploring' — the cascade was
+    // journaled, not just the leaf.
+    expect(a2?.status).toBe('exploring');
+    expect(a?.status).toBe('exploring');
+    // Audit trail intact, distinguishing direct refute from cascade.
+    expect(a2?.conclusion?.supersededBy).toBe('self');
+    expect(a?.conclusion?.supersededBy).toBe('descendant');
+  });
+
   it('abandoned-reopen round-trips: refute on a corroborated leaf in an abandoned session journals session-reopened', async () => {
     // Both terminal states reopen on refute against a corroborated leaf;
     // the persistence side must journal session-reopened for the abandoned

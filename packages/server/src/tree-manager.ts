@@ -206,7 +206,7 @@ export class TreeManager extends EventEmitter {
     type: 'supports' | 'refutes' | 'neutral',
     content: string,
     source?: string,
-  ): Evidence {
+  ): { evidence: Evidence; demotedAncestors: Hypothesis[] } {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
     if (isPruned(hypothesis.status)) {
@@ -237,8 +237,8 @@ export class TreeManager extends EventEmitter {
     // session was terminal, reopens it. Both terminal states reflect a
     // claimed closure that fresh refutation challenges. The demotion
     // cascades up corroborated ancestors because corroboration's contract
-    // requires every child to be terminal — once a descendant becomes
-    // non-terminal, the ancestor's verdict is no longer earned.
+    // requires every direct child to be terminal — once a descendant
+    // becomes non-terminal, the ancestor's verdict is no longer earned.
     const session = this.sessions.get(hypothesis.sessionId);
     const demotesCorroborated = type === 'refutes' && hypothesis.status === 'corroborated';
     const reopensSession = demotesCorroborated && session !== undefined && session.status !== 'open';
@@ -250,23 +250,30 @@ export class TreeManager extends EventEmitter {
     } else {
       this.incrementMutationCounter();
     }
+    // Mark the historical conclusion as superseded by the direct refute so
+    // renderers can distinguish it from a cascade demote.
+    if (demotesCorroborated && hypothesis.conclusion) {
+      hypothesis.conclusion.supersededBy = 'self';
+    }
 
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
-    if (demotesCorroborated) {
-      this.demoteCorroboratedAncestors(hypothesis);
-    }
-
+    // Reopen the session BEFORE the cascade fires so SSE consumers never
+    // see ancestors transitioning while the session is still terminal.
     if (reopensSession) {
       session.status = 'open';
       session.completedAt = undefined;
       this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
     }
 
+    const demotedAncestors = demotesCorroborated
+      ? this.demoteCorroboratedAncestors(hypothesis, now)
+      : [];
+
     this.setCurrent(hypothesis.sessionId);
 
-    return evidence;
+    return { evidence, demotedAncestors };
   }
 
   /**
@@ -738,20 +745,33 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Walks up corroborated ancestors and demotes each to 'exploring'. The
-   * corroboration gate requires every child to be terminal at the moment
-   * of the verdict; once a descendant becomes non-terminal (via demote on
-   * refute), the ancestor's verdict is no longer earned. The historical
-   * conclusion record stays as audit trail.
+   * Walks up corroborated ancestors and demotes each to 'exploring'.
+   * corroborateHypothesis requires direct children terminal at the moment
+   * of the verdict; once a corroborated child demotes via refute, the
+   * parent's gate is retroactively unmet, so the parent demotes too — and
+   * recursively up the corroborated spine. The historical conclusion stays
+   * as audit trail with supersededBy='descendant'. Returns the demoted
+   * ancestors so callers can journal the cascade.
+   *
+   * The visited set guards against a cycle in parentId pointers (impossible
+   * via the public engine API but reachable through corrupt journals).
    */
-  private demoteCorroboratedAncestors(start: Hypothesis): void {
+  private demoteCorroboratedAncestors(start: Hypothesis, now: string): Hypothesis[] {
+    const demoted: Hypothesis[] = [];
+    const seen = new Set<string>([start.id]);
     let cursor = start.parentId ? this.hypotheses.get(start.parentId) : undefined;
-    while (cursor && cursor.status === 'corroborated') {
+    while (cursor && cursor.status === 'corroborated' && !seen.has(cursor.id)) {
+      seen.add(cursor.id);
       cursor.status = 'exploring';
-      cursor.metadata.updatedAt = new Date().toISOString();
+      cursor.metadata.updatedAt = now;
+      if (cursor.conclusion) {
+        cursor.conclusion.supersededBy = 'descendant';
+      }
+      demoted.push(cursor);
       this.emit('event', { type: 'hypothesis-updated', hypothesis: cursor } satisfies TreeEvent);
       cursor = cursor.parentId ? this.hypotheses.get(cursor.parentId) : undefined;
     }
+    return demoted;
   }
 
   /**

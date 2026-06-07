@@ -257,10 +257,15 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const priorStatus = sessionIdForPrior
         ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
         : undefined;
-      tm.addEvidence(hypothesisId, type, content, source);
+      const { demotedAncestors } = tm.addEvidence(hypothesisId, type, content, source);
       const hypothesis = tm.getHypothesis(hypothesisId)!;
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
+      // Cascade-demoted ancestors are real status changes; journal each so
+      // replay reconstructs the same in-memory tree the engine produced.
+      for (const ancestor of demotedAncestors) {
+        await p.append('hypothesis-updated', ancestor);
+      }
       const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
       await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatAddEvidence(hypothesisId, hypothesis, tm));

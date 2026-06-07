@@ -88,8 +88,13 @@ function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines
   lines.push(`${indent}- ${icon} **${node.content}**${score} [${node.status}]`);
 
   if (node.conclusion) {
-    const isHistorical = node.status !== node.conclusion.verdict;
-    const prefix = isHistorical ? `historically ${node.conclusion.verdict}` : node.conclusion.verdict;
+    const supersededBy = node.conclusion.supersededBy;
+    const isHistorical = supersededBy !== undefined || node.status !== node.conclusion.verdict;
+    const prefix = !isHistorical
+      ? node.conclusion.verdict
+      : supersededBy === 'descendant'
+        ? `historically ${node.conclusion.verdict} (reopened by refuted descendant)`
+        : `historically ${node.conclusion.verdict}`;
     lines.push(`${indent}  > ${prefix}: ${node.conclusion.reason}`);
   }
 

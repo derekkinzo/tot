@@ -149,7 +149,7 @@ describe('TreeManager', () => {
   describe('addEvidence', () => {
     it('adds evidence and returns it', () => {
       const { root } = tm.createSession('Problem');
-      const ev = tm.addEvidence(root.id, 'supports', 'Log shows error', 'app.log');
+      const { evidence: ev } = tm.addEvidence(root.id, 'supports', 'Log shows error', 'app.log');
       expect(ev.type).toBe('supports');
       expect(ev.content).toBe('Log shows error');
       expect(ev.source).toBe('app.log');
@@ -361,9 +361,16 @@ describe('TreeManager', () => {
       expect(events.some((e) => e.type === 'session-reopened')).toBe(true);
       // The leaf is demoted to 'exploring' so closure can re-evaluate
       // honestly under the new evidence; the historical conclusion stays
-      // in the audit trail.
+      // in the audit trail with supersededBy='self' marking the direct
+      // refute.
       expect(a.status).toBe('exploring');
       expect(a.conclusion?.verdict).toBe('corroborated');
+      expect(a.conclusion?.supersededBy).toBe('self');
+      // session-reopened fires BEFORE the leaf hypothesis-updated at the
+      // engine level — wait, actually for direct refute on a leaf there's
+      // no cascade; the order is hypothesis-updated(target), then
+      // session-reopened. Check just that both fire.
+      expect(events.some((e) => e.type === 'hypothesis-updated')).toBe(true);
     });
 
     it('refuting evidence on a corroborated leaf reopens an abandoned session as well', () => {
@@ -419,13 +426,30 @@ describe('TreeManager', () => {
       expect(a2.status).toBe('corroborated');
       // Refute A2 — A2 demotes, and A's verdict is no longer earned, so A
       // also demotes. Session reopens.
-      tm.addEvidence(a2.id, 'refutes', 'counter-instance');
+      const events: TreeEvent[] = [];
+      tm.on('event', (e) => events.push(e));
+      const { demotedAncestors } = tm.addEvidence(a2.id, 'refutes', 'counter-instance');
       expect(a2.status).toBe('exploring');
       expect(a.status).toBe('exploring');
       expect(session.status).toBe('open');
-      // Audit trail intact on both ancestors.
-      expect(a.conclusion?.verdict).toBe('corroborated');
+      // Audit trail intact on both ancestors, with supersededBy distinguishing
+      // the direct refute from the cascade.
       expect(a2.conclusion?.verdict).toBe('corroborated');
+      expect(a2.conclusion?.supersededBy).toBe('self');
+      expect(a.conclusion?.verdict).toBe('corroborated');
+      expect(a.conclusion?.supersededBy).toBe('descendant');
+      // The cascade returns demoted ancestors so the tools handler can
+      // journal each one for replay parity.
+      expect(demotedAncestors.map((h) => h.id)).toEqual([a.id]);
+      // Event ordering: session-reopened fires BEFORE the cascade emits
+      // ancestor hypothesis-updated, so SSE consumers never see ancestors
+      // demoted under a still-resolved session.
+      const reopenIdx = events.findIndex((e) => e.type === 'session-reopened');
+      const ancestorUpdateIdx = events.findIndex(
+        (e) => e.type === 'hypothesis-updated' && e.hypothesis.id === a.id,
+      );
+      expect(reopenIdx).toBeGreaterThanOrEqual(0);
+      expect(ancestorUpdateIdx).toBeGreaterThan(reopenIdx);
     });
 
     it('rejects supports/neutral evidence on a corroborated leaf', () => {
@@ -574,8 +598,8 @@ describe('TreeManager', () => {
 
     it('binds all refutes-typed records when no explicit ids are passed', () => {
       const { root } = tm.createSession('Problem');
-      const e1 = tm.addEvidence(root.id, 'refutes', 'r1');
-      const e2 = tm.addEvidence(root.id, 'refutes', 'r2');
+      const { evidence: e1 } = tm.addEvidence(root.id, 'refutes', 'r1');
+      const { evidence: e2 } = tm.addEvidence(root.id, 'refutes', 'r2');
       tm.addEvidence(root.id, 'neutral', 'n');
       const result = tm.eliminateHypothesis(root.id, 'multiple refutations');
       expect(result.conclusion?.refutingEvidenceIds).toEqual([e1.id, e2.id]);
@@ -583,7 +607,7 @@ describe('TreeManager', () => {
 
     it('binds explicit ids when supplied', () => {
       const { root } = tm.createSession('Problem');
-      const e1 = tm.addEvidence(root.id, 'refutes', 'r1');
+      const { evidence: e1 } = tm.addEvidence(root.id, 'refutes', 'r1');
       tm.addEvidence(root.id, 'refutes', 'r2');
       const result = tm.eliminateHypothesis(root.id, 'just one is decisive', [e1.id]);
       expect(result.conclusion?.refutingEvidenceIds).toEqual([e1.id]);
@@ -591,7 +615,7 @@ describe('TreeManager', () => {
 
     it('rejects explicit ids that reference non-refutes records', () => {
       const { root } = tm.createSession('Problem');
-      const supports = tm.addEvidence(root.id, 'supports', 'irrelevant here');
+      const { evidence: supports } = tm.addEvidence(root.id, 'supports', 'irrelevant here');
       tm.addEvidence(root.id, 'refutes', 'real refute');
       expect(() => tm.eliminateHypothesis(root.id, 'wrong id', [supports.id])).toThrow(
         /not a refutes-typed record/,
