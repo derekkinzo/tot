@@ -13,6 +13,20 @@ Agents decompose problems into hypothesis trees, gather evidence, eliminate dead
 
 AI agents tackling complex investigations tend to reason linearly — they follow the first plausible lead, get stuck in rabbit holes, and lose track of what they've already considered. Tree of Thought reasoning fixes this by maintaining a structured hypothesis tree that agents explore systematically.
 
+```
+   Linear reasoning                      Tree of Thought
+   ─────────────────                     ────────────────────
+   guess A                                  Problem
+     ↓ (commit)                            /   |   \
+   try fix                                A    B    C
+     ↓ (didn't help)                      ✗    ↓    ↓
+   guess B                                    B1 B2  …
+     ↓ (commit)                              ✗   ✓
+   try fix
+     ↓ (didn't help)                       Eliminate by refutation;
+   …                                        corroborate the survivor.
+```
+
 The clearest concrete example is debugging: competing causes for a failure, evidence gathered for each, dead ends eliminated until a root cause survives. The same shape applies to other domains — medical differential diagnosis, intelligence analysis, and scientific inquiry.
 
 **tot-mcp** is an MCP server that gives agents this structured reasoning capability with:
@@ -26,42 +40,28 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 
 ## Quick Start
 
-```json
-{
-  "mcpServers": {
-    "tot": {
-      "command": "npx",
-      "args": ["tot-mcp"]
-    }
-  }
-}
-```
-
-Open `http://localhost:6274` to see the visualization.
-
-<details>
-<summary><strong>Claude Code (Plugin — recommended)</strong></summary>
-
-Install as a plugin for full skill support (`/tot-reason`, `/tot-inspect`, `/tot-export`, `/tot-dashboard`). From inside Claude Code:
+**Claude Code (plugin — recommended).** Bundles the MCP server, four slash
+commands, three subagents, and hooks in one install:
 
 ```
 /plugin marketplace add derekkinzo/tot
 /plugin install tot-mcp@tot
 ```
 
-This auto-registers the MCP server and enables slash commands and hooks.
-</details>
+Open `http://localhost:6274` to see the visualization once the daemon starts.
 
 <details>
-<summary><strong>Claude Code (MCP only)</strong></summary>
+<summary><strong>Claude Code (MCP only, no plugin)</strong></summary>
 
 ```bash
 claude mcp add tot -- npx tot-mcp
 ```
+
+You get the tools but not the slash commands, agents, or hooks.
 </details>
 
 <details>
-<summary><strong>Kiro CLI / Other MCP Clients</strong></summary>
+<summary><strong>Other MCP clients (Kiro, Cursor, etc.)</strong></summary>
 
 Add to your MCP configuration:
 ```json
