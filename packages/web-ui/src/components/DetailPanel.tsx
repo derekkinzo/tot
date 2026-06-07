@@ -68,7 +68,11 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
       {hypothesis.conclusion && (() => {
         const verdict = hypothesis.conclusion.verdict;
         const supersededBy = hypothesis.conclusion.supersededBy;
-        const isHistorical = supersededBy !== undefined;
+        // supersededBy is the explicit signal; the status/verdict mismatch
+        // is the legacy fallback for journals written before the field
+        // existed (older reopen-on-refute records carry status='exploring'
+        // and verdict='corroborated' without supersededBy).
+        const isHistorical = supersededBy !== undefined || hypothesis.status !== verdict;
         const accent = STATUS_COLORS[verdict] ?? STATUS_COLORS.eliminated;
         const tint =
           verdict === 'corroborated' ? '#052e1620' :

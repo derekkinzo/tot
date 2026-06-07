@@ -366,9 +366,9 @@ describe('TreeManager', () => {
       expect(a.status).toBe('exploring');
       expect(a.conclusion?.verdict).toBe('corroborated');
       expect(a.conclusion?.supersededBy).toBe('self');
-      // Direct refute on a leaf has no cascade; both hypothesis-updated
-      // (for the target) and session-reopened fire.
-      expect(events.some((e) => e.type === 'hypothesis-updated')).toBe(true);
+      // Direct refute on a leaf has no cascade: exactly one hypothesis-updated
+      // (for the target) fires, alongside session-reopened.
+      expect(events.filter((e) => e.type === 'hypothesis-updated').length).toBe(1);
     });
 
     it('refuting evidence on a corroborated leaf reopens an abandoned session as well', () => {
