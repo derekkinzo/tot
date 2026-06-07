@@ -256,12 +256,11 @@ export class TreeManager extends EventEmitter {
       this.incrementMutationCounter();
     }
     // Mark the historical conclusion as superseded by the direct refute
-    // so renderers can distinguish it from a cascade demote.
-    // corroborateHypothesis is the only writer of status='corroborated'
-    // and always sets conclusion in the same statement, so the conclusion
-    // is guaranteed to exist on the demote path.
-    if (demotesCorroborated) {
-      hypothesis.conclusion!.supersededBy = 'self';
+    // so renderers can distinguish it from a cascade demote. The guard
+    // covers loadState's reload path, which copies hypotheses straight
+    // from the journal without engine-API validation.
+    if (demotesCorroborated && hypothesis.conclusion) {
+      hypothesis.conclusion.supersededBy = 'self';
     }
 
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
@@ -774,9 +773,12 @@ export class TreeManager extends EventEmitter {
       seen.add(cursor.id);
       cursor.status = 'exploring';
       cursor.metadata.updatedAt = now;
-      // Conclusion is guaranteed because corroborateHypothesis is the
-      // only writer of status='corroborated' and always sets conclusion.
-      cursor.conclusion!.supersededBy = 'descendant';
+      // Guard for loadState's reload path, which trusts journal payloads;
+      // a corrupt entry could carry status='corroborated' without a
+      // conclusion, and a non-null assertion would crash mid-cascade.
+      if (cursor.conclusion) {
+        cursor.conclusion.supersededBy = 'descendant';
+      }
       demoted.push(cursor);
       this.emit('event', { type: 'hypothesis-updated', hypothesis: cursor } satisfies TreeEvent);
       cursor = cursor.parentId ? this.hypotheses.get(cursor.parentId) : undefined;
