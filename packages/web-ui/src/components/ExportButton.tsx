@@ -89,8 +89,7 @@ function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines
 
   if (node.conclusion) {
     const supersededBy = node.conclusion.supersededBy;
-    const isHistorical = supersededBy !== undefined || node.status !== node.conclusion.verdict;
-    const prefix = !isHistorical
+    const prefix = supersededBy === undefined
       ? node.conclusion.verdict
       : supersededBy === 'descendant'
         ? `historically ${node.conclusion.verdict} (reopened by refuted descendant)`

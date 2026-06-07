@@ -193,13 +193,18 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Attaches evidence to a hypothesis. Auto-transitions 'pending' to 'exploring'.
+   * Attaches evidence to a hypothesis. Auto-transitions 'pending' to
+   * 'exploring'. A refute against a corroborated hypothesis demotes it to
+   * 'exploring', cascades up corroborated ancestors (also demoted), and
+   * reopens the session if it was terminal.
    * @param hypothesisId - ID of the target hypothesis
    * @param type - Relationship of evidence to the hypothesis
    * @param content - Description of the evidence
-   * @param source - Optional provenance (logs, tests, docs, etc.)
-   * @returns The created evidence record
-   * @throws TreeError if hypothesis is eliminated or confirmed
+   * @param source - Optional provenance
+   * @returns The created evidence record plus the cascade-demoted ancestors
+   *   so callers can journal each ancestor's hypothesis-updated entry.
+   * @throws TreeError if hypothesis is eliminated/out-of-scope, or if
+   *   supports/neutral evidence is added to a corroborated leaf.
    */
   addEvidence(
     hypothesisId: string,
@@ -250,17 +255,22 @@ export class TreeManager extends EventEmitter {
     } else {
       this.incrementMutationCounter();
     }
-    // Mark the historical conclusion as superseded by the direct refute so
-    // renderers can distinguish it from a cascade demote.
-    if (demotesCorroborated && hypothesis.conclusion) {
-      hypothesis.conclusion.supersededBy = 'self';
+    // Mark the historical conclusion as superseded by the direct refute
+    // so renderers can distinguish it from a cascade demote.
+    // corroborateHypothesis is the only writer of status='corroborated'
+    // and always sets conclusion in the same statement, so the conclusion
+    // is guaranteed to exist on the demote path.
+    if (demotesCorroborated) {
+      hypothesis.conclusion!.supersededBy = 'self';
     }
 
     this.emit('event', { type: 'evidence-added', hypothesisId, evidence } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
-    // Reopen the session BEFORE the cascade fires so SSE consumers never
-    // see ancestors transitioning while the session is still terminal.
+    // Reopen the session BEFORE the cascade fires so ancestor demotions
+    // emitted by the cascade are observed under an open session. (The
+    // direct target's hypothesis-updated above precedes session-reopened
+    // and is part of the same logical event.)
     if (reopensSession) {
       session.status = 'open';
       session.completedAt = undefined;
@@ -764,9 +774,9 @@ export class TreeManager extends EventEmitter {
       seen.add(cursor.id);
       cursor.status = 'exploring';
       cursor.metadata.updatedAt = now;
-      if (cursor.conclusion) {
-        cursor.conclusion.supersededBy = 'descendant';
-      }
+      // Conclusion is guaranteed because corroborateHypothesis is the
+      // only writer of status='corroborated' and always sets conclusion.
+      cursor.conclusion!.supersededBy = 'descendant';
       demoted.push(cursor);
       this.emit('event', { type: 'hypothesis-updated', hypothesis: cursor } satisfies TreeEvent);
       cursor = cursor.parentId ? this.hypotheses.get(cursor.parentId) : undefined;

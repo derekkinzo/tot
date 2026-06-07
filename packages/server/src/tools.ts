@@ -260,14 +260,16 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const { demotedAncestors } = tm.addEvidence(hypothesisId, type, content, source);
       const hypothesis = tm.getHypothesis(hypothesisId)!;
       const p = getPersistence(hypothesis.sessionId);
+      // Journal append order mirrors engine SSE emit order: target hypothesis,
+      // then session transition, then cascade-demoted ancestors. Replay reads
+      // the journal as a timeline so audit consumers see the same ordering
+      // SSE consumers do.
       await p.append('hypothesis-updated', hypothesis);
-      // Cascade-demoted ancestors are real status changes; journal each so
-      // replay reconstructs the same in-memory tree the engine produced.
+      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       for (const ancestor of demotedAncestors) {
         await p.append('hypothesis-updated', ancestor);
       }
-      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
-      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatAddEvidence(hypothesisId, hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {

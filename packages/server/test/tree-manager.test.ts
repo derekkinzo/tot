@@ -366,10 +366,8 @@ describe('TreeManager', () => {
       expect(a.status).toBe('exploring');
       expect(a.conclusion?.verdict).toBe('corroborated');
       expect(a.conclusion?.supersededBy).toBe('self');
-      // session-reopened fires BEFORE the leaf hypothesis-updated at the
-      // engine level — wait, actually for direct refute on a leaf there's
-      // no cascade; the order is hypothesis-updated(target), then
-      // session-reopened. Check just that both fire.
+      // Direct refute on a leaf has no cascade; both hypothesis-updated
+      // (for the target) and session-reopened fire.
       expect(events.some((e) => e.type === 'hypothesis-updated')).toBe(true);
     });
 
@@ -399,9 +397,11 @@ describe('TreeManager', () => {
       expect(events.some((e) => e.type === 'session-reopened')).toBe(true);
       // The leaf is demoted to 'exploring' so closure can re-evaluate
       // honestly under the new evidence; the historical conclusion stays
-      // in the audit trail.
+      // in the audit trail with supersededBy='self' marking the direct
+      // refute (mirrors the resolved-session sibling above).
       expect(a2.status).toBe('exploring');
       expect(a2.conclusion?.verdict).toBe('corroborated');
+      expect(a2.conclusion?.supersededBy).toBe('self');
     });
 
     it('cascades demotion up corroborated ancestors when a corroborated child is refuted', () => {
@@ -441,14 +441,19 @@ describe('TreeManager', () => {
       // The cascade returns demoted ancestors so the tools handler can
       // journal each one for replay parity.
       expect(demotedAncestors.map((h) => h.id)).toEqual([a.id]);
-      // Event ordering: session-reopened fires BEFORE the cascade emits
-      // ancestor hypothesis-updated, so SSE consumers never see ancestors
-      // demoted under a still-resolved session.
+      // Event ordering: target hypothesis-updated fires first, then
+      // session-reopened, then the cascade emits ancestor
+      // hypothesis-updated. SSE consumers never see ancestors demoted
+      // under a still-resolved session.
+      const targetUpdateIdx = events.findIndex(
+        (e) => e.type === 'hypothesis-updated' && e.hypothesis.id === a2.id,
+      );
       const reopenIdx = events.findIndex((e) => e.type === 'session-reopened');
       const ancestorUpdateIdx = events.findIndex(
         (e) => e.type === 'hypothesis-updated' && e.hypothesis.id === a.id,
       );
-      expect(reopenIdx).toBeGreaterThanOrEqual(0);
+      expect(targetUpdateIdx).toBeGreaterThanOrEqual(0);
+      expect(reopenIdx).toBeGreaterThan(targetUpdateIdx);
       expect(ancestorUpdateIdx).toBeGreaterThan(reopenIdx);
     });
 
