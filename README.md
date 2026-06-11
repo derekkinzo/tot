@@ -17,14 +17,14 @@ AI agents tackling complex investigations tend to reason linearly — they follo
    Linear reasoning                      Tree of Thought
    ─────────────────                     ────────────────────
    guess A                                  Problem
-     ↓ (commit)                            /   |   \
-   try fix                                A    B    C
-     ↓ (didn't help)                      ✗    ↓    ↓
+     ↓ commit                              /   |   \
+   act on it                              A    B    C
+     ↓ didn't help                        ✗    ▼    ▼
    guess B                                    B1 B2  …
-     ↓ (commit)                              ✗   ✓
-   try fix
-     ↓ (didn't help)                       Eliminate by refutation;
-   …                                        corroborate the survivor.
+     ↓ commit                                 ✗   ✓
+   act on it
+     ↓ didn't help                         Eliminate by refutation;
+   …                                       corroborate the survivor.
 ```
 
 The clearest concrete example is debugging: competing causes for a failure, evidence gathered for each, dead ends eliminated until a root cause survives. The same shape applies to other domains — medical differential diagnosis, intelligence analysis, and scientific inquiry.
@@ -40,42 +40,40 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 
 ## Quick Start
 
-**Claude Code (plugin — recommended).** Bundles the MCP server, four slash
-commands, three subagents, and hooks in one install:
-
-```
-/plugin marketplace add derekkinzo/tot
-/plugin install tot-mcp@tot
-```
-
-Open `http://localhost:6274` to see the visualization once the daemon starts.
-
-<details>
-<summary><strong>Claude Code (MCP only, no plugin)</strong></summary>
+The MCP server runs from a local clone of this repository — there is no
+package registry release yet.
 
 ```bash
-claude mcp add tot -- npx tot-mcp
+git clone https://github.com/derekkinzo/tot.git
+cd tot
+npm install
+npm run build
 ```
 
-You get the tools but not the slash commands, agents, or hooks.
-</details>
+The build emits an executable at `packages/server/dist/cli.js`. Register
+it with your MCP client:
 
-<details>
-<summary><strong>Other MCP clients (Kiro, Cursor, etc.)</strong></summary>
+**Claude Code:**
+```bash
+claude mcp add tot -- node /absolute/path/to/tot/packages/server/dist/cli.js
+```
 
-Add to your MCP configuration:
+**Other MCP clients (Cursor, Kiro, Cline, etc.).** Add to your client's MCP
+configuration:
 ```json
 {
   "mcpServers": {
     "tot": {
       "type": "stdio",
-      "command": "npx",
-      "args": ["tot-mcp"]
+      "command": "node",
+      "args": ["/absolute/path/to/tot/packages/server/dist/cli.js"]
     }
   }
 }
 ```
-</details>
+
+Open `http://localhost:6274` after the first MCP tool call to see the
+visualization.
 
 ## Tools
 
@@ -93,18 +91,18 @@ Add to your MCP configuration:
 | `get_status` | Progress summary + stagnation detection |
 | `validate_decomposition` | Check structural properties of a decomposition |
 
-## Skills (Claude Code Plugin)
+## Claude Code Skills, Agents, and Hooks
 
-When installed as a plugin, these slash commands are available:
+The repository ships markdown definitions under `skills/`, `agents/`, and
+`hooks/` for Claude Code users who want guided workflows on top of the raw
+MCP tools. Point Claude Code at the cloned directory to load them.
 
-| Skill | Purpose |
+| Slash command | Purpose |
 |-------|---------|
 | `/tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
 | `/tot-inspect` | View current tree state, progress, and visualization |
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |
 | `/tot-dashboard` | Open the live tree visualization in the default browser at `localhost:6274` |
-
-The plugin also includes agents for parallel investigation and adversarial review:
 
 | Agent | Purpose |
 |-------|---------|
@@ -112,7 +110,7 @@ The plugin also includes agents for parallel investigation and adversarial revie
 | `evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
 | `decomposition-evaluator` | Advises on decomposition structure: sibling overlap, coverage, level of abstraction, testability. Emits advisory categories, not pass/fail. |
 
-It also ships hooks that detect failure patterns.
+Hooks under `hooks/hooks.json` detect failure patterns during reasoning.
 
 ## How It Works
 
@@ -150,16 +148,18 @@ Browser (localhost:6274) ← SSE events ← HTTP server ←┘
 - **Shim** auto-starts daemon on first use
 - **Daemon** survives agent disconnect (browser stays connected)
 - **JSONL persistence** in `{project}/.tot/sessions/`
-- **Offline viewing**: `tot-mcp serve`
+- **Offline viewing**: run the daemon directly with `node packages/server/dist/cli.js serve`
 
 ## CLI
 
+The build emits a single executable at `packages/server/dist/cli.js`.
+
 ```bash
-tot-mcp              # Start MCP shim (what clients spawn)
-tot-mcp serve        # Start daemon for offline viewing
-tot-mcp status       # Show daemon + session info
-tot-mcp stop         # Stop daemon
-tot-mcp --help       # Usage
+node packages/server/dist/cli.js              # Start MCP shim (what clients spawn)
+node packages/server/dist/cli.js serve        # Start daemon for offline viewing
+node packages/server/dist/cli.js status       # Show daemon + session info
+node packages/server/dist/cli.js stop         # Stop daemon
+node packages/server/dist/cli.js --help       # Usage
 ```
 
 ## Research Background
