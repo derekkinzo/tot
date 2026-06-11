@@ -29,7 +29,7 @@ describe('Plugin Structure', () => {
       const content = JSON.parse(readFileSync(path, 'utf-8'));
       expect(content.mcpServers?.tot).toEqual({
         command: 'node',
-        args: ['${CLAUDE_PLUGIN_DATA}/dist/cli.js'],
+        args: ['${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js'],
       });
     });
   });
