@@ -11,7 +11,7 @@ tot-mcp uses a client-server (daemon) architecture:
 | Problem | Per-Process | Daemon |
 |---------|-------------|--------|
 | Port conflicts | Multiple ports, user confusion | One stable port |
-| Subagent visibility | Separate state, can't share | Shared state |
+| Concurrent client visibility | Separate state, can't share | Shared state |
 | Browser dies on agent exit | Yes | No (daemon outlives agents) |
 | Offline viewing | Impossible | Daemon serves persisted state |
 | PID management | Complex, buggy | Trivial (one daemon) |

@@ -11,13 +11,13 @@ The tot-mcp daemon serves the dashboard on `http://localhost:6274` whenever it i
 
 ## Instructions
 
-1. **Ensure the daemon is running.** Call the `get_status` MCP tool. The shim auto-starts the daemon if it is not already running. If `get_status` fails (e.g., MCP not connected), fall back to the CLI:
+1. **Ensure the daemon is running.** Call the `get_status` MCP tool. The shim auto-starts the daemon if it is not already running. If `get_status` fails (e.g., MCP not connected), fall back to the bundled CLI:
    ```bash
-   tot-mcp status
+   node "${CLAUDE_PLUGIN_ROOT}/packages/server/dist/cli.js" status
    ```
-   If status reports the daemon is down and the CLI is available, start it in the background:
+   If status reports the daemon is down, start it in the background:
    ```bash
-   tot-mcp serve >/tmp/tot-mcp.log 2>&1 &
+   node "${CLAUDE_PLUGIN_ROOT}/packages/server/dist/cli.js" serve >/tmp/tot-mcp.log 2>&1 &
    ```
 
 2. **Open the browser** to the dashboard URL using the first command available on the platform:

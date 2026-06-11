@@ -22,6 +22,18 @@ describe('Plugin Structure', () => {
     });
   });
 
+  describe('.mcp.json', () => {
+    it('exists and references the bundled cli.js via CLAUDE_PLUGIN_ROOT', () => {
+      const path = join(REPO_ROOT, '.mcp.json');
+      expect(existsSync(path)).toBe(true);
+      const content = JSON.parse(readFileSync(path, 'utf-8'));
+      expect(content.mcpServers?.tot).toBeDefined();
+      expect(content.mcpServers.tot.command).toBe('node');
+      const args = content.mcpServers.tot.args ?? [];
+      expect(args.some((a: string) => a.includes('${CLAUDE_PLUGIN_ROOT}') && a.endsWith('cli.js'))).toBe(true);
+    });
+  });
+
   describe('skills/', () => {
     const skillsDir = join(REPO_ROOT, 'skills');
     const skills = readdirSync(skillsDir, { withFileTypes: true })

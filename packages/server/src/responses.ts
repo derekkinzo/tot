@@ -46,7 +46,7 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
     `1. Gather context: What is the relevant background? What is already known?\n` +
     `2. Characterize the question: What observations are being explained or what decision is being made? What is the scope?\n` +
     `3. Identify boundaries: What is IN scope vs OUT of scope for this investigation?\n` +
-    `Fan out subagents to research the domain from multiple angles simultaneously.\n\n` +
+    `Investigate the domain from multiple independent angles before decomposing.\n\n` +
     `── Decomposition ──\n` +
     `Once you understand the domain, decompose into 2-5 sibling hypotheses.\n` +
     `Choose a framing axis that suits the domain — by mechanism, by location, by stage, by actor, by time, or by population. Whichever axis you pick, make the siblings comparable along it.\n` +
@@ -114,12 +114,12 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   result += `  Overlap: could a single root cause belong to two of these? If accidental, refine the boundaries; if it reflects domain co-occurrence, consider an explicit "A and B" combined child.\n`;
   result += `  Coverage: imagine a plausible cause NOT covered by ANY of these. If yes, add it (catch-all branches are first-class).\n`;
   result += `  Level: are all hypotheses at the same level of abstraction?\n`;
-  // Dispatch the decomposition-evaluator subagent with content inlined (not
-  // bare UUIDs) so the validator can run its checks without an extra
-  // get_tree call. Each child is prefixed with an 8-char ID so the agent
-  // can map findings back to a specific node when it follows up.
+  // Inline the parent and children content (not bare UUIDs) so the structural
+  // review can be performed without an extra get_tree call. Each child is
+  // prefixed with an 8-char ID so findings can be mapped back to a specific
+  // node on follow-up.
   if (parent) {
-    result += `\nDispatch the \`decomposition-evaluator\` subagent (overlap, coverage, level, testability):\n`;
+    result += `\nStructural review (overlap, coverage, level, testability):\n`;
     result += `  Parent: "${truncate(parent.content, 80)}"\n`;
     for (const c of children) {
       result += `  - ${c.id.slice(0, 8)}: "${truncate(c.content, 80)}"\n`;
@@ -144,7 +144,7 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
   result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
   result += `  Overlap: does this overlap acknowledge a domain co-occurrence (e.g., an INUS cluster), or is it accidental redundancy?\n`;
   result += `  Coverage: does adding this close a gap, or is there still something missing?\n`;
-  result += `Fan out subagents to challenge whether this hypothesis is genuinely distinct or whether it should be merged with a sibling.\n\n`;
+  result += `Challenge whether this hypothesis is genuinely distinct or whether it should be merged with a sibling.\n\n`;
 
   result += `── Protocol ──\n`;
   result += `What is the fastest path to REFUTE this hypothesis? Define the test before investigating.\n`;
@@ -266,12 +266,12 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   if (remaining.length === 1) {
     result += `\n→ Only 1 hypothesis remains. Before corroborating, apply a SEVERE TEST:\n`;
     result += `  Can you REPRODUCE the outcome by instantiating this cause, or predict a previously unobserved consequence and check it?\n`;
-    result += `  Fan out subagents to challenge this conclusion from different angles — what could you be missing?\n`;
+    result += `  Challenge this conclusion from different angles — what could you be missing?\n`;
   } else if (remaining.length === 0) {
     const allEliminated = siblings.length > 0 && siblings.every((s) => s.status === 'eliminated');
     if (allEliminated) {
       result += `\n⚠ All siblings eliminated — hypothesis space may be incomplete.\n`;
-      result += `Fan out subagents to investigate what was missed. Add new hypotheses from fresh perspectives.\n`;
+      result += `Investigate what was missed. Add new hypotheses from fresh perspectives.\n`;
     } else {
       result += `\n⚠ No live siblings remain (every sibling is eliminated or out-of-scope).\n`;
       result += `If the out-of-scope branches were set aside without refutation, consider whether the answer might lie there before closing the investigation.\n`;
@@ -279,7 +279,7 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   } else {
     result += `\n── Protocol ──\n`;
     result += `What is the most discriminating test to distinguish the remaining ${remaining.length} hypotheses?\n`;
-    result += `Fan out subagents to independently investigate each remaining hypothesis and challenge assumptions.\n`;
+    result += `Investigate each remaining hypothesis independently and challenge assumptions.\n`;
   }
 
   result += '\n' + formatTreeSummary(tm);
@@ -424,11 +424,10 @@ export function formatValidateDecomposition(parentId: string, check: StructuralC
   }
 
   result += `\n── Review Questions ──\n`;
-  result += `\n(testability-advisory cases — unfalsifiable hypotheses — require semantic review; dispatch the decomposition-evaluator subagent for those.)\n`;
+  result += `\n(testability-advisory cases — unfalsifiable hypotheses — require semantic review of each child's refutability.)\n`;
   result += `Overlap: could a single observation belong to two of these by accident?\n`;
   result += `Coverage: is there a plausible cause not covered by any sibling or catch-all?\n`;
   result += `Level: are all hypotheses at the same level of abstraction?\n`;
-  result += `\nDispatch the \`decomposition-evaluator\` subagent for structural advice on ambiguous cases.\n`;
 
   return result;
 }
