@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "tot": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["tot-mcp"]
-    }
-  }
-}
