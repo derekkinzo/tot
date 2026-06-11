@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "build": "tsup && npm run copy-ui",
-    "copy-ui": "rm -rf static && cp -r ../web-ui/dist static 2>/dev/null || mkdir -p static",
+    "copy-ui": "rm -rf static.new && (cp -r ../web-ui/dist static.new 2>/dev/null || mkdir -p static.new) && rm -rf static && mv static.new static",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest"

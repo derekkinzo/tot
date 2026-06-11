@@ -42,18 +42,19 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 
 ### Claude Code (recommended)
 
-Install the plugin, then run the one-time build-and-register skill:
-
 ```
 /plugin marketplace add derekkinzo/tot
 /plugin install tot-mcp
-/tot-init
 ```
 
-Restart Claude Code after `/tot-init` so the freshly registered MCP server
-loads. The plugin ships source code; `/tot-init` runs `npm install`,
-`npm run build`, and `claude mcp add tot -- node <path-to-built-cli>` for
-you. It is idempotent — re-run it any time the plugin updates.
+The plugin's `SessionStart` hook runs `npm install` and builds the bundled
+MCP server on first launch and again whenever a plugin update changes
+`packages/server/package.json`. The first run takes about a minute; later
+runs are no-ops. Restart Claude Code once after install so the hook fires
+and the MCP server is registered.
+
+The build output is written to the plugin's persistent data directory
+(`${CLAUDE_PLUGIN_DATA}`) so it survives plugin updates.
 
 ### Other MCP clients (Cursor, Kiro, Cline, etc.)
 
@@ -85,8 +86,11 @@ visualization.
 
 ### Requirements
 
-- Node.js 20.11 or later
-- A working `claude` CLI on `$PATH` for the Claude Code install path
+- Node.js 20.11 or later (enforced by `engines` in `package.json`; the
+  plugin's install hook also checks)
+- npm
+- For the manual install path: a working MCP-capable client (Cursor,
+  Kiro, Cline, etc.)
 
 ## Tools
 
@@ -112,7 +116,6 @@ MCP tools. Point Claude Code at the cloned directory to load them.
 
 | Slash command | Purpose |
 |-------|---------|
-| `/tot-init` | One-time build and `claude mcp add` registration after `/plugin install` |
 | `/tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
 | `/tot-inspect` | View current tree state, progress, and visualization |
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |
@@ -124,7 +127,10 @@ MCP tools. Point Claude Code at the cloned directory to load them.
 | `evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
 | `decomposition-evaluator` | Advises on decomposition structure: sibling overlap, coverage, level of abstraction, testability. Emits advisory categories, not pass/fail. |
 
-Hooks under `hooks/hooks.json` detect failure patterns during reasoning.
+Hooks under `hooks/hooks.json` build the bundled MCP server on first
+session and after plugin updates (`SessionStart`), surface a hint when
+Bash output looks like a failure pattern (`PostToolUse`), and announce
+active reasoning sessions on resume.
 
 ## How It Works
 
@@ -162,18 +168,19 @@ Browser (localhost:6274) ← SSE events ← HTTP server ←┘
 - **Shim** auto-starts daemon on first use
 - **Daemon** survives agent disconnect (browser stays connected)
 - **JSONL persistence** in `{project}/.tot/sessions/`
-- **Offline viewing**: run the daemon directly with `node packages/server/dist/cli.js serve`
+- **Offline viewing**: run the daemon directly with `node <cli.js> serve`
 
 ## CLI
 
-The build emits a single executable at `packages/server/dist/cli.js`.
+The build emits a single executable. Manual-clone path:
+`packages/server/dist/cli.js`. Plugin path: `${CLAUDE_PLUGIN_DATA}/dist/cli.js`.
 
 ```bash
-node packages/server/dist/cli.js              # Start MCP shim (what clients spawn)
-node packages/server/dist/cli.js serve        # Start daemon for offline viewing
-node packages/server/dist/cli.js status       # Show daemon + session info
-node packages/server/dist/cli.js stop         # Stop daemon
-node packages/server/dist/cli.js --help       # Usage
+node <cli.js>              # Start MCP shim (what clients spawn)
+node <cli.js> serve        # Start daemon for offline viewing
+node <cli.js> status       # Show daemon + session info
+node <cli.js> stop         # Stop daemon
+node <cli.js> --help       # Usage
 ```
 
 ## Research Background

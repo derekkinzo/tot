@@ -11,7 +11,7 @@
     "clean": "rm -rf packages/*/dist packages/server/static"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.11.0"
   },
   "devDependencies": {
     "playwright": "^1.60.0"
