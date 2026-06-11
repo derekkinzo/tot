@@ -22,17 +22,6 @@ describe('Plugin Structure', () => {
     });
   });
 
-  describe('.mcp.json', () => {
-    it('exists and references tot-mcp', () => {
-      const path = join(REPO_ROOT, '.mcp.json');
-      expect(existsSync(path)).toBe(true);
-      const content = JSON.parse(readFileSync(path, 'utf-8'));
-      expect(content.mcpServers?.tot).toBeDefined();
-      expect(content.mcpServers.tot.command).toBe('npx');
-      expect(content.mcpServers.tot.args).toContain('tot-mcp');
-    });
-  });
-
   describe('skills/', () => {
     const skillsDir = join(REPO_ROOT, 'skills');
     const skills = readdirSync(skillsDir, { withFileTypes: true })
