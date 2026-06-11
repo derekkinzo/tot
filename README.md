@@ -40,8 +40,24 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 
 ## Quick Start
 
-The MCP server runs from a local clone of this repository — there is no
-package registry release yet.
+### Claude Code (recommended)
+
+Install the plugin, then run the one-time build-and-register skill:
+
+```
+/plugin marketplace add derekkinzo/tot
+/plugin install tot-mcp
+/tot-init
+```
+
+Restart Claude Code after `/tot-init` so the freshly registered MCP server
+loads. The plugin ships source code; `/tot-init` runs `npm install`,
+`npm run build`, and `claude mcp add tot -- node <path-to-built-cli>` for
+you. It is idempotent — re-run it any time the plugin updates.
+
+### Other MCP clients (Cursor, Kiro, Cline, etc.)
+
+Clone the repo, build, and register the path with your client:
 
 ```bash
 git clone https://github.com/derekkinzo/tot.git
@@ -50,21 +66,13 @@ npm install
 npm run build
 ```
 
-The build emits an executable at `packages/server/dist/cli.js`. Register
-it with your MCP client:
+The build emits an executable at `packages/server/dist/cli.js`. Add to your
+client's MCP configuration:
 
-**Claude Code:**
-```bash
-claude mcp add tot -- node /absolute/path/to/tot/packages/server/dist/cli.js
-```
-
-**Other MCP clients (Cursor, Kiro, Cline, etc.).** Add to your client's MCP
-configuration:
 ```json
 {
   "mcpServers": {
     "tot": {
-      "type": "stdio",
       "command": "node",
       "args": ["/absolute/path/to/tot/packages/server/dist/cli.js"]
     }
@@ -74,6 +82,11 @@ configuration:
 
 Open `http://localhost:6274` after the first MCP tool call to see the
 visualization.
+
+### Requirements
+
+- Node.js 20.11 or later
+- A working `claude` CLI on `$PATH` for the Claude Code install path
 
 ## Tools
 
@@ -99,6 +112,7 @@ MCP tools. Point Claude Code at the cloned directory to load them.
 
 | Slash command | Purpose |
 |-------|---------|
+| `/tot-init` | One-time build and `claude mcp add` registration after `/plugin install` |
 | `/tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
 | `/tot-inspect` | View current tree state, progress, and visualization |
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |

@@ -19,7 +19,7 @@ Initiate structured Tree of Thought reasoning for systematic investigation of a 
 
 ## Protocol
 
-### Phase 1: Domain Investigation
+### Domain investigation
 
 BEFORE creating hypotheses, investigate the problem domain thoroughly:
 
@@ -29,11 +29,11 @@ BEFORE creating hypotheses, investigate the problem domain thoroughly:
 
 Fan out subagents to research the domain from multiple angles simultaneously.
 
-### Phase 2: Create Tree
+### Create the tree
 
 Call `create_tree` with a clear, specific problem statement. Include the observations, the scope, and any relevant background.
 
-### Phase 3: Decompose into competing hypotheses
+### Decompose into competing hypotheses
 
 Call `decompose` with 2-5 sibling hypotheses that are comparable along a single framing axis:
 
@@ -52,7 +52,7 @@ After decomposing, STOP and review:
 - Could a single observation belong to two of these by accident? If yes, refine boundaries.
 - Is there a plausible explanation NOT covered by any sibling or catch-all? If yes, add it.
 
-### Phase 4: Evidence Gathering
+### Gather evidence
 
 For EACH hypothesis, seek REFUTING evidence (falsification-first per Popper):
 
@@ -66,7 +66,7 @@ Key principles:
 - Triangulate from multiple independent sources (records, measurements, observations, controlled tests).
 - A strong test predicts different outcomes for different hypotheses.
 
-### Phase 5: Eliminate, Set-aside, and Corroborate
+### Eliminate, set aside, or corroborate
 
 - Call `eliminate_hypothesis` when refuting evidence is decisive. Bind the verdict to the supporting refuting-evidence ids so the audit trail is preserved.
 - Call `set_out_of_scope` when a branch is plausible but outside the scope of this investigation. Distinct from elimination — it sets a branch aside without claiming refutation.
@@ -76,7 +76,7 @@ Key principles:
 
 The session resolves only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope). Multiple corroborated branches are valid: many real-world outcomes have compound causes.
 
-### Phase 6: Verification
+### Verify
 
 Before declaring done:
 - Does the surviving hypothesis (or set of hypotheses) account for all the relevant observations?
