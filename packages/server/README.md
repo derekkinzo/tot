@@ -3,7 +3,7 @@
 The MCP server package for [tot-mcp](https://github.com/derekkinzo/tot) — structured hypothesis tree reasoning for AI agents.
 
 For installation, usage, architecture, and research background see the
-[top-level README](../../README.md).
+[project README on GitHub](https://github.com/derekkinzo/tot#readme).
 
 ## Package layout
 

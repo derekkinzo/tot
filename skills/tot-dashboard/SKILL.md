@@ -13,7 +13,11 @@ The tot-mcp daemon serves the dashboard on `http://localhost:6274` whenever it i
 
 1. **Ensure the daemon is running.** Call the `get_status` MCP tool. The shim auto-starts the daemon if it is not already running. If `get_status` fails (e.g., MCP not connected), fall back to the bundled CLI built by the plugin's SessionStart hook:
    ```bash
-   CLI="${CLAUDE_PLUGIN_DATA:-}/build/packages/server/dist/cli.js"
+   if [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
+     echo "CLAUDE_PLUGIN_DATA is not set; this skill must run inside a Claude Code plugin context."
+     exit 1
+   fi
+   CLI="${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js"
    if [ ! -f "$CLI" ]; then
      echo "MCP server not built yet. Restart Claude Code to trigger the SessionStart install hook."
      exit 1
@@ -22,7 +26,9 @@ The tot-mcp daemon serves the dashboard on `http://localhost:6274` whenever it i
    ```
    If status reports the daemon is down, start it in the background:
    ```bash
-   nohup node "$CLI" serve >/tmp/tot-mcp.log 2>&1 &
+   LOG_DIR="${HOME}/.tot"
+   mkdir -p "$LOG_DIR"
+   nohup node "$CLI" serve >"$LOG_DIR/daemon.log" 2>&1 &
    disown
    ```
 
