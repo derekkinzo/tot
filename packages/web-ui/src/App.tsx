@@ -29,13 +29,9 @@ export default function App() {
     }
   }, [followMode, followTarget]);
 
-  // Manual selection (clicking a node) does not pause follow — only the
-  // follow button or the F key toggles it.
-  const handleUserSelect = useCallback((id: string | null) => {
-    setSelectedId(id);
-  }, []);
-
-  const handleProgrammaticSelect = useCallback((id: string | null) => {
+  // Selecting a node (by click, keyboard, or a selector switch) does not
+  // pause follow — only the follow button or the F key toggles it.
+  const handleSelect = useCallback((id: string | null) => {
     setSelectedId(id);
   }, []);
 
@@ -64,7 +60,7 @@ export default function App() {
               hypotheses={hypotheses}
               rootId={session?.rootNodeId ?? null}
               selectedId={selectedId}
-              onSelect={handleUserSelect}
+              onSelect={handleSelect}
               panelOpen={selected !== null}
               recentlyChanged={recentlyChanged}
               lastAddedId={lastAddedId}
@@ -73,7 +69,6 @@ export default function App() {
               followMode={followMode}
               onToggleFollow={toggleFollow}
               onLoadSession={loadSession}
-              onProgrammaticSelect={handleProgrammaticSelect}
               projects={projects}
               currentProject={currentProject}
               onSwitchProject={switchProject}
@@ -97,7 +92,7 @@ export default function App() {
       </div>
 
       {selected && (
-        <DetailPanel hypothesis={selected} onClose={() => handleUserSelect(null)} />
+        <DetailPanel hypothesis={selected} onClose={() => handleSelect(null)} />
       )}
     </div>
   );

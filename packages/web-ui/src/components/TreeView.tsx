@@ -52,7 +52,6 @@ interface Props {
   followMode: 'following' | 'paused';
   onToggleFollow: () => void;
   onLoadSession: (id: string) => void;
-  onProgrammaticSelect: (id: string | null) => void;
   projects: ProjectInfo[];
   currentProject: string;
   onSwitchProject: (dir: string) => void;
@@ -65,7 +64,7 @@ interface ContextMenuState {
   y: number;
 }
 
-function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, onProgrammaticSelect, projects, currentProject, onSwitchProject, projectLabel }: Props) {
+function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, projects, currentProject, onSwitchProject, projectLabel }: Props) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const { fitView } = useReactFlow();
@@ -146,7 +145,9 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
     }
   }, [panelOpen, selectedId, hypotheses, fitView]);
 
-  // Auto-fit entire tree when nodes change and no selection (follow mode)
+  // With no selection (follow paused and deselected), keep the whole tree
+  // framed as nodes arrive. When following, the selection effect above
+  // focuses the active node instead.
   useEffect(() => {
     if (lastAddedId && !selectedId) {
       requestAnimationFrame(() => {
@@ -296,16 +297,16 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
                 {session ? (
                   <>
                     <span>{session.problem.slice(0, 50)}{session.problem.length > 50 ? '...' : ''}</span>
-                    <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onProgrammaticSelect(null); }} project={currentProject} />
+                    <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onSelect(null); }} project={currentProject} />
                     {projects.length > 1 && (
-                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onProgrammaticSelect(null); }} />
+                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onSelect(null); }} />
                     )}
                   </>
                 ) : (
                   <span style={{ color: '#8b949e' }}>
                     Waiting for session...
                     {projects.length > 1 && (
-                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onProgrammaticSelect(null); }} />
+                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onSelect(null); }} />
                     )}
                     {projectLabel && <span style={{ fontSize: 10, color: '#6b7280', marginLeft: 8 }}>{projectLabel}</span>}
                   </span>
