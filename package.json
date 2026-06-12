@@ -8,6 +8,7 @@
     "build": "npm run build -w packages/web-ui && npm run build -w packages/server",
     "dev": "npm run dev -w packages/server",
     "test": "npm run test -w packages/server",
+    "repl": "npx -y tsx scripts/repl.ts",
     "clean": "rm -rf packages/*/dist packages/server/static"
   },
   "engines": {
