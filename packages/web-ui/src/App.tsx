@@ -5,8 +5,14 @@ import TreeView from './components/TreeView';
 import DetailPanel from './components/DetailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
+function readProjectFromUrl(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const param = new URLSearchParams(window.location.search).get('project');
+  return param ? param : undefined;
+}
+
 export default function App() {
-  const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId, projects, currentProject, switchProject } = useTreeStream();
+  const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId, projects, currentProject, switchProject } = useTreeStream(readProjectFromUrl());
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { followMode, followTarget, reportUserInteraction, toggleFollow } = useFollowMode({

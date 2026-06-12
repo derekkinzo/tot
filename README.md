@@ -116,10 +116,11 @@ MCP tools. Point Claude Code at the cloned directory to load them.
 
 | Slash command | Purpose |
 |-------|---------|
+| `/tot` | Open the live tree visualization scoped to the current project (`?project=<cwd>`) — the right command when several Claude Code sessions share one daemon |
 | `/tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
 | `/tot-inspect` | View current tree state, progress, and visualization |
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |
-| `/tot-dashboard` | Open the live tree visualization in the default browser at `localhost:6274` |
+| `/tot-dashboard` | Open the dashboard at `localhost:6274` showing whichever project was last active across all sessions |
 
 | Agent | Purpose |
 |-------|---------|
