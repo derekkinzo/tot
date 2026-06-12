@@ -2,6 +2,7 @@ node_modules/
 dist/
 static/
 .tot/
+.tot-repl/
 .claude/
 eval/
 *.tgz
