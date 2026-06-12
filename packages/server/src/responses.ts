@@ -21,6 +21,10 @@
  * - Signals fire conditionally based on tree state (avoid prompt fatigue)
  * - Advisory, never blocking (agents retain autonomy)
  * - Grounded in quantitative signals (evidence counts, scores, depths)
+ * - Client-agnostic vocabulary: these strings ship to every MCP client, so
+ *   they avoid client-specific concepts (subagent dispatch, slash commands).
+ *   Client-specific guidance lives in `skills/` and `agents/`, which are
+ *   loaded only by clients that recognize that surface.
  *
  * Threshold rationale:
  * - Confirmation bias: 3+ supporting with 0 refuting (ACH unidirectional evidence)
@@ -45,8 +49,7 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
     `BEFORE decomposing, investigate the problem domain:\n` +
     `1. Gather context: What is the relevant background? What is already known?\n` +
     `2. Characterize the question: What observations are being explained or what decision is being made? What is the scope?\n` +
-    `3. Identify boundaries: What is IN scope vs OUT of scope for this investigation?\n` +
-    `Investigate the domain from multiple independent angles before decomposing.\n\n` +
+    `3. Identify boundaries: What is IN scope vs OUT of scope for this investigation?\n\n` +
     `── Decomposition ──\n` +
     `Once you understand the domain, decompose into 2-5 sibling hypotheses.\n` +
     `Choose a framing axis that suits the domain — by mechanism, by location, by stage, by actor, by time, or by population. Whichever axis you pick, make the siblings comparable along it.\n` +

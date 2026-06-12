@@ -48,7 +48,8 @@ The siblings form a partition of the explanation space (cf. Chamberlin's method 
 - **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain.
 
 After decomposing, STOP and review:
-- Fan out subagents to validate each hypothesis is truly distinct from its siblings.
+- Dispatch the `decomposition-evaluator` subagent to advise on overlap, coverage, level of abstraction, and testability.
+- Dispatch the `hypothesis-challenger` subagent on each child to surface missing alternatives and hidden assumptions.
 - Could a single observation belong to two of these by accident? If yes, refine boundaries.
 - Is there a plausible explanation NOT covered by any sibling or catch-all? If yes, add it.
 
@@ -59,7 +60,7 @@ For EACH hypothesis, seek REFUTING evidence (falsification-first per Popper):
 1. Define what observation would REFUTE this hypothesis.
 2. Execute the most discriminating test first (one whose outcome is predicted by one sibling but not the others — cf. Platt's strong inference, 1964).
 3. Call `add_evidence` with type `supports`, `refutes`, or `neutral`.
-4. Fan out subagents to investigate from independent data sources.
+4. Fan out subagents to investigate from independent data sources, then dispatch the `evidence-reviewer` subagent to audit directness, source diversity, and diagnosticity before relying on the result.
 
 Key principles:
 - Seek evidence that DISCRIMINATES between hypotheses, not just confirms a favored one.

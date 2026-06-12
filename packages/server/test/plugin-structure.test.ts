@@ -23,14 +23,32 @@ describe('Plugin Structure', () => {
   });
 
   describe('.mcp.json', () => {
-    it('exists and references the bundled cli.js via CLAUDE_PLUGIN_ROOT', () => {
+    it('routes the tot MCP server through the persistent data dir', () => {
       const path = join(REPO_ROOT, '.mcp.json');
       expect(existsSync(path)).toBe(true);
       const content = JSON.parse(readFileSync(path, 'utf-8'));
-      expect(content.mcpServers?.tot).toBeDefined();
-      expect(content.mcpServers.tot.command).toBe('node');
-      const args = content.mcpServers.tot.args ?? [];
-      expect(args.some((a: string) => a.includes('${CLAUDE_PLUGIN_ROOT}') && a.endsWith('cli.js'))).toBe(true);
+      expect(content.mcpServers?.tot).toEqual({
+        command: 'node',
+        args: ['${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js'],
+      });
+    });
+  });
+
+  describe('hooks/install.sh', () => {
+    const scriptPath = join(REPO_ROOT, 'hooks/install.sh');
+
+    it('exists and is executable', () => {
+      expect(existsSync(scriptPath)).toBe(true);
+      const mode = require('node:fs').statSync(scriptPath).mode;
+      expect((mode & 0o111) !== 0).toBe(true);
+    });
+
+    it('is referenced by the SessionStart hook', () => {
+      const hooks = JSON.parse(readFileSync(join(REPO_ROOT, 'hooks/hooks.json'), 'utf-8'));
+      const commands = (hooks.hooks.SessionStart ?? [])
+        .flatMap((entry: any) => entry.hooks ?? [])
+        .map((h: any) => h.command);
+      expect(commands.some((c: string) => c.includes('hooks/install.sh'))).toBe(true);
     });
   });
 
