@@ -9,70 +9,64 @@ Open the live Tree of Thought visualization scoped to the current project.
 
 The shared daemon at `http://localhost:6274` serves all projects. The
 plain dashboard URL lands on the daemon's last-active project, which can
-be confusing when you have several Claude Code sessions open in
-different repos. This skill builds a URL with the current project root
-encoded as `?project=<path>` so the dashboard opens directly on this
-project's tree, regardless of which other sessions touched the daemon
-last.
+be confusing when several Claude Code sessions are open in different
+repos. This skill builds a URL with the current project root encoded as
+`?project=<path>` so the dashboard opens directly on this project's
+tree, regardless of which other sessions touched the daemon last.
 
 ## Instructions
 
-1. **Resolve the current project root.** Use `$CLAUDE_PROJECT_DIR`
-   when set (documented Claude Code variable for the workspace root);
-   otherwise fall back to `$PWD`:
-   ```bash
-   PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
-   ```
+Run the entire setup as a single Bash invocation so shell variables
+propagate across steps. Pasting these lines into separate Bash tool
+calls will leave variables undefined; keep them in one fenced block.
 
-2. **Ensure the daemon is running.** First try the `get_status` MCP
-   tool (the shim auto-starts the daemon). If MCP is not connected,
-   start the bundled CLI directly:
-   ```bash
-   if [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
-     echo "CLAUDE_PLUGIN_DATA is not set; this skill must run inside a Claude Code plugin context."
-     exit 1
-   fi
-   CLI="${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js"
-   if [ ! -f "$CLI" ]; then
-     echo "MCP server not built yet. Restart Claude Code to trigger the SessionStart install hook."
-     exit 1
-   fi
-   if ! node "$CLI" status >/dev/null 2>&1; then
-     LOG_DIR="${HOME}/.tot"
-     mkdir -p "$LOG_DIR"
-     nohup node "$CLI" serve >"$LOG_DIR/daemon.log" 2>&1 &
-     disown
-     sleep 1
-   fi
-   ```
+```bash
+set -e
 
-3. **Build the project-scoped URL** with `jq -rR @uri` for proper
-   percent-encoding (handles paths with spaces or special characters).
-   Falls back to the raw path if `jq` is unavailable, which is fine
-   for typical project directories:
-   ```bash
-   if command -v jq >/dev/null 2>&1; then
-     ENCODED=$(printf '%s' "$PROJECT_DIR" | jq -rR @uri)
-   else
-     ENCODED="$PROJECT_DIR"
-   fi
-   URL="http://localhost:6274/?project=${ENCODED}"
-   ```
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+if [ -z "$PROJECT_DIR" ]; then
+  echo "Cannot resolve project directory: CLAUDE_PROJECT_DIR and PWD are both unset."
+  exit 1
+fi
 
-4. **Open the browser** to `$URL` using the first command available
-   on the platform:
-   ```bash
-   (command -v xdg-open >/dev/null && xdg-open "$URL") \
-     || (command -v open >/dev/null && open "$URL") \
-     || (command -v start >/dev/null && start "$URL") \
-     || echo "Open this URL manually: $URL"
-   ```
+if [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
+  echo "CLAUDE_PLUGIN_DATA is not set; this skill must run inside a Claude Code plugin context."
+  exit 1
+fi
 
-5. **Report to the user**, including the URL as a fallback:
-   ```
-   Tree open at <URL>
-   Scoped to: <PROJECT_DIR>
-   ```
+CLI="${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js"
+if [ ! -f "$CLI" ]; then
+  echo "MCP server not built yet. Restart Claude Code to trigger the SessionStart install hook."
+  exit 1
+fi
+
+if ! node "$CLI" status >/dev/null 2>&1; then
+  LOG_DIR="${HOME}/.tot"
+  mkdir -p "$LOG_DIR"
+  nohup node "$CLI" serve >"$LOG_DIR/daemon.log" 2>&1 &
+  disown
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -fsS -o /dev/null --max-time 1 "http://localhost:6274/api/info"; then break; fi
+    sleep 0.5
+  done
+fi
+
+if ! curl -fsS -o /dev/null --max-time 1 "http://localhost:6274/api/info"; then
+  echo "Daemon failed to bind http://localhost:6274 — see ${HOME}/.tot/daemon.log"
+  exit 1
+fi
+
+ENCODED=$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$PROJECT_DIR")
+URL="http://localhost:6274/?project=${ENCODED}"
+
+(command -v xdg-open >/dev/null && xdg-open "$URL") \
+  || (command -v open >/dev/null && open "$URL") \
+  || (command -v start >/dev/null && start "$URL") \
+  || true
+
+echo "Tree open at $URL"
+echo "Scoped to: $PROJECT_DIR"
+```
 
 ## Notes
 

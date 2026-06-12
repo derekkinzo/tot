@@ -6,7 +6,6 @@ import DetailPanel from './components/DetailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 function readProjectFromUrl(): string | undefined {
-  if (typeof window === 'undefined') return undefined;
   const param = new URLSearchParams(window.location.search).get('project');
   return param ? param : undefined;
 }

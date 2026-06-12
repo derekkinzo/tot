@@ -99,13 +99,23 @@ export function useTreeStream(projectDir?: string) {
     }
   }, [state.recentlyChanged, state.lastAddedId]);
 
-  // Fetch projects list
+  // Fetch projects list. If the requested project (e.g. from a URL
+  // parameter) is not yet registered with the daemon — typically when
+  // a fresh session has not made any MCP tool calls — fall back to the
+  // daemon's last-active project so the dashboard isn't stuck on an
+  // empty SSE stream.
   const refreshProjects = useCallback(() => {
     fetch('/api/projects')
       .then((r) => r.json())
       .then((d) => {
-        setProjects(d.projects ?? []);
-        if (!currentProject && d.lastActive) {
+        const list: ProjectInfo[] = d.projects ?? [];
+        setProjects(list);
+        if (currentProject) {
+          const known = list.some((p) => p.dir === currentProject);
+          if (!known && d.lastActive) {
+            setCurrentProject(d.lastActive);
+          }
+        } else if (d.lastActive) {
           setCurrentProject(d.lastActive);
         }
       })
@@ -188,6 +198,15 @@ export function useTreeStream(projectDir?: string) {
 
   const switchProject = useCallback((dir: string) => {
     setCurrentProject(dir);
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      const url = new URL(window.location.href);
+      if (dir) {
+        url.searchParams.set('project', dir);
+      } else {
+        url.searchParams.delete('project');
+      }
+      window.history.replaceState(null, '', url.toString());
+    }
   }, []);
 
   return { ...state, loadSession, projects, currentProject, switchProject };
