@@ -14,31 +14,30 @@ export default function App() {
   const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId, projects, currentProject, switchProject } = useTreeStream(readProjectFromUrl());
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { followMode, followTarget, reportUserInteraction, toggleFollow } = useFollowMode({
+  const { followMode, followTarget, toggleFollow } = useFollowMode({
     lastAddedId,
     recentlyChanged,
   });
 
   const selected = selectedId ? hypotheses.get(selectedId) ?? null : null;
 
+  // While following, pin selection to the active node. This also fires when
+  // follow is toggled on, so enabling follow focuses the active hypothesis.
   useEffect(() => {
-    if (followMode === 'following') {
+    if (followMode === 'following' && followTarget) {
       setSelectedId(followTarget);
     }
   }, [followMode, followTarget]);
 
+  // Manual selection (clicking a node) does not pause follow — only the
+  // follow button or the F key toggles it.
   const handleUserSelect = useCallback((id: string | null) => {
-    reportUserInteraction();
     setSelectedId(id);
-  }, [reportUserInteraction]);
+  }, []);
 
   const handleProgrammaticSelect = useCallback((id: string | null) => {
     setSelectedId(id);
   }, []);
-
-  const handleUserViewportInteraction = useCallback(() => {
-    reportUserInteraction();
-  }, [reportUserInteraction]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -66,7 +65,6 @@ export default function App() {
               rootId={session?.rootNodeId ?? null}
               selectedId={selectedId}
               onSelect={handleUserSelect}
-              onUserViewportInteraction={handleUserViewportInteraction}
               panelOpen={selected !== null}
               recentlyChanged={recentlyChanged}
               lastAddedId={lastAddedId}
