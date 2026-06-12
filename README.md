@@ -173,7 +173,8 @@ Browser (localhost:6274) ← SSE events ← HTTP server ←┘
 ## CLI
 
 The build emits a single executable. Manual-clone path:
-`packages/server/dist/cli.js`. Plugin path: `${CLAUDE_PLUGIN_DATA}/dist/cli.js`.
+`packages/server/dist/cli.js`. Plugin path:
+`${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js`.
 
 ```bash
 node <cli.js>              # Start MCP shim (what clients spawn)
