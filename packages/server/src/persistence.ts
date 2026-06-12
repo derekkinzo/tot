@@ -45,14 +45,6 @@ export class Persistence {
   }
 }
 
-export function discoverDataDir(): string {
-  const override = process.env['TOT_DATA_DIR'];
-  if (override) return override;
-
-  const projectDir = process.env['CLAUDE_PROJECT_DIR'] || process.cwd();
-  return join(projectDir, '.tot', 'sessions');
-}
-
 export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypotheses: Hypothesis[] } {
   if (!existsSync(dataDir)) return { sessions: [], hypotheses: [] };
 

@@ -50,7 +50,7 @@ interface Props {
   // Overlay props
   connected: boolean;
   session: Session | null;
-  followMode: 'following' | 'paused' | 'off';
+  followMode: 'following' | 'paused';
   onToggleFollow: () => void;
   onLoadSession: (id: string) => void;
   onProgrammaticSelect: (id: string | null) => void;
@@ -134,7 +134,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
     if (selectedId) {
       const h = hypotheses.get(selectedId);
       const nodeIds = h
-        ? [{ id: selectedId }, ...h.children.filter(c => !collapsedIds.has(selectedId)).map(id => ({ id }))]
+        ? [{ id: selectedId }, ...h.children.filter(c => !collapsedIds.has(c)).map(id => ({ id }))]
         : [{ id: selectedId }];
       requestAnimationFrame(() => {
         fitViewTracked({ nodes: nodeIds, duration: DURATION_STANDARD, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
@@ -342,7 +342,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
         </Panel>
 
         <Panel position="top-right">
-          {session && followMode !== 'off' && (
+          {session && (
             <FollowIndicator followMode={followMode} onToggle={onToggleFollow} />
           )}
         </Panel>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-type FollowState = 'following' | 'paused' | 'off';
+type FollowState = 'following' | 'paused';
 
 interface UseFollowModeOptions {
   lastAddedId: string | null;
