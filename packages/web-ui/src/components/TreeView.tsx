@@ -43,7 +43,6 @@ interface Props {
   rootId: string | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  onUserViewportInteraction?: () => void;
   panelOpen: boolean;
   recentlyChanged: Set<string>;
   lastAddedId: string | null;
@@ -53,7 +52,6 @@ interface Props {
   followMode: 'following' | 'paused';
   onToggleFollow: () => void;
   onLoadSession: (id: string) => void;
-  onProgrammaticSelect: (id: string | null) => void;
   projects: ProjectInfo[];
   currentProject: string;
   onSwitchProject: (dir: string) => void;
@@ -66,28 +64,10 @@ interface ContextMenuState {
   y: number;
 }
 
-function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewportInteraction, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, onProgrammaticSelect, projects, currentProject, onSwitchProject, projectLabel }: Props) {
+function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, projects, currentProject, onSwitchProject, projectLabel }: Props) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const { fitView } = useReactFlow();
-
-  // Track whether a viewport move was triggered programmatically (fitView)
-  const isProgrammaticMove = useRef(true);
-
-  // Override fitView to mark moves as programmatic
-  const fitViewTracked: typeof fitView = useCallback((...args) => {
-    isProgrammaticMove.current = true;
-    return fitView(...args);
-  }, [fitView]);
-
-  const onMoveEnd = useCallback(() => {
-    if (isProgrammaticMove.current) {
-      isProgrammaticMove.current = false;
-      return;
-    }
-    // User manually panned or zoomed
-    onUserViewportInteraction?.();
-  }, [onUserViewportInteraction]);
 
   const hypothesesRef = useRef(hypotheses);
   hypothesesRef.current = hypotheses;
@@ -137,14 +117,14 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
         ? [{ id: selectedId }, ...h.children.filter(c => !collapsedIds.has(c)).map(id => ({ id }))]
         : [{ id: selectedId }];
       requestAnimationFrame(() => {
-        fitViewTracked({ nodes: nodeIds, duration: DURATION_STANDARD, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
+        fitView({ nodes: nodeIds, duration: DURATION_STANDARD, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
       });
     } else {
       requestAnimationFrame(() => {
-        fitViewTracked({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
+        fitView({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
     }
-  }, [selectedId, hypotheses, collapsedIds, fitViewTracked]);
+  }, [selectedId, hypotheses, collapsedIds, fitView]);
 
   // Fit when panel opens/closes (container resizes)
   const prevPanelOpen = useRef(panelOpen);
@@ -157,22 +137,24 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
           const nodeIds = h
             ? [{ id: selectedId }, ...h.children.map(id => ({ id }))]
             : [{ id: selectedId }];
-          fitViewTracked({ nodes: nodeIds, duration: DURATION_INSTANT, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
+          fitView({ nodes: nodeIds, duration: DURATION_INSTANT, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
         } else {
-          fitViewTracked({ duration: DURATION_INSTANT, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
+          fitView({ duration: DURATION_INSTANT, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
         }
       }, 50);
     }
-  }, [panelOpen, selectedId, hypotheses, fitViewTracked]);
+  }, [panelOpen, selectedId, hypotheses, fitView]);
 
-  // Auto-fit entire tree when nodes change and no selection (follow mode)
+  // With no selection (follow paused and deselected), keep the whole tree
+  // framed as nodes arrive. When following, the selection effect above
+  // focuses the active node instead.
   useEffect(() => {
     if (lastAddedId && !selectedId) {
       requestAnimationFrame(() => {
-        fitViewTracked({ duration: DURATION_STANDARD, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
+        fitView({ duration: DURATION_STANDARD, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
     }
-  }, [lastAddedId, selectedId, hypotheses, fitViewTracked]);
+  }, [lastAddedId, selectedId, hypotheses, fitView]);
 
   // Fit all when node count changes and no specific focus
   const prevNodeCount = useRef(nodes.length);
@@ -180,11 +162,11 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
     if (nodes.length !== prevNodeCount.current && !selectedId && !lastAddedId) {
       prevNodeCount.current = nodes.length;
       requestAnimationFrame(() => {
-        fitViewTracked({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
+        fitView({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
     }
     prevNodeCount.current = nodes.length;
-  }, [nodes.length, selectedId, lastAddedId, fitViewTracked]);
+  }, [nodes.length, selectedId, lastAddedId, fitView]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -259,7 +241,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
       case 'zoom': {
         const h = hypotheses.get(nodeId);
         const nodeIds = h ? [{ id: nodeId }, ...h.children.map(id => ({ id }))] : [{ id: nodeId }];
-        fitViewTracked({ nodes: nodeIds, duration: DURATION_DELIBERATE, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
+        fitView({ nodes: nodeIds, duration: DURATION_DELIBERATE, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
         break;
       }
       case 'parent': {
@@ -282,7 +264,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
       }
     }
     setContextMenu(null);
-  }, [hypotheses, fitViewTracked, onSelect]);
+  }, [hypotheses, fitView, onSelect]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -293,7 +275,6 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
         onPaneClick={onPaneClick}
-        onMoveEnd={onMoveEnd}
         fitView
         fitViewOptions={{ padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM }}
         minZoom={GLOBAL_MIN_ZOOM}
@@ -316,16 +297,16 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, onUserViewpor
                 {session ? (
                   <>
                     <span>{session.problem.slice(0, 50)}{session.problem.length > 50 ? '...' : ''}</span>
-                    <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onProgrammaticSelect(null); }} project={currentProject} />
+                    <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onSelect(null); }} project={currentProject} />
                     {projects.length > 1 && (
-                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onProgrammaticSelect(null); }} />
+                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onSelect(null); }} />
                     )}
                   </>
                 ) : (
                   <span style={{ color: '#8b949e' }}>
                     Waiting for session...
                     {projects.length > 1 && (
-                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onProgrammaticSelect(null); }} />
+                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onSelect(null); }} />
                     )}
                     {projectLabel && <span style={{ fontSize: 10, color: '#6b7280', marginLeft: 8 }}>{projectLabel}</span>}
                   </span>
