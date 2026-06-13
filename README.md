@@ -50,8 +50,13 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 The plugin's `SessionStart` hook runs `npm install` and builds the bundled
 MCP server on first launch and again whenever a plugin update changes
 `packages/server/package.json`. The first run takes about a minute; later
-runs are no-ops. Restart Claude Code once after install so the hook fires
-and the MCP server is registered.
+runs are no-ops.
+
+Because the first build runs while Claude Code is already starting, the
+`tot` MCP server won't connect on that same launch — the server binary is
+still being built. Once the build finishes (about a minute), reconnect it
+with `/mcp` → **Reconnect**, or simply restart Claude Code again. Subsequent
+launches connect immediately, since the build is then a no-op.
 
 The build output is written to the plugin's persistent data directory
 (`${CLAUDE_PLUGIN_DATA}`) so it survives plugin updates.
