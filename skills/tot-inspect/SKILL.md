@@ -17,7 +17,7 @@ View and interpret the current hypothesis tree state.
 3. Report to the user:
    - Problem statement
    - Progress: N/M hypotheses resolved
-   - Current best lead (highest scored, non-eliminated)
+   - Live hypotheses still standing, noting which have the least refuting evidence against them
    - Any stagnation warnings
    - Unexplored hypotheses that need attention
 

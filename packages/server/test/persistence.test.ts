@@ -56,10 +56,6 @@ describe('Persistence Roundtrip', () => {
       arguments: { hypothesisId: childIds[0], type: 'supports', content: 'Evidence for A' },
     });
     await c1.callTool({
-      name: 'score_hypothesis',
-      arguments: { hypothesisId: childIds[0], score: 0.7 },
-    });
-    await c1.callTool({
       name: 'add_evidence',
       arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'B is ruled out' },
     });
@@ -79,7 +75,6 @@ describe('Persistence Roundtrip', () => {
     expect(hypotheses).toHaveLength(4); // root + 3 children
     const hypothesisA = hypotheses.find((h) => h.content === 'Cause A');
     expect(hypothesisA?.status).toBe('exploring');
-    expect(hypothesisA?.score).toBe(0.7);
     expect(hypothesisA?.evidence).toHaveLength(1);
     expect(hypothesisA?.evidence[0].content).toBe('Evidence for A');
 
@@ -204,6 +199,43 @@ describe('Persistence Roundtrip', () => {
 
     const index = scanSessions(tempDir);
     expect(index[0].status).toBe('open');
+  });
+
+  it('replays a legacy session whose events carry the removed score fields', () => {
+    // score / scoreRationale were removed from the model. Old .tot sessions
+    // on user machines still carry those keys in their hypothesis payloads;
+    // replay must tolerate them (ignore as inert) and reconstruct the tree
+    // cleanly with no leaked score value.
+    const sessionId = '00000000-0000-4000-8000-aaaaaaaaaa01';
+    const rootId = '00000000-0000-4000-8000-aaaaaaaaaa02';
+    const ts = '2024-03-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Legacy score session', rootNodeId: rootId,
+        status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, content: 'Root',
+        status: 'exploring', score: 0.8, scoreRationale: 'legacy gut feel',
+        evidence: [], metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].id).toBe(sessionId);
+    const root = hypotheses.find((h) => h.id === rootId);
+    expect(root).toBeDefined();
+    expect(root!.content).toBe('Root');
+    expect(root!.status).toBe('exploring');
+    // Replay reconstructs via a structural cast, so the legacy `score` key
+    // survives as an inert property — no code reads it. The contract is that
+    // replay tolerates the extra field and the tree is fully usable, NOT
+    // that the property is stripped.
+    expect(root!.evidence).toEqual([]);
+    expect(root!.children).toEqual([]);
   });
 
   it('terminal session with mix of eliminated and out-of-scope replays as abandoned', async () => {

@@ -34,14 +34,6 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
             color: statusColor,
             border: `1px solid ${statusColor}40`,
           }}>{statusLabel}</span>
-          {hypothesis.score !== null && (
-            <span style={{
-              marginLeft: 10,
-              fontSize: 14,
-              fontWeight: 600,
-              color: '#e1e4e8',
-            }}>{(hypothesis.score * 100).toFixed(0)}%</span>
-          )}
         </div>
         <button
           onClick={onClose}

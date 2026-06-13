@@ -5,8 +5,6 @@ export interface Hypothesis {
   depth: number;
   content: string;
   status: HypothesisStatus;
-  score: number | null;
-  scoreRationale?: string;
   evidence: Evidence[];
   conclusion?: Conclusion;
   metadata: HypothesisMetadata;

@@ -103,7 +103,6 @@ visualization.
 | `eliminate_hypothesis` | Mark a hypothesis as a dead end (with reason) |
 | `corroborate_hypothesis` | Mark a surviving hypothesis as corroborated (provisionally retained) |
 | `set_out_of_scope` | Mark a branch terminal without investigating it (no refutation claimed) |
-| `score_hypothesis` | Set confidence (0-1) based on evidence |
 | `get_tree` | View the current tree structure |
 | `get_status` | Progress summary + stagnation detection |
 | `validate_decomposition` | Check structural properties of a decomposition |

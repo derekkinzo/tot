@@ -2,7 +2,7 @@
 name: hypothesis-challenger
 description: |
   Use this agent to challenge and stress-test a leading hypothesis. Dispatched when
-  a hypothesis has high confidence but hasn't faced rigorous refutation attempts.
+  a hypothesis has accumulated support but hasn't faced rigorous refutation attempts.
   Acts as a devil's advocate seeking disconfirming evidence.
 model: inherit
 color: red

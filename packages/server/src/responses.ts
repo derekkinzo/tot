@@ -20,7 +20,7 @@
  * Design principles:
  * - Signals fire conditionally based on tree state (avoid prompt fatigue)
  * - Advisory, never blocking (agents retain autonomy)
- * - Grounded in quantitative signals (evidence counts, scores, depths)
+ * - Grounded in quantitative signals (evidence counts, depths)
  * - Client-agnostic vocabulary: these strings ship to every MCP client, so
  *   they avoid client-specific concepts (subagent dispatch, slash commands).
  *   Client-specific guidance lives in `skills/` and `agents/`, which are
@@ -220,8 +220,10 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   if (lastEvidence && lastEvidence.type === 'supports' && activeSiblings.length > 0) {
     const noSiblingsRefuted = activeSiblings.every((s) => s.evidence.filter((e) => e.type === 'refutes').length === 0);
     if (noSiblingsRefuted && hypothesis.evidence.length >= 2) {
-      // Diagnosticity amplification: name the top sibling
-      const topSibling = activeSiblings.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+      // Diagnosticity amplification: name a live sibling to make the
+      // discrimination question concrete. Any surviving rival serves; the
+      // prompt only needs an example, not a ranked "best" one.
+      const topSibling = activeSiblings[0];
       if (topSibling) {
         result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
       } else {
@@ -348,50 +350,6 @@ export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): st
   return result;
 }
 
-export function formatScore(hypothesis: Hypothesis, tm: TreeManager): string {
-  const siblings = tm.getSiblings(hypothesis.id);
-  const ranked = [hypothesis, ...siblings]
-    .filter((h) => h.score !== null && isLive(h.status))
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-
-  const ranking = ranked.map((h, i) =>
-    `  ${i + 1}. ${truncate(h.content, 35)} (${h.score!.toFixed(2)}) [${h.evidence.length} ev]`
-  ).join('\n');
-
-  // Compute evidence-based score
-  const s = hypothesis.evidence.filter((e) => e.type === 'supports').length;
-  const r = hypothesis.evidence.filter((e) => e.type === 'refutes').length;
-  const total = hypothesis.evidence.length;
-  const evidenceRatio = total > 0 ? `+${s} -${r}` : 'no evidence yet';
-
-  let result = JSON.stringify({ hypothesisId: hypothesis.id, score: hypothesis.score }) + '\n\n' +
-    `✓ Score: ${hypothesis.score!.toFixed(2)} | Evidence: ${evidenceRatio}\n\n`;
-
-  if (total === 0) {
-    result += `⚠ Scoring without evidence creates anchoring bias. Gather evidence first.\n\n`;
-  }
-
-  if (ranking) result += `── Ranking ──\n${ranking}\n`;
-
-  // Tie detection: top-2 within 0.15
-  if (ranked.length >= 2 && (ranked[0].score! - ranked[1].score!) < 0.15) {
-    result += `\n⚠ Near-tie: "${truncate(ranked[0].content, 25)}" and "${truncate(ranked[1].content, 25)}" are within 0.15.\n`;
-    result += `What test would SEPARATE them?\n`;
-  }
-
-  // Ready-for-corroboration signal
-  if (hypothesis.score !== null && hypothesis.score >= 0.85) {
-    const siblings = tm.getSiblings(hypothesis.id);
-    const allSiblingsWeak = siblings.every((s) => !isLive(s.status) || (s.score !== null && s.score < 0.3));
-    const someRefutationAttempted = siblings.some((s) => s.evidence.some((e) => e.type === 'refutes'));
-    if (allSiblingsWeak && someRefutationAttempted) {
-      result += `\n→ Evidence appears sufficient: strong support, alternatives pruned (eliminated or out-of-scope), refutation attempted. Consider corroboration.\n`;
-    }
-  }
-
-  result += '\n' + formatTreeSummary(tm);
-  return result;
-}
 
 export function formatValidateDecomposition(parentId: string, check: StructuralCheck): string {
   // Advisory output, not pass/fail. Strict mutual exclusivity is rejected
@@ -442,7 +400,7 @@ export function formatStatus(tm: TreeManager): string {
     return `No open session. Call create_tree to start.`;
   }
 
-  const { session, counts, stagnant, unexplored, bestLead } = status;
+  const { session, counts, stagnant, unexplored } = status;
   const breakdown = computeProgressBreakdown(counts);
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +
@@ -453,12 +411,9 @@ export function formatStatus(tm: TreeManager): string {
   if (unexplored.length > 0) {
     result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
   }
-  if (bestLead) {
-    result += `Best lead: "${truncate(bestLead.content, 40)}" (score: ${bestLead.score!.toFixed(2)})\n`;
-  }
   if (stagnant) {
     result += `\n⚠ STAGNATION: Multiple mutations without progress.\n`;
-    result += `  Devil's advocate: Assume your LOWEST-scored active hypothesis is correct. What evidence would you expect to find?\n`;
+    result += `  Devil's advocate: Assume a hypothesis you have challenged least is correct. What evidence would you expect to find?\n`;
     result += `  This reframing often reveals overlooked tests.\n`;
   }
 
@@ -474,14 +429,13 @@ function formatTreeSummary(tm: TreeManager): string {
   const status = tm.getStatus();
   if (!status.session) return '';
 
-  const { counts, stagnant, bestLead } = status;
+  const { counts, stagnant } = status;
   const breakdown = computeProgressBreakdown(counts);
 
   let summary = `── Tree ──\n`;
   summary += `Progress: ${breakdown.terminal}/${breakdown.total} resolved`;
   if (breakdown.activeParts.length > 0) summary += ` | ${breakdown.activeParts.join(', ')}`;
-  if (bestLead) summary += ` | Lead: "${truncate(bestLead.content, 20)}" (${bestLead.score!.toFixed(2)})`;
-  if (stagnant) summary += `\n⚠ Stagnation — devil's advocate: what if your lowest-scored hypothesis is correct?`;
+  if (stagnant) summary += `\n⚠ Stagnation — devil's advocate: what if a hypothesis you have challenged least is correct?`;
 
   return summary;
 }

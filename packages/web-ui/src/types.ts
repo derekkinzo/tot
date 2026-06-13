@@ -20,7 +20,6 @@ export interface Hypothesis {
   depth: number;
   content: string;
   status: HypothesisStatus;
-  score: number | null;
   evidence: Evidence[];
   conclusion?: {
     verdict: 'eliminated' | 'corroborated' | 'out-of-scope';

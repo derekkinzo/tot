@@ -651,36 +651,6 @@ describe('TreeManager', () => {
     });
   });
 
-  // --- Score ---
-
-  describe('scoreHypothesis', () => {
-    it('sets score on hypothesis', () => {
-      const { root } = tm.createSession('Problem');
-      tm.scoreHypothesis(root.id, 0.75);
-      expect(root.score).toBe(0.75);
-    });
-
-    it('rejects score below 0', () => {
-      const { root } = tm.createSession('Problem');
-      expect(() => tm.scoreHypothesis(root.id, -0.1)).toThrow(TreeError);
-    });
-
-    it('rejects score above 1', () => {
-      const { root } = tm.createSession('Problem');
-      expect(() => tm.scoreHypothesis(root.id, 1.1)).toThrow(TreeError);
-    });
-
-    it('rejects NaN score', () => {
-      const { root } = tm.createSession('Problem');
-      expect(() => tm.scoreHypothesis(root.id, NaN)).toThrow(TreeError);
-    });
-
-    it('rejects non-existent hypothesis', () => {
-      tm.createSession('Problem');
-      expect(() => tm.scoreHypothesis('fake', 0.5)).toThrow(TreeError);
-    });
-  });
-
   // --- Validate Decomposition ---
 
   describe('validateDecomposition', () => {
@@ -768,30 +738,20 @@ describe('TreeManager', () => {
       expect(status.session).toBeNull();
     });
 
-    it('reports best lead by score', () => {
+    it('reports unexplored pending hypotheses', () => {
       const { root } = tm.createSession('Problem');
       const children = tm.decompose(root.id, ['A', 'B']);
-      tm.scoreHypothesis(children[0].id, 0.3);
-      tm.scoreHypothesis(children[1].id, 0.9);
       const status = tm.getStatus();
-      expect(status.bestLead?.id).toBe(children[1].id);
+      const unexploredIds = status.unexplored.map((u) => u.id).sort();
+      expect(unexploredIds).toEqual([children[0].id, children[1].id].sort());
     });
 
-    it('does not pick a pruned hypothesis as best lead', () => {
-      // A pruning verdict (eliminated, out-of-scope) cannot accept further
-      // work, so it must not surface as the agent's "best lead".
+    it('drops a hypothesis from unexplored once it has evidence', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, ['A', 'B', 'C']);
-      tm.scoreHypothesis(children[0].id, 0.3);
-      tm.scoreHypothesis(children[1].id, 0.9);
-      tm.scoreHypothesis(children[2].id, 0.5);
-      tm.addEvidence(children[1].id, 'refutes', 'no');
-      tm.eliminateHypothesis(children[1].id, 'gone');
-      const eliminatedLead = tm.getStatus().bestLead;
-      expect(eliminatedLead?.id).toBe(children[2].id);
-      tm.setOutOfScope(children[2].id, 'aside');
-      const oosLead = tm.getStatus().bestLead;
-      expect(oosLead?.id).toBe(children[0].id);
+      const children = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(children[0].id, 'supports', 'data'); // pending -> exploring
+      const status = tm.getStatus();
+      expect(status.unexplored.map((u) => u.id)).toEqual([children[1].id]);
     });
   });
 
@@ -806,24 +766,24 @@ describe('TreeManager', () => {
     it('becomes stagnant after threshold mutations without status change', () => {
       const { root } = tm.createSession('Problem');
       const children = tm.decompose(root.id, ['A', 'B']);
-      // These are mutations that don't change status (scoring)
-      tm.scoreHypothesis(children[0].id, 0.1);
-      tm.scoreHypothesis(children[0].id, 0.2);
-      tm.scoreHypothesis(children[0].id, 0.3);
-      tm.scoreHypothesis(children[0].id, 0.4);
+      // First evidence flips pending->exploring (resets the counter); the
+      // next four are same-status mutations that accumulate to the threshold.
+      tm.addEvidence(children[0].id, 'neutral', 'n0');
+      tm.addEvidence(children[0].id, 'neutral', 'n1');
+      tm.addEvidence(children[0].id, 'neutral', 'n2');
+      tm.addEvidence(children[0].id, 'neutral', 'n3');
+      tm.addEvidence(children[0].id, 'neutral', 'n4');
       expect(tm.getStatus().stagnant).toBe(true);
     });
 
     it('resets after a status change', () => {
       const { root } = tm.createSession('Problem');
       const children = tm.decompose(root.id, ['A', 'B']);
-      tm.scoreHypothesis(children[0].id, 0.1);
-      tm.scoreHypothesis(children[0].id, 0.2);
-      tm.scoreHypothesis(children[0].id, 0.3);
-      tm.scoreHypothesis(children[0].id, 0.4);
+      for (let i = 0; i < 5; i++) tm.addEvidence(children[0].id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
-      // Status change resets
-      tm.addEvidence(children[0].id, 'supports', 'Progress');
+      // A real status change (eliminating a different sibling) resets it.
+      tm.addEvidence(children[1].id, 'refutes', 'no');
+      tm.eliminateHypothesis(children[1].id, 'gone');
       expect(tm.getStatus().stagnant).toBe(false);
     });
 
@@ -842,13 +802,11 @@ describe('TreeManager', () => {
       tm.eliminateHypothesis(bA.id, 'gone');
       expect(sessionA.status).toBe('resolved');
 
-      // Open session B and bump its stagnation counter via no-op scoring.
+      // Open session B and bump its stagnation counter via same-status
+      // neutral evidence (first flips pending->exploring, rest accumulate).
       const { root: rootB } = tm.createSession('Problem B');
       const [b1] = tm.decompose(rootB.id, ['B1', 'B2']);
-      tm.scoreHypothesis(b1.id, 0.1);
-      tm.scoreHypothesis(b1.id, 0.2);
-      tm.scoreHypothesis(b1.id, 0.3);
-      tm.scoreHypothesis(b1.id, 0.4);
+      for (let i = 0; i < 5; i++) tm.addEvidence(b1.id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
 
       // Refute A's corroborated leaf — sessionA reopens. The counter is
@@ -861,12 +819,9 @@ describe('TreeManager', () => {
     it('setOutOfScope resets the stagnation counter (it is real disposition progress)', () => {
       const { root } = tm.createSession('Problem');
       const children = tm.decompose(root.id, ['A', 'B', 'C']);
-      tm.scoreHypothesis(children[0].id, 0.1);
-      tm.scoreHypothesis(children[0].id, 0.2);
-      tm.scoreHypothesis(children[0].id, 0.3);
-      tm.scoreHypothesis(children[0].id, 0.4);
+      for (let i = 0; i < 5; i++) tm.addEvidence(children[0].id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
-      tm.setOutOfScope(children[0].id, 'set aside');
+      tm.setOutOfScope(children[1].id, 'set aside');
       expect(tm.getStatus().stagnant).toBe(false);
     });
   });
@@ -1033,9 +988,10 @@ describe('TreeManager', () => {
       const { root: rootB } = tm.createSession('Problem B');
       tm.corroborateHypothesis(rootB.id, 'done');
 
-      // Score validation fails before any state change. currentSessionId
-      // must not be promoted on a rejected call.
-      expect(() => tm.scoreHypothesis(rootB.id, NaN)).toThrow();
+      // This mutation is rejected (only refuting evidence is admitted on a
+      // corroborated hypothesis). A rejected call must not promote
+      // currentSessionId.
+      expect(() => tm.addEvidence(rootB.id, 'supports', 'more')).toThrow();
       expect(tm.getActiveSession()?.id).toBe(activeBefore);
     });
   });
