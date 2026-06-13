@@ -15,7 +15,6 @@
  *   eliminate <id> <reason>       - Eliminate hypothesis (refuted)
  *   corroborate <id> <reason>     - Mark hypothesis as corroborated (provisionally retained)
  *   oos <id> <reason>             - Set hypothesis out-of-scope (terminal, no refutation)
- *   score <id> <0-1>             - Score hypothesis
  *   add <parentId> <content>     - Add single hypothesis
  *   tree                          - Show tree (compact)
  *   status                        - Show status
@@ -29,7 +28,6 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 
 const SERVER_PATH = join(process.cwd(), 'packages/server/dist/cli.js');
-const DATA_DIR = join(process.cwd(), '.tot-repl', 'sessions');
 let verbose = false; // Toggle with 'verbose' command
 
 // Clean previous REPL state
@@ -53,6 +51,14 @@ let nextId = 1;
 const pending = new Map<number, (resp: any) => void>();
 let currentRootId: string | null = null;
 let lastChildIds: string[] = [];
+// Every full ID the server has handed back this session. Lets the user type a
+// short unique prefix (the form the REPL prints) and resolve it to the full
+// UUID the server's exact-match lookup requires.
+const knownIds = new Set<string>();
+
+function remember(...ids: (string | undefined | null)[]): void {
+  for (const id of ids) if (id) knownIds.add(id);
+}
 
 server.stdout?.on('data', (data: Buffer) => {
   buffer += data.toString();
@@ -119,10 +125,11 @@ async function handleCommand(input: string) {
         const result = await callTool('create_tree', { problem });
         if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         currentRootId = result.data?.rootId;
+        remember(currentRootId);
         console.log(`  ✓ Tree created`);
         console.log(`    Session: ${result.data?.sessionId?.slice(0, 8)}`);
         console.log(`    Root ID: ${currentRootId?.slice(0, 8)}`);
-        console.log(`    (use this ID for decompose)`);
+        console.log(`    (decompose with "." for root, or this short ID)`);
         break;
       }
       case 'decompose': case 'd': {
@@ -134,6 +141,7 @@ async function handleCommand(input: string) {
         const result = await callTool('decompose', { parentId: id, children });
         if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         lastChildIds = result.data?.childIds || [];
+        remember(...lastChildIds);
         console.log(`  ✓ Decomposed into ${lastChildIds.length} children:`);
         lastChildIds.forEach((cid, i) => console.log(`    [${i}] ${cid.slice(0, 8)}  "${children[i]}"`));
         break;
@@ -178,22 +186,13 @@ async function handleCommand(input: string) {
         console.log(`  ✓ Out of scope`);
         break;
       }
-      case 'score': {
-        const id = resolveId(parts[1]);
-        if (!id) { console.log('  Usage: score <id|0|1|2...> <0-1>'); break; }
-        const score = parseFloat(parts[2]);
-        if (isNaN(score)) { console.log('  Score must be a number 0-1'); break; }
-        const result = await callTool('score_hypothesis', { hypothesisId: id, score });
-        if (result.isError) { console.log(`  Error: ${result.text}`); break; }
-        console.log(`  ✓ Score set to ${score}`);
-        break;
-      }
       case 'add': {
         const parentId = resolveId(parts[1]);
         if (!parentId) { console.log('  Usage: add <parentId|.|0|1...> <content>'); break; }
         const content = parts.slice(2).join(' ');
         const result = await callTool('add_hypothesis', { parentId, content });
         if (result.isError) { console.log(`  Error: ${result.text}`); break; }
+        remember(result.data?.hypothesisId);
         console.log(`  ✓ Added: ${result.data?.hypothesisId?.slice(0, 8)}`);
         break;
       }
@@ -235,7 +234,6 @@ async function handleCommand(input: string) {
     eliminate <id|0> <reason>           - Eliminate hypothesis (refuted)
     corroborate <id|0> <reason>         - Mark hypothesis as corroborated
     oos <id|0> <reason>                 - Set hypothesis out-of-scope
-    score <id|0> <0-1>                  - Set confidence score
     add <id|.> <content>                - Add single hypothesis
     tree [full|compact]                 - Show tree
     status                              - Show progress
@@ -261,9 +259,28 @@ async function handleCommand(input: string) {
 function resolveId(input: string | undefined): string | null {
   if (!input) return null;
   if (input === '.') return currentRootId;
-  const idx = parseInt(input);
-  if (!isNaN(idx) && idx >= 0 && idx < lastChildIds.length) return lastChildIds[idx];
-  if (input.length >= 8) return input; // Assume it's a full or partial UUID
+  // A bare index (0,1,2...) selects from the most recent decompose's children.
+  // Reserve this only for short, purely-numeric tokens — a full UUID can start
+  // with digits but is never a 1-2 digit integer.
+  if (/^\d{1,2}$/.test(input)) {
+    const idx = parseInt(input, 10);
+    if (idx >= 0 && idx < lastChildIds.length) return lastChildIds[idx];
+    return null;
+  }
+  // Exact match wins outright.
+  if (knownIds.has(input)) return input;
+  // Treat the token as a prefix of a known ID (the short form the REPL prints).
+  // Unique prefix → resolved; ambiguous → rejected so the user sees a clear
+  // message instead of a silent server error.
+  const matches = Array.from(knownIds).filter((id) => id.startsWith(input));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    console.log(`  Ambiguous ID "${input}" matches ${matches.length} hypotheses — type more characters.`);
+    return null;
+  }
+  // A full UUID the REPL never captured (e.g. copied from the dashboard) is
+  // still passed through for the server to validate.
+  if (input.length >= 32) return input;
   return null;
 }
 
