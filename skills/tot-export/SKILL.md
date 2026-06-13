@@ -26,7 +26,7 @@ Export a completed (or in-progress) hypothesis tree as a structured Markdown rep
 ## Hypothesis Tree
 
 ### Corroborated Hypotheses
-- **{hypothesis content}** (confidence: {score})
+- **{hypothesis content}** ({N} supporting, {M} refuting)
   - Reason: {corroboration reason}
   - Evidence:
     - [supports] {evidence content}

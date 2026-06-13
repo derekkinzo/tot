@@ -6,7 +6,6 @@ import { isPruned, type HypothesisStatus } from '../types';
 export type HypothesisData = {
   label: string;
   status: HypothesisStatus;
-  score: number | null;
   evidenceCount: number;
   selected: boolean;
   childCount: number;
@@ -56,17 +55,12 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           cursor: 'pointer',
         }}
       >
-        {/* Status + Score header */}
+        {/* Status header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
           <span style={{ fontSize: 14 }}>{style.icon}</span>
           <span style={{ fontSize: 12, color: '#8b949e', textTransform: 'capitalize' }}>
             {d.status}
           </span>
-          {d.score !== null && (
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: '#8b949e' }}>
-              {(d.score * 100).toFixed(0)}%
-            </span>
-          )}
         </div>
 
         {/* Content text (2-line clamp) */}

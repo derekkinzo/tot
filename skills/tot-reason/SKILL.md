@@ -71,7 +71,7 @@ Key principles:
 
 - Call `eliminate_hypothesis` when refuting evidence is decisive. Bind the verdict to the supporting refuting-evidence ids so the audit trail is preserved.
 - Call `set_out_of_scope` when a branch is plausible but outside the scope of this investigation. Distinct from elimination — it sets a branch aside without claiming refutation.
-- Call `score_hypothesis` to track relative confidence among live siblings.
+- Rank live siblings by disproof: the strongest standing hypothesis is the one with the least refuting evidence against it, not one assigned a confidence number.
 - Drill deeper: call `decompose` on surviving hypotheses to test sub-causes.
 - Call `corroborate_hypothesis` when the hypothesis has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification — the verdict can be reopened by later refuting evidence.
 
@@ -94,6 +94,6 @@ The tree is visible in real-time at `http://localhost:6274`. Open it to see:
 ## Tips
 
 - Never investigate linearly — always maintain multiple competing hypotheses (cf. Chamberlin's method of multiple working hypotheses, 1890).
-- If stuck (stagnation), apply devil's advocate: assume your LOWEST-scored hypothesis is correct and look for evidence that would corroborate it.
+- If stuck (stagnation), apply devil's advocate: assume a hypothesis you have challenged least is correct and look for evidence that would corroborate it.
 - Deep decompositions (depth 3+) risk fragmenting — ask if the parent is directly testable instead.
 - Always seek the CRUCIAL EXPERIMENT: one observation that gives different results under different hypotheses.

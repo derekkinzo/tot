@@ -75,14 +75,6 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
       reason: z.string().min(1).max(10000).describe('Why this branch is being set aside without investigation'),
     },
   },
-  score_hypothesis: {
-    description: 'Update the confidence score for a hypothesis (0-1). Use to track relative likelihood among competing hypotheses.',
-    schema: {
-      hypothesisId: z.string().min(1).describe('ID of the hypothesis to score'),
-      score: z.number().min(0).max(1).describe('Confidence score between 0 and 1'),
-      rationale: z.string().max(10000).optional().describe('Why this score was assigned'),
-    },
-  },
   get_tree: {
     description: 'View the current hypothesis tree structure.',
     schema: {
@@ -131,11 +123,6 @@ const schemas = {
   set_out_of_scope: z.object({
     hypothesisId: z.string().min(1),
     reason: z.string().min(1).max(10000),
-  }),
-  score_hypothesis: z.object({
-    hypothesisId: z.string().min(1),
-    score: z.number().min(0).max(1),
-    rationale: z.string().max(10000).optional(),
   }),
   get_tree: z.object({
     format: z.enum(['full', 'compact', 'path']).optional().default('compact'),
@@ -345,21 +332,6 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     }
   });
 
-  handlers.set('score_hypothesis', async (args) => {
-    try {
-      const { hypothesisId, score, rationale } = schemas.score_hypothesis.parse(args);
-      const hypothesis = tm.scoreHypothesis(hypothesisId, score, rationale);
-      const p = getPersistence(hypothesis.sessionId);
-      await p.append('hypothesis-updated', hypothesis);
-      return toolResult(fmt.formatScore(hypothesis, tm));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
-
   handlers.set('get_tree', async (args) => {
     try {
       const { format } = schemas.get_tree.parse(args);
@@ -428,8 +400,7 @@ function renderCompactTree(hypotheses: Map<string, import('./types.js').Hypothes
   const node = hypotheses.get(nodeId);
   if (!node) return '';
 
-  const scoreStr = node.score !== null ? ` (${node.score.toFixed(2)})` : '';
-  let line = `${indent}${STATUS_ICONS[node.status]} ${node.content}${scoreStr}\n`;
+  let line = `${indent}${STATUS_ICONS[node.status]} ${node.content}\n`;
 
   for (const childId of node.children) {
     line += renderCompactTree(hypotheses, childId, indent + '  ');

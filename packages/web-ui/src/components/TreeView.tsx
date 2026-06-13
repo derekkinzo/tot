@@ -488,7 +488,6 @@ function computeLayout(
       data: {
         label: h.content,
         status: h.status,
-        score: h.score,
         evidenceCount: h.evidence.length,
         selected: id === selectedId,
         childCount: h.children.length,

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { v4 as uuid } from 'uuid';
-import { isLive, isPruned, isTerminal, subtreeContainsCorroborated } from './closure.js';
+import { isPruned, isTerminal, subtreeContainsCorroborated } from './closure.js';
 import type {
   Evidence,
   Hypothesis,
@@ -60,7 +60,6 @@ export class TreeManager extends EventEmitter {
       depth: 0,
       content: problem,
       status: 'pending',
-      score: null,
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' },
       children: [],
@@ -113,7 +112,6 @@ export class TreeManager extends EventEmitter {
       depth: parent.depth + 1,
       content,
       status: 'pending' as const,
-      score: null,
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' as const },
       children: [],
@@ -174,7 +172,6 @@ export class TreeManager extends EventEmitter {
       depth: parent.depth + 1,
       content,
       status: 'pending',
-      score: null,
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' },
       children: [],
@@ -450,33 +447,6 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Updates the confidence score for a hypothesis (0-1 range).
-   * @param hypothesisId - ID of the hypothesis to score
-   * @param score - Confidence between 0 and 1
-   * @param rationale - Optional reasoning for the score assignment
-   * @returns The updated hypothesis
-   * @throws TreeError if score is out of range or hypothesis not found
-   */
-  scoreHypothesis(hypothesisId: string, score: number, rationale?: string): Hypothesis {
-    const hypothesis = this.getHypothesisOrThrow(hypothesisId);
-
-    if (score < 0 || score > 1 || Number.isNaN(score)) {
-      throw new TreeError('Score must be between 0 and 1');
-    }
-
-    hypothesis.score = score;
-    if (rationale) {
-      hypothesis.scoreRationale = rationale;
-    }
-    hypothesis.metadata.updatedAt = new Date().toISOString();
-    this.incrementMutationCounter();
-
-    this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
-    this.setCurrent(hypothesis.sessionId);
-    return hypothesis;
-  }
-
-  /**
    * Checks structural properties of a decomposition (overlaps, duplicates, catch-all).
    * Does NOT validate semantic MECE — that requires human/LLM reasoning.
    * @param parentId - ID of the parent whose children to validate
@@ -550,25 +520,18 @@ export class TreeManager extends EventEmitter {
     counts: Record<HypothesisStatus, number>;
     stagnant: boolean;
     unexplored: Hypothesis[];
-    bestLead: Hypothesis | null;
   } {
     const state = this.getTree();
     if (!state) {
-      return { session: null, counts: { pending: 0, exploring: 0, eliminated: 0, corroborated: 0, 'out-of-scope': 0 }, stagnant: false, unexplored: [], bestLead: null };
+      return { session: null, counts: { pending: 0, exploring: 0, eliminated: 0, corroborated: 0, 'out-of-scope': 0 }, stagnant: false, unexplored: [] };
     }
 
     const counts: Record<HypothesisStatus, number> = { pending: 0, exploring: 0, eliminated: 0, corroborated: 0, 'out-of-scope': 0 };
     const unexplored: Hypothesis[] = [];
-    let bestLead: Hypothesis | null = null;
 
     for (const h of state.hypotheses.values()) {
       counts[h.status]++;
       if (h.status === 'pending') unexplored.push(h);
-      // Pruning verdicts cannot accept further work; bestLead tracks where
-      // the agent's next move should go.
-      if (isLive(h.status) && h.score !== null && (bestLead === null || h.score > bestLead.score!)) {
-        bestLead = h;
-      }
     }
 
     return {
@@ -576,7 +539,6 @@ export class TreeManager extends EventEmitter {
       counts,
       stagnant: this.mutationsSinceStatusChange >= this.stagnationThreshold,
       unexplored,
-      bestLead,
     };
   }
 

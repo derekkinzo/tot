@@ -46,14 +46,14 @@ describe('MCP Integration', () => {
   // ─── Tool Discovery ───
 
   describe('tool discovery', () => {
-    it('lists all 11 tools with correct names', async () => {
+    it('lists all 10 tools with correct names', async () => {
       const result = await client.listTools();
-      expect(result.tools).toHaveLength(11);
+      expect(result.tools).toHaveLength(10);
       const names = result.tools.map((t) => t.name).sort();
       expect(names).toEqual([
         'add_evidence', 'add_hypothesis', 'corroborate_hypothesis',
         'create_tree', 'decompose', 'eliminate_hypothesis',
-        'get_status', 'get_tree', 'score_hypothesis',
+        'get_status', 'get_tree',
         'set_out_of_scope', 'validate_decomposition',
       ]);
     });
@@ -428,52 +428,30 @@ describe('MCP Integration', () => {
     });
   });
 
-  // ─── score_hypothesis ───
+  // ─── scoring removed: no score_hypothesis tool ───
 
-  describe('score_hypothesis', () => {
-    it('sets score and shows ranking', async () => {
-      const { rootId } = parseResult(
-        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
-      );
-      const { childIds } = parseResult(
-        await client.callTool({
-          name: 'decompose',
-          arguments: { parentId: rootId, children: ['Low', 'High'] },
-        }),
-      );
-      await client.callTool({
-        name: 'score_hypothesis',
-        arguments: { hypothesisId: childIds[0], score: 0.2 },
-      });
-      const result = await client.callTool({
-        name: 'score_hypothesis',
-        arguments: { hypothesisId: childIds[1], score: 0.9, rationale: 'Strong evidence' },
-      });
-      expect(result.isError).toBeFalsy();
-      const text = getText(result);
-      expect(text).toContain('0.90');
+  describe('no scoring tool', () => {
+    it('score_hypothesis is not a registered tool', async () => {
+      const result = await client.listTools();
+      const names = result.tools.map((t) => t.name);
+      expect(names).not.toContain('score_hypothesis');
     });
 
-    it('error: score above 1', async () => {
+    it('tool responses and tree JSON expose no score field', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
       );
-      const result = await client.callTool({
-        name: 'score_hypothesis',
-        arguments: { hypothesisId: rootId, score: 1.5 },
+      const dec = await client.callTool({
+        name: 'decompose',
+        arguments: { parentId: rootId, children: ['A', 'B'] },
       });
-      expect(result.isError).toBe(true);
-    });
-
-    it('error: score below 0', async () => {
-      const { rootId } = parseResult(
-        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
-      );
-      const result = await client.callTool({
-        name: 'score_hypothesis',
-        arguments: { hypothesisId: rootId, score: -0.1 },
-      });
-      expect(result.isError).toBe(true);
+      expect(getText(dec)).not.toMatch(/score/i);
+      const tree = await client.callTool({ name: 'get_tree', arguments: { format: 'full' } });
+      const parsed = JSON.parse(getText(tree));
+      for (const h of Object.values(parsed.hypotheses) as any[]) {
+        expect(h).not.toHaveProperty('score');
+        expect(h).not.toHaveProperty('scoreRationale');
+      }
     });
   });
 
@@ -602,11 +580,13 @@ describe('MCP Integration', () => {
           arguments: { parentId: rootId, children: ['A', 'B'] },
         }),
       );
-      // 4 score mutations without status change = stagnation
-      for (let i = 0; i < 4; i++) {
+      // First evidence flips the child pending→exploring (resets the
+      // counter); subsequent same-status mutations accumulate. 5 neutral
+      // additions leave 4 mutations without a status change = stagnation.
+      for (let i = 0; i < 5; i++) {
         await client.callTool({
-          name: 'score_hypothesis',
-          arguments: { hypothesisId: childIds[0], score: (i + 1) * 0.1 },
+          name: 'add_evidence',
+          arguments: { hypothesisId: childIds[0], type: 'neutral', content: `note ${i}` },
         });
       }
 
@@ -776,10 +756,6 @@ describe('MCP Integration', () => {
         name: 'add_evidence',
         arguments: { hypothesisId: l1[0], type: 'supports', content: 'Stack trace shows NullPointerException' },
       });
-      await client.callTool({
-        name: 'score_hypothesis',
-        arguments: { hypothesisId: l1[0], score: 0.8 },
-      });
 
       // Level 2: Decompose the winning branch
       const { childIds: l2 } = parseResult(
@@ -802,10 +778,6 @@ describe('MCP Integration', () => {
           source: 'DB query correlation',
         },
       });
-      await client.callTool({
-        name: 'score_hypothesis',
-        arguments: { hypothesisId: l2[0], score: 0.95 },
-      });
 
       // Corroborate root cause
       const corroborateResult = await client.callTool({
@@ -823,12 +795,10 @@ describe('MCP Integration', () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Build failing' } }),
       );
-      const { childIds } = parseResult(
-        await client.callTool({
-          name: 'decompose',
-          arguments: { parentId: rootId, children: ['Dep conflict', 'Syntax error'] },
-        }),
-      );
+      await client.callTool({
+        name: 'decompose',
+        arguments: { parentId: rootId, children: ['Dep conflict', 'Syntax error'] },
+      });
 
       // Agent realizes it missed something
       const addResult = await client.callTool({
@@ -863,11 +833,11 @@ describe('MCP Integration', () => {
       });
       expect(getText(evResult)).toContain('Progress:');
 
-      const scoreResult = await client.callTool({
-        name: 'score_hypothesis',
-        arguments: { hypothesisId: childIds[1], score: 0.6 },
+      const addResult = await client.callTool({
+        name: 'add_hypothesis',
+        arguments: { parentId: rootId, content: 'D' },
       });
-      expect(getText(scoreResult)).toContain('Progress:');
+      expect(getText(addResult)).toContain('Progress:');
 
       await client.callTool({
         name: 'add_evidence',
