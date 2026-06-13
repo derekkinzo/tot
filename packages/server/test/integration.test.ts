@@ -514,6 +514,21 @@ describe('MCP Integration', () => {
       });
       expect(getText(result)).toContain('No open session');
     });
+
+    it('rejects an unsupported format value at the wire boundary', async () => {
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } });
+      // The format enum is enforced by the registered tool schema, so the SDK
+      // rejects an out-of-enum value before the handler runs and names the
+      // valid options.
+      const result = await client.callTool({
+        name: 'get_tree',
+        arguments: { format: 'path' },
+      });
+      expect(result.isError).toBe(true);
+      const text = getText(result);
+      expect(text).toContain('full');
+      expect(text).toContain('compact');
+    });
   });
 
   // ─── get_status ───
