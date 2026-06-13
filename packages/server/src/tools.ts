@@ -78,7 +78,7 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   get_tree: {
     description: 'View the current hypothesis tree structure.',
     schema: {
-      format: z.enum(['full', 'compact', 'path']).optional().default('compact').describe('Output format'),
+      format: z.enum(['full', 'compact']).optional().default('compact').describe('Output format'),
     },
   },
   get_status: {
@@ -125,7 +125,7 @@ const schemas = {
     reason: z.string().min(1).max(10000),
   }),
   get_tree: z.object({
-    format: z.enum(['full', 'compact', 'path']).optional().default('compact'),
+    format: z.enum(['full', 'compact']).optional().default('compact'),
   }),
   get_status: z.object({}),
   validate_decomposition: z.object({
