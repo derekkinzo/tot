@@ -30,7 +30,6 @@
  * - Confirmation bias: 3+ supporting with 0 refuting (ACH unidirectional evidence)
  * - Staleness: 120s between interactions (re-anchor context)
  * - Elimination nudge: 2+ refuting with 0 supporting
- * - Tie detection: top-2 within 0.15 gap
  * - Diagnosticity: supports added with no siblings refuted (non-discriminating)
  * - Premature decomposition: parent has 0 evidence items
  * - Depth caution: children at depth >= 3 (heuristic; deeper trees fragment
@@ -221,14 +220,10 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     const noSiblingsRefuted = activeSiblings.every((s) => s.evidence.filter((e) => e.type === 'refutes').length === 0);
     if (noSiblingsRefuted && hypothesis.evidence.length >= 2) {
       // Diagnosticity amplification: name a live sibling to make the
-      // discrimination question concrete. Any surviving rival serves; the
-      // prompt only needs an example, not a ranked "best" one.
+      // discrimination question concrete. The guard above guarantees at least
+      // one surviving rival; any of them serves as the example.
       const topSibling = activeSiblings[0];
-      if (topSibling) {
-        result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
-      } else {
-        result += `\nNo hypothesis has been refuted yet. A strong test is one whose outcome is predicted by THIS hypothesis but NOT by its siblings.\n`;
-      }
+      result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
     }
   }
 
@@ -349,7 +344,6 @@ export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): st
   result += '\n' + formatTreeSummary(tm);
   return result;
 }
-
 
 export function formatValidateDecomposition(parentId: string, check: StructuralCheck): string {
   // Advisory output, not pass/fail. Strict mutual exclusivity is rejected

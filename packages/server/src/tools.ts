@@ -82,7 +82,7 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   get_status: {
-    description: 'Get a summary of the current investigation: progress, unexplored branches, best lead, and stagnation check.',
+    description: 'Get a summary of the current investigation: progress, unexplored branches, and stagnation check.',
     schema: {},
   },
   validate_decomposition: {
