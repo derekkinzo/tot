@@ -214,6 +214,7 @@ async function handleCommand(input: string) {
         const id = parts[1] ? resolveId(parts[1]) : currentRootId;
         if (!id) { console.log('  Usage: validate <id|.>'); break; }
         const result = await callTool('validate_decomposition', { parentId: id });
+        if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         console.log(result.text);
         break;
       }
@@ -264,11 +265,13 @@ function resolveId(input: string | undefined): string | null {
   if (input === '.') return currentRootId;
   // A bare index (0,1,2...) selects from the most recent decompose's children.
   // Reserve this only for short, purely-numeric tokens — a full UUID can start
-  // with digits but is never a 1-2 digit integer. Out of range falls through
-  // to prefix matching, so an all-digit ID prefix can still resolve.
+  // with digits but is never a 1-2 digit integer. An out-of-range index is a
+  // typo, not an ID prefix (REPL-printed prefixes are 8 hex chars), so reject
+  // it rather than letting it fall through and match an unrelated hypothesis.
   if (/^\d{1,2}$/.test(input)) {
     const idx = parseInt(input, 10);
     if (idx >= 0 && idx < lastChildIds.length) return lastChildIds[idx];
+    return null;
   }
   // Exact match wins outright.
   if (knownIds.has(input)) return input;
@@ -283,8 +286,11 @@ function resolveId(input: string | undefined): string | null {
   }
   // An ID-shaped token the REPL never captured (a short prefix copied from the
   // dashboard, or a full UUID from another session) is forwarded to the server
-  // for an authoritative exact-match lookup rather than rejected here.
-  if (/^[0-9a-f-]{8,}$/i.test(input)) return input;
+  // for an authoritative exact-match lookup rather than rejected here. Server
+  // IDs are lowercase uuid-v4 looked up case-sensitively, so normalize first;
+  // require a leading hex digit so a pure-hyphen token isn't treated as an ID.
+  const normalized = input.toLowerCase();
+  if (/^[0-9a-f][0-9a-f-]{7,}$/.test(normalized)) return normalized;
   return null;
 }
 
