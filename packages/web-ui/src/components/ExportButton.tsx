@@ -83,8 +83,12 @@ function generateMarkdown(session: Session, hypotheses: Map<string, Hypothesis>)
 function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines: string[], depth: number): void {
   const indent = '  '.repeat(depth);
   const icon = STATUS_NODE_STYLES[node.status]?.icon ?? '?';
-  const supports = node.evidence.filter((e) => e.type === 'supports').length;
-  const refutes = node.evidence.filter((e) => e.type === 'refutes').length;
+  let supports = 0;
+  let refutes = 0;
+  for (const e of node.evidence) {
+    if (e.type === 'supports') supports++;
+    else if (e.type === 'refutes') refutes++;
+  }
   const ev = node.evidence.length > 0 ? ` (${supports} supporting, ${refutes} refuting)` : '';
 
   lines.push(`${indent}- ${icon} **${node.content}**${ev} [${node.status}]`);
