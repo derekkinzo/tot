@@ -20,8 +20,11 @@ import { encode, createLineParser, type ShimToDaemon, type DaemonToShim } from '
 import { HTTP_PORT_DEFAULT, MAX_LOADED_PROJECTS, SHUTDOWN_DEADLINE_MS } from './defaults.js';
 
 const parsedHttpPort = parseInt(process.env['TOT_PORT'] || '', 10);
-const HTTP_PORT = Number.isNaN(parsedHttpPort) ? HTTP_PORT_DEFAULT : parsedHttpPort;
-if (Number.isNaN(parsedHttpPort) && process.env['TOT_PORT']) {
+// A valid port is an integer in [1, 65535]. 0 (OS-assigned) is rejected too:
+// the advertised dashboard URL would carry port 0, which is unreachable.
+const httpPortValid = Number.isInteger(parsedHttpPort) && parsedHttpPort >= 1 && parsedHttpPort <= 65535;
+const HTTP_PORT = httpPortValid ? parsedHttpPort : HTTP_PORT_DEFAULT;
+if (!httpPortValid && process.env['TOT_PORT']) {
   console.error(`[tot-daemon] Warning: invalid TOT_PORT "${process.env['TOT_PORT']}", using default ${HTTP_PORT_DEFAULT}`);
 }
 
@@ -47,7 +50,15 @@ export function withProjectLock<T>(projectDir: string, fn: () => Promise<T>): Pr
   let release: () => void;
   const next = new Promise<void>((r) => { release = r; });
   projectLocks.set(projectDir, next);
-  return prev.then(fn).finally(() => release!());
+  return prev.then(fn).finally(() => {
+    release!();
+    // Self-prune only when this tail is still the latest: a newer caller may
+    // have chained on after us. This keeps the Map from growing without
+    // dropping an in-flight chain (eviction must NOT delete locks eagerly).
+    if (projectLocks.get(projectDir) === next) {
+      projectLocks.delete(projectDir);
+    }
+  });
 }
 
 /** Most recently active project (used as default for HTTP/SSE when no project specified) */
@@ -102,7 +113,7 @@ function getOrCreateProject(projectDir: string): ProjectState {
     persistenceHealthy: true,
   };
 
-  const handlers = getToolHandlers(tm, () => dataDir, (err) => {
+  const handlers = getToolHandlers(tm, () => dataDir, () => {
     state.persistenceHealthy = false;
   });
   state.handlers = handlers;
@@ -302,7 +313,10 @@ async function handleMessage(
           }
           if (oldest && oldest !== projectDir) {
             projectManagers.delete(oldest);
-            projectLocks.delete(oldest);
+            // Do NOT delete projectLocks[oldest] here: a tool-call or HTTP read
+            // may still be queued behind it, and dropping the entry would let a
+            // future call skip the in-flight chain and break mutual exclusion.
+            // withProjectLock self-prunes the lock once it is provably idle.
             console.error(`[tot-daemon] Evicted LRU project: ${oldest}`);
           }
         }

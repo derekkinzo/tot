@@ -42,7 +42,11 @@ function reducer(state: TreeState, action: Action): TreeState {
     case 'hypothesis-updated': {
       const next = new Map(state.hypotheses);
       next.set(action.hypothesis.id, action.hypothesis);
+      // Re-append on re-update so the most-recently-changed id is always last
+      // (a plain Set.add keeps the original insertion position). Follow mode
+      // reads the last entry to focus the node that just changed.
       const recent = new Set(state.recentlyChanged);
+      recent.delete(action.hypothesis.id);
       recent.add(action.hypothesis.id);
       return { ...state, hypotheses: next, recentlyChanged: recent };
     }
@@ -138,51 +142,73 @@ export function useTreeStream(projectDir?: string) {
 
     const gen = ++connectionGenRef.current;
     const sseUrl = currentProject ? `/sse?project=${encodeURIComponent(currentProject)}` : '/sse';
-    const es = new EventSource(sseUrl);
-    esRef.current = es;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let backoff = 1000;
 
-    es.onopen = () => {
+    const connect = () => {
       if (connectionGenRef.current !== gen) return;
-      dispatch({ type: 'connected' });
-    };
-    es.onerror = () => {
-      if (connectionGenRef.current !== gen) return;
-      dispatch({ type: 'disconnected' });
-    };
+      const es = new EventSource(sseUrl);
+      esRef.current = es;
 
-    es.onmessage = (event) => {
-      if (connectionGenRef.current !== gen) return;
-      try {
-        const data: TreeEvent = JSON.parse(event.data);
-        switch (data.type) {
-          case 'snapshot':
-            dispatch({ type: 'snapshot', session: data.session, hypotheses: data.hypotheses });
-            break;
-          case 'session-created':
-            dispatch({ type: 'session-created', session: data.session });
-            break;
-          case 'hypothesis-added':
-            dispatch({ type: 'hypothesis-added', hypothesis: data.hypothesis });
-            break;
-          case 'hypothesis-updated':
-            dispatch({ type: 'hypothesis-updated', hypothesis: data.hypothesis });
-            break;
-          case 'evidence-added':
-            dispatch({ type: 'evidence-added', hypothesisId: data.hypothesisId, evidence: data.evidence });
-            break;
-          case 'session-completed':
-            dispatch({ type: 'session-completed', sessionId: data.sessionId, terminalStatus: data.terminalStatus });
-            break;
-          case 'session-reopened':
-            dispatch({ type: 'session-reopened', sessionId: data.sessionId });
-            break;
+      es.onopen = () => {
+        if (connectionGenRef.current !== gen) return;
+        backoff = 1000; // reset after a successful connect
+        dispatch({ type: 'connected' });
+      };
+      es.onerror = () => {
+        if (connectionGenRef.current !== gen) return;
+        dispatch({ type: 'disconnected' });
+        // EventSource auto-reconnects while the connection stays in CONNECTING;
+        // once it gives up (CLOSED, e.g. the daemon went away) drive a manual
+        // reconnect with bounded exponential backoff so the dashboard recovers
+        // without a page reload.
+        if (es.readyState === EventSource.CLOSED) {
+          es.close();
+          retryTimer = setTimeout(connect, backoff);
+          backoff = Math.min(backoff * 2, 30_000);
         }
-      } catch {
-        // Ignore unparseable events (keepalive comments, etc.)
-      }
+      };
+
+      es.onmessage = (event) => {
+        if (connectionGenRef.current !== gen) return;
+        try {
+          const data: TreeEvent = JSON.parse(event.data);
+          switch (data.type) {
+            case 'snapshot':
+              dispatch({ type: 'snapshot', session: data.session, hypotheses: data.hypotheses });
+              break;
+            case 'session-created':
+              dispatch({ type: 'session-created', session: data.session });
+              break;
+            case 'hypothesis-added':
+              dispatch({ type: 'hypothesis-added', hypothesis: data.hypothesis });
+              break;
+            case 'hypothesis-updated':
+              dispatch({ type: 'hypothesis-updated', hypothesis: data.hypothesis });
+              break;
+            case 'evidence-added':
+              dispatch({ type: 'evidence-added', hypothesisId: data.hypothesisId, evidence: data.evidence });
+              break;
+            case 'session-completed':
+              dispatch({ type: 'session-completed', sessionId: data.sessionId, terminalStatus: data.terminalStatus });
+              break;
+            case 'session-reopened':
+              dispatch({ type: 'session-reopened', sessionId: data.sessionId });
+              break;
+          }
+        } catch {
+          // Ignore unparseable events (keepalive comments, etc.)
+        }
+      };
     };
 
-    return () => es.close();
+    connect();
+
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      esRef.current?.close();
+      esRef.current = null;
+    };
   }, [currentProject]);
 
   const loadSession = useCallback(async (sessionId: string) => {

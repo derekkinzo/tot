@@ -160,7 +160,6 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
   const prevNodeCount = useRef(nodes.length);
   useEffect(() => {
     if (nodes.length !== prevNodeCount.current && !selectedId && !lastAddedId) {
-      prevNodeCount.current = nodes.length;
       requestAnimationFrame(() => {
         fitView({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
@@ -252,9 +251,9 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
       case 'copy': {
         const h = hypotheses.get(nodeId);
         if (h) {
-          try {
-            navigator.clipboard?.writeText(h.content);
-          } catch { /* clipboard unavailable in this context */ }
+          // Swallow a rejected writeText Promise (unfocused doc / denied
+          // permission) so it doesn't surface as an unhandledrejection.
+          void Promise.resolve(navigator.clipboard?.writeText(h.content)).catch(() => {});
         }
         break;
       }
@@ -421,7 +420,9 @@ function MenuItem({ label, shortcut, onClick }: { label: string; shortcut: strin
 function getPathToRoot(nodeId: string, hypotheses: Map<string, Hypothesis>): Set<string> {
   const path = new Set<string>();
   let current: string | null = nodeId;
-  while (current) {
+  // Stop on a revisit so a malformed parentId cycle (corrupt journal) cannot
+  // spin this useMemo forever and freeze the render thread.
+  while (current && !path.has(current)) {
     path.add(current);
     const node = hypotheses.get(current);
     current = node?.parentId ?? null;
@@ -451,12 +452,49 @@ function computeLayout(
     }
   }
 
+  // Adopt transient orphans: a 'hypothesis-added' child can arrive a render
+  // before its parent's 'hypothesis-updated' appends it to parent.children.
+  // Such a node carries a valid parentId reaching a visible ancestor, so pull
+  // it (and its own children) in via the parentId chain rather than dropping
+  // it for that frame. Skip nodes whose nearest visible ancestor is collapsed.
+  const orphanChildren = new Map<string, string[]>(); // parentId → [childId]
+  for (const [id, h] of hypotheses) {
+    if (visibleIds.has(id) || !h.parentId) continue;
+    // Walk up parentId to decide visibility; guard against cycles.
+    const chain: string[] = [];
+    let cursor: string | null = id;
+    const seen = new Set<string>();
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      chain.push(cursor);
+      if (visibleIds.has(cursor)) break;
+      cursor = hypotheses.get(cursor)?.parentId ?? null;
+    }
+    const anchor = cursor;
+    if (anchor && visibleIds.has(anchor) && !collapsedIds.has(anchor)) {
+      for (const cid of chain) {
+        if (cid === anchor) continue;
+        visibleIds.add(cid);
+        const parentId = hypotheses.get(cid)?.parentId;
+        if (parentId) {
+          const list = orphanChildren.get(parentId) ?? [];
+          if (!list.includes(cid)) list.push(cid);
+          orphanChildren.set(parentId, list);
+        }
+      }
+    }
+  }
+
   // Build hierarchy for flextree
   interface TreeData { id: string; children?: TreeData[] }
   function buildTree(id: string): TreeData {
     const h = hypotheses.get(id);
     if (!h || collapsedIds.has(id)) return { id };
-    const children = h.children.filter((c) => visibleIds.has(c)).map(buildTree);
+    // Merge real children with any adopted orphans not yet in h.children.
+    const declared = h.children.filter((c) => visibleIds.has(c));
+    const adopted = (orphanChildren.get(id) ?? []).filter((c) => !declared.includes(c));
+    const childIds = [...declared, ...adopted];
+    const children = childIds.map(buildTree);
     return children.length > 0 ? { id, children } : { id };
   }
 
