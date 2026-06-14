@@ -529,6 +529,32 @@ describe('MCP Integration', () => {
       expect(text).toContain('full');
       expect(text).toContain('compact');
     });
+
+    it('renders a specific session when sessionId is passed', async () => {
+      // Two sessions open in one project; get_tree(sessionId) must render the
+      // named one, not just the active (most-recent) session.
+      const a = parseResult(await client.callTool({ name: 'create_tree', arguments: { problem: 'Session A problem' } }));
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'Session B problem' } });
+
+      // Active session is B (most recently created); fetch A explicitly.
+      const result = await client.callTool({
+        name: 'get_tree',
+        arguments: { format: 'compact', sessionId: a.sessionId },
+      });
+      const text = getText(result);
+      expect(text).toContain('Session A problem');
+      expect(text).not.toContain('Session B problem');
+    });
+
+    it('rejects get_tree for an unknown sessionId', async () => {
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } });
+      const result = await client.callTool({
+        name: 'get_tree',
+        arguments: { format: 'compact', sessionId: 'no-such-session' },
+      });
+      expect(result.isError).toBe(true);
+      expect(getText(result)).toContain('No such session');
+    });
   });
 
   // ─── get_status ───

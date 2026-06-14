@@ -92,7 +92,18 @@ export default function App() {
       </div>
 
       {selected && (
-        <DetailPanel hypothesis={selected} onClose={() => handleSelect(null)} />
+        <ErrorBoundary
+          fallback={
+            <div style={{
+              width: 400, borderLeft: '1px solid #30363d', background: '#161b22',
+              padding: 24, color: '#8b949e',
+            }}>
+              Failed to render detail panel.
+            </div>
+          }
+        >
+          <DetailPanel hypothesis={selected} onClose={() => handleSelect(null)} />
+        </ErrorBoundary>
       )}
     </div>
   );

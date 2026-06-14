@@ -111,12 +111,16 @@ export async function startDaemon(totDir: string): Promise<DaemonInfo> {
     child.unref();
     child.disconnect();
     closeSync(logFd);
+
+    // Hold the lock until the child has booted and written daemon.port. The
+    // fork+startup window takes tens of ms; releasing the lock the instant
+    // fork() returns would let a second concurrent shim pass the lock check
+    // and fork a duplicate daemon before this one is listening.
+    return await pollForDaemon(totDir);
   } finally {
     closeSync(lockFd);
     try { unlinkSync(lockFile); } catch {}
   }
-
-  return pollForDaemon(totDir);
 }
 
 async function pollForDaemon(totDir: string): Promise<DaemonInfo> {

@@ -41,7 +41,16 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
   // Track SSE clients per project
   const sseClients = new Map<string, Set<ServerResponse>>(); // projectDir → clients
   const eventCounters = new Map<string, number>(); // projectDir → eventId
-  const waitingClients = new Set<ServerResponse>(); // clients connected before any project exists
+  // Clients connected before their project existed. The value is the project
+  // they requested via ?project= (null = no preference), so the flush only
+  // binds a client to the project it actually wanted.
+  const waitingClients = new Map<ServerResponse, string | null>();
+  // The TreeManager instance currently subscribed per project. After an LRU
+  // eviction the daemon rebuilds a project with a fresh TreeManager; tracking
+  // the instance lets ensureSubscribed detect the swap and re-wire the listener
+  // (a projectDir-only check would wrongly treat the stale entry as live).
+  const subscribedManagers = new Map<string, TreeManager>();
+  const subscribedListeners = new Map<string, (event: TreeEvent) => void>();
 
   // Subscribe to tree events for all registered (and future) projects
   function subscribeProject(state: ProjectState): void {
@@ -50,14 +59,25 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
       sseClients.set(projectDir, new Set());
       eventCounters.set(projectDir, 0);
     }
+    // Remove a listener bound to a previous (evicted) manager so it can be GC'd
+    // and stops firing into a stale closure.
+    const priorTm = subscribedManagers.get(projectDir);
+    const priorListener = subscribedListeners.get(projectDir);
+    if (priorTm && priorListener && priorTm !== tm) {
+      priorTm.removeListener('event', priorListener);
+    }
 
-    tm.on('event', (event: TreeEvent) => {
-      // Flush waiting clients: subscribe them to the first project that fires an event
+    const listener = (event: TreeEvent) => {
+      // Flush waiting clients onto this project — but only those that did not
+      // ask for a *different* project. A client that named another project via
+      // ?project= stays waiting until its own project fires/registers, so it
+      // is never bound to the wrong tree.
       if (waitingClients.size > 0) {
         const clients = sseClients.get(projectDir)!;
-        for (const wc of waitingClients) {
+        for (const [wc, requested] of waitingClients) {
+          if (requested && requested !== projectDir) continue;
           clients.add(wc);
-          // Send snapshot to the waiting client
+          waitingClients.delete(wc);
           const session = pickDefaultSession(tm);
           if (session) {
             const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
@@ -65,7 +85,6 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
             try { wc.write(`id: 0\ndata: ${JSON.stringify(snapshot)}\n\n`); } catch { clients.delete(wc); }
           }
         }
-        waitingClients.clear();
       }
 
       const clients = sseClients.get(projectDir);
@@ -82,7 +101,11 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
           clients.delete(client);
         }
       }
-    });
+    };
+
+    tm.on('event', listener);
+    subscribedManagers.set(projectDir, tm);
+    subscribedListeners.set(projectDir, listener);
   }
 
   // Subscribe existing projects and set up a poll for new ones
@@ -90,10 +113,12 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
     subscribeProject(state);
   }
 
-  // Check for new projects every time a request comes in (lightweight)
+  // Check for new projects every time a request comes in (lightweight). Also
+  // re-subscribe a project whose TreeManager was replaced (LRU eviction then
+  // reload builds a fresh instance) so its live events keep reaching clients.
   function ensureSubscribed(): void {
     for (const state of ctx.getAllProjects()) {
-      if (!sseClients.has(state.projectDir)) {
+      if (subscribedManagers.get(state.projectDir) !== state.tm) {
         subscribeProject(state);
       }
     }
@@ -110,7 +135,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
         }
       }
     }
-    for (const client of waitingClients) {
+    for (const client of waitingClients.keys()) {
       try {
         client.write(': keepalive\n\n');
       } catch {
@@ -206,7 +231,7 @@ function handleSSE(
   url: URL,
   ctx: MultiProjectContext,
   sseClients: Map<string, Set<ServerResponse>>,
-  waitingClients: Set<ServerResponse>,
+  waitingClients: Map<ServerResponse, string | null>,
 ): void {
   const project = resolveProject(url, ctx);
   if (!project) {
@@ -216,8 +241,9 @@ function handleSSE(
       'Connection': 'keep-alive',
     });
     res.flushHeaders();
-    // No project yet — add to waiting set; will be subscribed on first event
-    waitingClients.add(res);
+    // No project yet — record which project (if any) this client asked for so
+    // the flush only binds it to that project, never an unrelated one.
+    waitingClients.set(res, url.searchParams.get('project'));
     ctx.onSseConnect();
     req.on('close', () => { waitingClients.delete(res); ctx.onSseDisconnect(); });
     return;
@@ -411,11 +437,13 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL):
     return;
   }
 
-  // Create cached sirv handler once
+  // Create cached sirv handler once. Serve the built bundle with ETags and
+  // long-lived caching (hashed asset names make immutable safe) so unchanged
+  // assets get a 304 instead of a full refetch on every load.
   if (!sirvHandler) {
     try {
       const mod = await import('sirv');
-      sirvHandler = mod.default(STATIC_DIR, { single: true, dev: true });
+      sirvHandler = mod.default(STATIC_DIR, { single: true, etag: true, maxAge: 31536000, immutable: true });
     } catch {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Static file serving unavailable (sirv not installed)');

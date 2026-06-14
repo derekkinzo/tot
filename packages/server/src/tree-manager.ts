@@ -17,7 +17,10 @@ export class TreeManager extends EventEmitter {
   private hypotheses = new Map<string, Hypothesis>();
   private sessionHypotheses = new Map<string, Set<string>>();
   private currentSessionId: string | null = null;
-  private mutationsSinceStatusChange = 0;
+  // Stagnation is tracked per session: one TreeManager can hold several
+  // concurrently-open trees, and each session's "mutations since last status
+  // change" must not leak into another's stagnation verdict.
+  private mutationsSinceStatusChange = new Map<string, number>();
   private stagnationThreshold: number;
   private maxDepth: number;
   private maxHypotheses: number;
@@ -68,8 +71,7 @@ export class TreeManager extends EventEmitter {
     this.sessions.set(sessionId, session);
     this.hypotheses.set(rootId, root);
     this.sessionHypotheses.set(sessionId, new Set([rootId]));
-    this.mutationsSinceStatusChange = 0;
-    this.touch();
+    this.resetMutationCounter(sessionId);
 
     this.emit('event', { type: 'session-created', session } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-added', hypothesis: root } satisfies TreeEvent);
@@ -100,7 +102,11 @@ export class TreeManager extends EventEmitter {
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
     }
-    if (this.hypotheses.size + childContents.length > this.maxHypotheses) {
+    // The cap is per tree, not per process: count only the parent's session,
+    // so a large historical session co-loaded in this manager cannot block a
+    // small new one.
+    const sessionSize = this.sessionHypotheses.get(parent.sessionId)?.size ?? 0;
+    if (sessionSize + childContents.length > this.maxHypotheses) {
       throw new TreeError(`Maximum hypothesis count (${this.maxHypotheses}) exceeded`);
     }
 
@@ -129,10 +135,9 @@ export class TreeManager extends EventEmitter {
 
     if (parent.status === 'pending') {
       parent.status = 'exploring';
-      this.mutationsSinceStatusChange = 0;
-      this.touch();
+      this.resetMutationCounter(parent.sessionId);
     } else {
-      this.incrementMutationCounter();
+      this.incrementMutationCounter(parent.sessionId);
     }
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis: parent } satisfies TreeEvent);
@@ -160,7 +165,9 @@ export class TreeManager extends EventEmitter {
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
     }
-    if (this.hypotheses.size + 1 > this.maxHypotheses) {
+    // Per-tree cap (see decompose): meter only the parent's session.
+    const sessionSize = this.sessionHypotheses.get(parent.sessionId)?.size ?? 0;
+    if (sessionSize + 1 > this.maxHypotheses) {
       throw new TreeError(`Maximum hypothesis count (${this.maxHypotheses}) exceeded`);
     }
 
@@ -181,7 +188,7 @@ export class TreeManager extends EventEmitter {
     this.sessionHypotheses.get(parent.sessionId)?.add(hypothesis.id);
     parent.children.push(hypothesis.id);
     parent.metadata.updatedAt = now;
-    this.incrementMutationCounter();
+    this.incrementMutationCounter(parent.sessionId);
 
     this.emit('event', { type: 'hypothesis-added', hypothesis } satisfies TreeEvent);
     this.emit('event', { type: 'hypothesis-updated', hypothesis: parent } satisfies TreeEvent);
@@ -247,10 +254,9 @@ export class TreeManager extends EventEmitter {
 
     if (hypothesis.status === 'pending' || demotesCorroborated) {
       hypothesis.status = 'exploring';
-      this.mutationsSinceStatusChange = 0;
-      this.touch();
+      this.resetMutationCounter(hypothesis.sessionId);
     } else {
-      this.incrementMutationCounter();
+      this.incrementMutationCounter(hypothesis.sessionId);
     }
     // Mark the historical conclusion as superseded by the direct refute
     // so renderers can distinguish it from a cascade demote. The guard
@@ -329,8 +335,7 @@ export class TreeManager extends EventEmitter {
     hypothesis.status = 'eliminated';
     hypothesis.conclusion = { verdict: 'eliminated', reason, timestamp: now, refutingEvidenceIds: groundedIds };
     hypothesis.metadata.updatedAt = now;
-    this.mutationsSinceStatusChange = 0;
-    this.touch();
+    this.resetMutationCounter(hypothesis.sessionId);
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
@@ -375,8 +380,11 @@ export class TreeManager extends EventEmitter {
     // hidden work is moot under the closure rule and stays moot here).
     for (const childId of hypothesis.children) {
       const child = this.hypotheses.get(childId);
-      if (child && !isTerminal(child.status)) {
-        throw new TreeError('Cannot corroborate a hypothesis with unresolved children');
+      // A child id present in the array but absent from the Map signals an
+      // incompletely-loaded subtree (e.g. a corrupt/skipped journal line); fail
+      // closed rather than treating the missing branch as satisfied.
+      if (!child || !isTerminal(child.status)) {
+        throw new TreeError('Cannot corroborate a hypothesis with unresolved or missing children');
       }
     }
 
@@ -384,8 +392,7 @@ export class TreeManager extends EventEmitter {
     hypothesis.status = 'corroborated';
     hypothesis.conclusion = { verdict: 'corroborated', reason, timestamp: now };
     hypothesis.metadata.updatedAt = now;
-    this.mutationsSinceStatusChange = 0;
-    this.touch();
+    this.resetMutationCounter(hypothesis.sessionId);
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
@@ -431,8 +438,7 @@ export class TreeManager extends EventEmitter {
     // A status change is real progress on tree disposition; sibling
     // status-changing mutators (eliminate, corroborate) reset the counter
     // for the same reason.
-    this.mutationsSinceStatusChange = 0;
-    this.touch();
+    this.resetMutationCounter(hypothesis.sessionId);
 
     this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
 
@@ -476,11 +482,13 @@ export class TreeManager extends EventEmitter {
     );
 
     let abstractionMismatch = false;
+    let minWords: number | undefined;
+    let maxWords: number | undefined;
     if (children.length >= 2) {
-      const wordCounts = children.map((c) => c.content.split(/\s+/).length);
-      const minLen = Math.min(...wordCounts);
-      const maxLen = Math.max(...wordCounts);
-      abstractionMismatch = maxLen > minLen * 3;
+      const wordCounts = children.map((c) => c.content.trim().split(/\s+/).filter(Boolean).length);
+      minWords = Math.min(...wordCounts);
+      maxWords = Math.max(...wordCounts);
+      abstractionMismatch = maxWords > minWords * 3;
     }
 
     return {
@@ -489,6 +497,8 @@ export class TreeManager extends EventEmitter {
       duplicateLabels,
       hasCatchAll,
       abstractionMismatch,
+      minWords,
+      maxWords,
     };
   }
 
@@ -534,10 +544,11 @@ export class TreeManager extends EventEmitter {
       if (h.status === 'pending') unexplored.push(h);
     }
 
+    const sessionMutations = this.mutationsSinceStatusChange.get(state.session.id) ?? 0;
     return {
       session: state.session,
       counts,
-      stagnant: this.mutationsSinceStatusChange >= this.stagnationThreshold,
+      stagnant: sessionMutations >= this.stagnationThreshold,
       unexplored,
     };
   }
@@ -600,6 +611,11 @@ export class TreeManager extends EventEmitter {
 
   getAllSessions(): Session[] {
     return Array.from(this.sessions.values());
+  }
+
+  /** O(1) lookup of a session by id. */
+  getSession(sessionId: string): Session | undefined {
+    return this.sessions.get(sessionId);
   }
 
   /** Returns all hypotheses across all sessions. For per-session lookup, prefer getHypothesesBySession(). */
@@ -775,8 +791,14 @@ export class TreeManager extends EventEmitter {
     return h;
   }
 
-  private incrementMutationCounter(): void {
-    this.mutationsSinceStatusChange++;
+  private incrementMutationCounter(sessionId: string): void {
+    this.mutationsSinceStatusChange.set(sessionId, (this.mutationsSinceStatusChange.get(sessionId) ?? 0) + 1);
+    this.touch();
+  }
+
+  /** Resets the stagnation counter for a session after a real status change. */
+  private resetMutationCounter(sessionId: string): void {
+    this.mutationsSinceStatusChange.set(sessionId, 0);
     this.touch();
   }
 }

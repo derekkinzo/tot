@@ -297,6 +297,33 @@ describe('TreeManager', () => {
       const result = tm.corroborateHypothesis(root.id, 'reason');
       expect(result.status).toBe('corroborated');
     });
+
+    it('refuses to corroborate a parent with a dangling (missing) child id', () => {
+      // Simulate an incompletely-loaded tree (e.g. a corrupt/skipped journal
+      // line dropped one child) by replaying a parent that lists a child id
+      // the manager never loaded. A missing child must fail closed, not be
+      // treated as satisfied.
+      const loadTm = new TreeManager({});
+      const now = new Date().toISOString();
+      const session = { id: 'sx', problem: 'P', rootNodeId: 'root', status: 'open' as const, createdAt: now };
+      const root = {
+        id: 'root', parentId: null, sessionId: 'sx', depth: 0, content: 'P',
+        status: 'exploring' as const, evidence: [],
+        metadata: { createdAt: now, updatedAt: now, source: 'agent' as const },
+        children: ['present', 'missing'],
+      };
+      const present = {
+        id: 'present', parentId: 'root', sessionId: 'sx', depth: 1, content: 'present child',
+        status: 'eliminated' as const,
+        conclusion: { verdict: 'eliminated' as const, reason: 'r', timestamp: now },
+        evidence: [{ id: 'e', type: 'refutes' as const, content: 'x', timestamp: now }],
+        metadata: { createdAt: now, updatedAt: now, source: 'agent' as const },
+        children: [],
+      };
+      // 'missing' is intentionally NOT loaded.
+      loadTm.loadState([session], [root, present]);
+      expect(() => loadTm.corroborateHypothesis('root', 'should fail')).toThrow(/unresolved or missing children/);
+    });
   });
 
   // --- Spine closure ---
@@ -689,6 +716,24 @@ describe('TreeManager', () => {
       tm.createSession('Problem');
       expect(() => tm.validateDecomposition('fake')).toThrow(TreeError);
     });
+
+    it('ignores incidental whitespace when counting words for abstraction mismatch', () => {
+      // 'database is slow' is 3 words; a leading space must not inflate it to
+      // 4 and trip the maxLen > minLen*3 heuristic against the 1-word sibling.
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, [' database is slow', 'cache']);
+      const check = tm.validateDecomposition(root.id);
+      expect(check.abstractionMismatch).toBe(false);
+      expect(check.minWords).toBe(1);
+      expect(check.maxWords).toBe(3);
+    });
+
+    it('flags a genuine abstraction mismatch (>3x word span)', () => {
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, ['the database query plan regressed badly', 'cache']);
+      const check = tm.validateDecomposition(root.id);
+      expect(check.abstractionMismatch).toBe(true);
+    });
   });
 
   // --- Get Tree ---
@@ -809,8 +854,8 @@ describe('TreeManager', () => {
       for (let i = 0; i < 5; i++) tm.addEvidence(b1.id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
 
-      // Refute A's corroborated leaf — sessionA reopens. The counter is
-      // shared engine-wide; the session-level transition resets it.
+      // Refute A's corroborated leaf — sessionA reopens, becomes current, and
+      // its own (reset) stagnation counter is what get_status now reports.
       tm.addEvidence(a.id, 'refutes', 'counter-instance');
       expect(sessionA.status).toBe('open');
       expect(tm.getStatus().stagnant).toBe(false);
@@ -822,6 +867,27 @@ describe('TreeManager', () => {
       for (let i = 0; i < 5; i++) tm.addEvidence(children[0].id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
       tm.setOutOfScope(children[1].id, 'set aside');
+      expect(tm.getStatus().stagnant).toBe(false);
+    });
+
+    it('tracks stagnation per session — churn on B does not mark A stagnant', () => {
+      // Two co-open sessions in one manager. Session A has had a real status
+      // change and zero churn; session B accumulates same-status mutations.
+      // get_status for A must report stagnant=false: each session's counter
+      // is isolated, so B's churn cannot contaminate A's verdict.
+      const { session: sessionA, root: rootA } = tm.createSession('Problem A');
+      const [a1] = tm.decompose(rootA.id, ['A1', 'A2']);
+      tm.addEvidence(a1.id, 'supports', 'real status change on A');
+
+      const { root: rootB } = tm.createSession('Problem B');
+      const [b1] = tm.decompose(rootB.id, ['B1', 'B2']);
+      for (let i = 0; i < 5; i++) tm.addEvidence(b1.id, 'neutral', `n${i}`);
+
+      // B is the active session (last mutated) and is stagnant.
+      expect(tm.getStatus().stagnant).toBe(true);
+      // Resolve the active pointer back to A and confirm A is NOT stagnant.
+      tm.addEvidence(a1.id, 'supports', 'more on A');
+      expect(tm.getStatus().session?.id).toBe(sessionA.id);
       expect(tm.getStatus().stagnant).toBe(false);
     });
   });
@@ -921,6 +987,19 @@ describe('TreeManager', () => {
       const { root } = smallTm.createSession('Problem');
       smallTm.decompose(root.id, ['A', 'B', 'C']); // 4 total
       expect(() => smallTm.addHypothesis(root.id, 'Overflow')).toThrow('Maximum hypothesis count (4) exceeded');
+    });
+
+    it('counts the hypothesis cap per session, not across all sessions', () => {
+      // The cap is per tree: a session filled to the limit must not block
+      // decompose/add in a different, nearly-empty session of the same manager.
+      const smallTm = new TreeManager({ maxHypotheses: 4 });
+      const { root: rootA } = smallTm.createSession('Problem A');
+      smallTm.decompose(rootA.id, ['A', 'B', 'C']); // session A: 4 nodes (at cap)
+
+      const { root: rootB } = smallTm.createSession('Problem B');
+      // Session B has only its root; decompose must succeed despite A being full.
+      expect(() => smallTm.decompose(rootB.id, ['X', 'Y'])).not.toThrow();
+      expect(smallTm.getHypothesesBySession(rootB.sessionId)).toHaveLength(3);
     });
   });
 

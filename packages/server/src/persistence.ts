@@ -103,10 +103,22 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       const lines = content.split('\n').filter((l) => l.trim());
       if (lines.length === 0) continue;
 
-      const firstEntry: JournalEntry = JSON.parse(lines[0]);
-      if (firstEntry.type !== 'session-created') continue;
-
-      const session = firstEntry.payload as Session;
+      // Find the session-created header, tolerating a corrupt/truncated first
+      // line (e.g. a crash mid-first-append) by scanning forward rather than
+      // discarding the whole — otherwise recoverable — file.
+      let session: Session | undefined;
+      for (const line of lines) {
+        try {
+          const entry: JournalEntry = JSON.parse(line);
+          if (entry.type === 'session-created') {
+            session = entry.payload as Session;
+            break;
+          }
+        } catch {
+          // skip corrupt line, keep scanning for the header
+        }
+      }
+      if (!session) continue;
 
       // Determine final status by tracking the last session-level event.
       // session-reopened wins over an earlier session-completed; the
@@ -224,6 +236,10 @@ function replayEntry(
       break;
     }
     case 'evidence-added': {
+      // The current tool layer persists evidence via the full hypothesis-updated
+      // snapshot, not a discrete evidence-added entry, so this branch does not
+      // fire on journals written today. It is retained so a journal that does
+      // carry the SSE-mirrored evidence-added event still replays correctly.
       const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
       const h = hypotheses.find((hyp) => hyp.id === hypothesisId);
       if (h) h.evidence.push(evidence);

@@ -9,6 +9,13 @@ interface Props {
 export default function DetailPanel({ hypothesis, onClose }: Props) {
   const statusColor = STATUS_COLORS[hypothesis.status] ?? STATUS_COLORS.pending;
   const statusLabel = STATUS_LABELS[hypothesis.status] ?? STATUS_LABELS.pending;
+  // A partial/legacy stream record may be missing optional arrays or a valid
+  // timestamp; default them so the panel renders a graceful fallback instead
+  // of throwing (it sits in its own ErrorBoundary, but degrading is friendlier).
+  const evidence = hypothesis.evidence ?? [];
+  const childCount = hypothesis.children?.length ?? 0;
+  const createdAt = new Date(hypothesis.metadata?.createdAt ?? '');
+  const createdLabel = Number.isNaN(createdAt.getTime()) ? '—' : createdAt.toLocaleTimeString();
 
   return (
     <div style={{
@@ -101,7 +108,7 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
       })()}
 
       {/* Evidence */}
-      {hypothesis.evidence.length > 0 && (
+      {evidence.length > 0 && (
         <div>
           <div style={{
             fontSize: 12,
@@ -111,10 +118,10 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
             color: '#8b949e',
             marginBottom: 10,
           }}>
-            Evidence ({hypothesis.evidence.length})
+            Evidence ({evidence.length})
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {hypothesis.evidence.map((ev) => (
+            {evidence.map((ev) => (
               <div key={ev.id} style={{
                 padding: '12px 14px',
                 background: '#1c1f26',
@@ -164,11 +171,11 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
         </div>
         <div>
           <div style={{ color: '#8b949e', fontWeight: 500 }}>Created</div>
-          <div>{new Date(hypothesis.metadata.createdAt).toLocaleTimeString()}</div>
+          <div>{createdLabel}</div>
         </div>
         <div>
           <div style={{ color: '#8b949e', fontWeight: 500 }}>Children</div>
-          <div>{hypothesis.children.length}</div>
+          <div>{childCount}</div>
         </div>
       </div>
     </div>

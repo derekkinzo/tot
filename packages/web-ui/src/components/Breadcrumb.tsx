@@ -10,8 +10,11 @@ export default function Breadcrumb({ selectedId, hypotheses, onNavigate }: Props
   if (!selectedId) return null;
 
   const path: Hypothesis[] = [];
+  const seen = new Set<string>();
   let current: string | null = selectedId;
-  while (current) {
+  // Stop on a revisit so a malformed parentId cycle can't loop forever.
+  while (current && !seen.has(current)) {
+    seen.add(current);
     const h = hypotheses.get(current);
     if (h) path.unshift(h);
     current = h?.parentId ?? null;

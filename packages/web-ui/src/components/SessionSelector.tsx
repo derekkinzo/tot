@@ -17,14 +17,19 @@ interface Props {
 export default function SessionSelector({ currentSessionId, onSwitch, project }: Props) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const projectParam = project ? `?project=${encodeURIComponent(project)}` : '';
+    setLoading(true);
+    setError(null);
     fetch(`/api/sessions${projectParam}`)
       .then((r) => r.json())
       .then((d) => setSessions(d.sessions ?? []))
-      .catch(() => {});
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
   }, [open, project]);
 
   if (!currentSessionId) return null;
@@ -42,7 +47,7 @@ export default function SessionSelector({ currentSessionId, onSwitch, project }:
         Sessions ▾
       </button>
 
-      {open && sessions.length > 0 && (
+      {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 4,
           background: '#1c1f26', border: '1px solid #30363d', borderRadius: 8,
@@ -50,7 +55,10 @@ export default function SessionSelector({ currentSessionId, onSwitch, project }:
           minWidth: 280, maxHeight: 300, overflowY: 'auto',
           padding: '4px 0',
         }}>
-          {sessions.map((s) => (
+          {loading && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 12 }}>Loading…</div>}
+          {!loading && error && <div style={{ padding: '10px 14px', color: '#f87171', fontSize: 12 }}>Failed to load sessions.</div>}
+          {!loading && !error && sessions.length === 0 && <div style={{ padding: '10px 14px', color: '#6b7280', fontSize: 12 }}>No sessions.</div>}
+          {!loading && !error && sessions.map((s) => (
             <button
               key={s.id}
               onClick={() => { onSwitch(s.id); setOpen(false); }}

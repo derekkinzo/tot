@@ -76,9 +76,10 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
     },
   },
   get_tree: {
-    description: 'View the current hypothesis tree structure.',
+    description: 'View a hypothesis tree structure. Defaults to the active session; pass sessionId to view another open session.',
     schema: {
       format: z.enum(['full', 'compact']).optional().default('compact').describe('Output format'),
+      sessionId: z.string().min(1).optional().describe('Session to view (defaults to the active session)'),
     },
   },
   get_status: {
@@ -126,6 +127,7 @@ const schemas = {
   }),
   get_tree: z.object({
     format: z.enum(['full', 'compact']).optional().default('compact'),
+    sessionId: z.string().min(1).optional(),
   }),
   get_status: z.object({}),
   validate_decomposition: z.object({
@@ -242,7 +244,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const target = tm.getHypothesis(hypothesisId);
       const sessionIdForPrior = target?.sessionId;
       const priorStatus = sessionIdForPrior
-        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        ? tm.getSession(sessionIdForPrior)?.status
         : undefined;
       const { demotedAncestors } = tm.addEvidence(hypothesisId, type, content, source);
       const hypothesis = tm.getHypothesis(hypothesisId)!;
@@ -252,7 +254,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       // the journal as a timeline so audit consumers see the same ordering
       // SSE consumers do.
       await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      const session = tm.getSession(hypothesis.sessionId);
       await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       for (const ancestor of demotedAncestors) {
         await p.append('hypothesis-updated', ancestor);
@@ -272,12 +274,12 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const target = tm.getHypothesis(hypothesisId);
       const sessionIdForPrior = target?.sessionId;
       const priorStatus = sessionIdForPrior
-        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        ? tm.getSession(sessionIdForPrior)?.status
         : undefined;
       const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      const session = tm.getSession(hypothesis.sessionId);
       await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatEliminate(hypothesis, tm));
     } catch (e) {
@@ -294,12 +296,12 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const target = tm.getHypothesis(hypothesisId);
       const sessionIdForPrior = target?.sessionId;
       const priorStatus = sessionIdForPrior
-        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        ? tm.getSession(sessionIdForPrior)?.status
         : undefined;
       const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      const session = tm.getSession(hypothesis.sessionId);
       await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatCorroborate(hypothesis, tm));
     } catch (e) {
@@ -316,12 +318,12 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const target = tm.getHypothesis(hypothesisId);
       const sessionIdForPrior = target?.sessionId;
       const priorStatus = sessionIdForPrior
-        ? tm.getAllSessions().find((s) => s.id === sessionIdForPrior)?.status
+        ? tm.getSession(sessionIdForPrior)?.status
         : undefined;
       const hypothesis = tm.setOutOfScope(hypothesisId, reason);
       const p = getPersistence(hypothesis.sessionId);
       await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getAllSessions().find((s) => s.id === hypothesis.sessionId);
+      const session = tm.getSession(hypothesis.sessionId);
       await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
       return toolResult(fmt.formatSetOutOfScope(hypothesis, tm));
     } catch (e) {
@@ -334,8 +336,11 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
 
   handlers.set('get_tree', async (args) => {
     try {
-      const { format } = schemas.get_tree.parse(args);
-      const state = tm.getTree();
+      const { format, sessionId } = schemas.get_tree.parse(args);
+      if (sessionId && !tm.hasSession(sessionId)) {
+        return toolResult(`No such session: ${sessionId}`, true);
+      }
+      const state = tm.getTree(sessionId);
       if (!state) return toolResult('No open session. Call create_tree to start.');
 
       if (format === 'full') {
@@ -396,14 +401,23 @@ export function registerTools(server: McpServer, tm: TreeManager, getDataDir: ()
 
 // ─── Helpers ───
 
-function renderCompactTree(hypotheses: Map<string, import('./types.js').Hypothesis>, nodeId: string, indent: string): string {
+function renderCompactTree(
+  hypotheses: Map<string, import('./types.js').Hypothesis>,
+  nodeId: string,
+  indent: string,
+  visited: Set<string> = new Set(),
+): string {
   const node = hypotheses.get(nodeId);
   if (!node) return '';
+  // Guard against a children cycle from a corrupt/hand-edited journal so a
+  // get_tree render terminates instead of overflowing the stack.
+  if (visited.has(nodeId)) return `${indent}↺ (cycle)\n`;
+  visited.add(nodeId);
 
   let line = `${indent}${STATUS_ICONS[node.status]} ${node.content}\n`;
 
   for (const childId of node.children) {
-    line += renderCompactTree(hypotheses, childId, indent + '  ');
+    line += renderCompactTree(hypotheses, childId, indent + '  ', visited);
   }
 
   return line;

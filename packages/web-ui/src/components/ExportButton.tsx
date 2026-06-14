@@ -24,11 +24,14 @@ export default function ExportButton({ session, hypotheses }: Props) {
     setShowMenu(false);
   };
 
-  const copyMarkdown = () => {
+  const copyMarkdown = async () => {
     const md = generateMarkdown(session, hypotheses);
+    // writeText returns a Promise that can reject after the sync block exits
+    // (document not focused, permission denied), so await it inside the try —
+    // a sync try/catch would let the rejection escape as an unhandledrejection.
     try {
-      navigator.clipboard?.writeText(md);
-    } catch { /* clipboard unavailable */ }
+      await navigator.clipboard?.writeText(md);
+    } catch { /* clipboard unavailable or write rejected */ }
     setShowMenu(false);
   };
 

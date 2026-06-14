@@ -84,7 +84,9 @@ server.stderr?.on('data', (data: Buffer) => {
 async function send(method: string, params: any): Promise<any> {
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => { pending.delete(id); reject(new Error('Timeout')); }, 10000);
+    // Exceed the shim→daemon tool-call timeout (30s) so the REPL never reports
+    // a failure for a call the server is still committing.
+    const timeout = setTimeout(() => { pending.delete(id); reject(new Error('Timeout')); }, 35000);
     pending.set(id, (resp) => { clearTimeout(timeout); resolve(resp); });
     server.stdin?.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
   });
@@ -93,6 +95,11 @@ async function send(method: string, params: any): Promise<any> {
 async function callTool(name: string, args: Record<string, any>): Promise<{ text: string; data: any; isError: boolean }> {
   if (verbose) console.log(`\n  ──── SENT ────\n  tool: ${name}\n  args: ${JSON.stringify(args)}`);
   const resp = await send('tools/call', { name, arguments: args });
+  // A protocol-level JSON-RPC error has no `result`; surface it as an error
+  // rather than letting handlers read undefined and report false success.
+  if (resp.error) {
+    return { text: resp.error.message ?? JSON.stringify(resp.error), data: null, isError: true };
+  }
   const content = resp.result?.content;
   const text = content?.find((c: any) => c.type === 'text')?.text || '';
   if (verbose) console.log(`  ──── RECEIVED ────\n${text}\n  ────────────────`);
@@ -125,6 +132,9 @@ async function handleCommand(input: string) {
         const result = await callTool('create_tree', { problem });
         if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         currentRootId = result.data?.rootId;
+        // Clear the previous tree's child indices so a bare `0/1/2` no longer
+        // resolves to the old session's children before the new decompose.
+        lastChildIds = [];
         remember(currentRootId);
         console.log(`  ✓ Tree created`);
         console.log(`    Session: ${result.data?.sessionId?.slice(0, 8)}`);
@@ -205,6 +215,7 @@ async function handleCommand(input: string) {
       }
       case 'status': case 's': {
         const result = await callTool('get_status', {});
+        if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         console.log(result.text);
         break;
       }
@@ -273,12 +284,15 @@ function resolveId(input: string | undefined): string | null {
     if (idx >= 0 && idx < lastChildIds.length) return lastChildIds[idx];
     return null;
   }
+  // Server IDs are lowercase uuid-v4; normalize so an uppercase-pasted token
+  // resolves identically to its lowercase form across all remaining paths.
+  const key = input.toLowerCase();
   // Exact match wins outright.
-  if (knownIds.has(input)) return input;
+  if (knownIds.has(key)) return key;
   // Treat the token as a prefix of a known ID (the short form the REPL prints).
   // Unique prefix → resolved; ambiguous → rejected so the user sees a clear
   // message instead of a silent server error.
-  const matches = Array.from(knownIds).filter((id) => id.startsWith(input));
+  const matches = Array.from(knownIds).filter((id) => id.startsWith(key));
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) {
     console.log(`  Ambiguous ID "${input}" matches ${matches.length} hypotheses — type more characters.`);
@@ -286,11 +300,9 @@ function resolveId(input: string | undefined): string | null {
   }
   // An ID-shaped token the REPL never captured (a short prefix copied from the
   // dashboard, or a full UUID from another session) is forwarded to the server
-  // for an authoritative exact-match lookup rather than rejected here. Server
-  // IDs are lowercase uuid-v4 looked up case-sensitively, so normalize first;
-  // require a leading hex digit so a pure-hyphen token isn't treated as an ID.
-  const normalized = input.toLowerCase();
-  if (/^[0-9a-f][0-9a-f-]{7,}$/.test(normalized)) return normalized;
+  // for an authoritative exact-match lookup rather than rejected here. Require
+  // a leading hex digit so a pure-hyphen token isn't treated as an ID.
+  if (/^[0-9a-f][0-9a-f-]{7,}$/.test(key)) return key;
   return null;
 }
 
@@ -311,9 +323,13 @@ async function main() {
   const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: 'tot> ' });
   rl.prompt();
 
-  rl.on('line', async (line) => {
-    await handleCommand(line);
-    rl.prompt();
+  // Serialize commands through a single-flight chain so a fast typist or a
+  // pasted multi-line block runs them strictly in order — each command's
+  // shared state (currentRootId, lastChildIds) is fully updated before the
+  // next reads it, and prompts print in sequence.
+  let chain: Promise<void> = Promise.resolve();
+  rl.on('line', (line) => {
+    chain = chain.then(() => handleCommand(line)).then(() => { rl.prompt(); });
   });
 
   rl.on('close', () => {

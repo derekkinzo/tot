@@ -37,7 +37,7 @@
  * - Inference detection: 2+ keywords (suggests/implies/could/might/possibly/likely)
  */
 
-import { isLive, isTerminal } from './closure.js';
+import { isLive, isOpen, undisposedNodes } from './closure.js';
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
@@ -81,8 +81,9 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   if (!check.hasCatchAll) result += `Note: No catch-all — is anything missing?\n`;
 
   if (check.abstractionMismatch) {
-    const lengths = children.map((c) => c.content.split(/\s+/).length);
-    result += `level-mismatch-advisory: labels range from ${Math.min(...lengths)} to ${Math.max(...lengths)} words — uneven abstraction\n`;
+    // Reuse the engine's word counts so the printed range can never drift from
+    // the boolean that gated it.
+    result += `level-mismatch-advisory: labels range from ${check.minWords} to ${check.maxWords} words — uneven abstraction\n`;
   }
 
   if (check.substringOverlaps.length === 0 && check.childCount >= 2 && !check.abstractionMismatch) {
@@ -161,6 +162,9 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
 
   const siblings = tm.getSiblings(hypothesisId);
   const activeSiblings = siblings.filter((s) => isLive(s.status));
+  // Genuine rivals to discriminate against are still-open (pending/exploring)
+  // siblings — a corroborated sibling is a settled verdict, not a competitor.
+  const openSiblings = siblings.filter((s) => isOpen(s.status));
 
   let result = JSON.stringify({ hypothesisId, evidenceCount: hypothesis.evidence.length }) + '\n\n' +
     `✓ Evidence added to "${truncate(hypothesis.content, 50)}"\n\n`;
@@ -216,13 +220,13 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   }
 
   // Diagnosticity: evidence that doesn't discriminate (Heuer 1999, Popper 1959)
-  if (lastEvidence && lastEvidence.type === 'supports' && activeSiblings.length > 0) {
-    const noSiblingsRefuted = activeSiblings.every((s) => s.evidence.filter((e) => e.type === 'refutes').length === 0);
+  if (lastEvidence && lastEvidence.type === 'supports' && openSiblings.length > 0) {
+    const noSiblingsRefuted = openSiblings.every((s) => s.evidence.filter((e) => e.type === 'refutes').length === 0);
     if (noSiblingsRefuted && hypothesis.evidence.length >= 2) {
-      // Diagnosticity amplification: name a live sibling to make the
-      // discrimination question concrete. The guard above guarantees at least
-      // one surviving rival; any of them serves as the example.
-      const topSibling = activeSiblings[0];
+      // Name an open rival to make the discrimination concrete. openSiblings is
+      // non-empty here, and excludes corroborated siblings (settled verdicts,
+      // not competitors).
+      const topSibling = openSiblings[0];
       result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
     }
   }
@@ -238,8 +242,8 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
 
   // Protocol — with specific named siblings for adversarial questions
   result += `\n── Protocol ──\n`;
-  if (activeSiblings.length > 0 && hypothesis.evidence.length >= 2 && refuting === 0) {
-    const topSibling = activeSiblings[0];
+  if (openSiblings.length > 0 && hypothesis.evidence.length >= 2 && refuting === 0) {
+    const topSibling = openSiblings[0];
     result += `What observation would be TRUE if "${truncate(hypothesis.content, 25)}" but FALSE if "${truncate(topSibling.content, 25)}"?\n`;
   } else if (activeSiblings.length > 1) {
     result += `Does this evidence also bear on sibling hypotheses?\n`;
@@ -255,6 +259,9 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
 export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string {
   const siblings = tm.getSiblings(hypothesis.id);
   const remaining = siblings.filter((s) => isLive(s.status));
+  // Of the live siblings, only the still-open ones are candidates the agent
+  // would corroborate next; a corroborated sibling is already settled.
+  const remainingOpen = siblings.filter((s) => isOpen(s.status));
 
   let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'eliminated' }) + '\n\n' +
     `✓ Eliminated "${truncate(hypothesis.content, 50)}"\n` +
@@ -263,7 +270,7 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   result += `── Signals ──\n`;
   result += `Remaining: ${remaining.length} (${remaining.map((r) => truncate(r.content, 25)).join(', ')})\n`;
 
-  if (remaining.length === 1) {
+  if (remaining.length === 1 && remainingOpen.length === 1) {
     result += `\n→ Only 1 hypothesis remains. Before corroborating, apply a SEVERE TEST:\n`;
     result += `  Can you REPRODUCE the outcome by instantiating this cause, or predict a previously unobserved consequence and check it?\n`;
     result += `  Challenge this conclusion from different angles — what could you be missing?\n`;
@@ -311,12 +318,13 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     }
     result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
   } else {
-    // List every still-pending or still-exploring hypothesis session-wide,
-    // not just direct siblings — the agent must dispose of every other
-    // top-level branch before resolution.
-    const open = state ? Array.from(state.hypotheses.values()).filter(
-      (h) => !isTerminal(h.status),
-    ) : [];
+    // List only the open nodes that actually block resolution, matching the
+    // engine's closure walk: nodes under an eliminated/out-of-scope ancestor
+    // are moot and excluded, so the count never overstates what the agent
+    // must still dispose of.
+    const open = state
+      ? undisposedNodes(state.session.rootNodeId, (id) => state.hypotheses.get(id))
+      : [];
     result += `── Resolution pending ──\n`;
     result += `${open.length} hypothes${open.length === 1 ? 'is' : 'es'} still open:\n`;
     for (const h of open) {
@@ -413,7 +421,9 @@ export function formatStatus(tm: TreeManager): string {
 
   const openSessions = tm.getAllSessions().filter((s) => s.status === 'open');
   if (openSessions.length > 1) {
-    result += `\nNote: ${openSessions.length} open sessions. Use get_tree with sessionId to view others.`;
+    const others = openSessions.filter((s) => s.id !== session.id);
+    result += `\nNote: ${openSessions.length} open sessions. View another by passing its full id to get_tree(sessionId): ` +
+      others.map((s) => s.id).join(', ');
   }
 
   return result;
