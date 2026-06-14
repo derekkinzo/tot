@@ -199,6 +199,7 @@ async function handleCommand(input: string) {
       case 'tree': case 't': {
         const format = parts[1] || 'compact';
         const result = await callTool('get_tree', { format });
+        if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         console.log(result.text);
         break;
       }
@@ -208,7 +209,9 @@ async function handleCommand(input: string) {
         break;
       }
       case 'validate': case 'v': {
-        const id = resolveId(parts[1]) || currentRootId;
+        // No argument defaults to the root; an explicit but unresolvable token
+        // bails rather than silently validating the root in its place.
+        const id = parts[1] ? resolveId(parts[1]) : currentRootId;
         if (!id) { console.log('  Usage: validate <id|.>'); break; }
         const result = await callTool('validate_decomposition', { parentId: id });
         console.log(result.text);
@@ -261,11 +264,11 @@ function resolveId(input: string | undefined): string | null {
   if (input === '.') return currentRootId;
   // A bare index (0,1,2...) selects from the most recent decompose's children.
   // Reserve this only for short, purely-numeric tokens — a full UUID can start
-  // with digits but is never a 1-2 digit integer.
+  // with digits but is never a 1-2 digit integer. Out of range falls through
+  // to prefix matching, so an all-digit ID prefix can still resolve.
   if (/^\d{1,2}$/.test(input)) {
     const idx = parseInt(input, 10);
     if (idx >= 0 && idx < lastChildIds.length) return lastChildIds[idx];
-    return null;
   }
   // Exact match wins outright.
   if (knownIds.has(input)) return input;
@@ -278,9 +281,10 @@ function resolveId(input: string | undefined): string | null {
     console.log(`  Ambiguous ID "${input}" matches ${matches.length} hypotheses — type more characters.`);
     return null;
   }
-  // A full UUID the REPL never captured (e.g. copied from the dashboard) is
-  // still passed through for the server to validate.
-  if (input.length >= 32) return input;
+  // An ID-shaped token the REPL never captured (a short prefix copied from the
+  // dashboard, or a full UUID from another session) is forwarded to the server
+  // for an authoritative exact-match lookup rather than rejected here.
+  if (/^[0-9a-f-]{8,}$/i.test(input)) return input;
   return null;
 }
 

@@ -512,7 +512,7 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Returns a summary of the active session: counts, stagnation state, unexplored branches, and best lead.
+   * Returns a summary of the active session: counts, stagnation state, and unexplored branches.
    * @returns Status object (session is null if no active session exists)
    */
   getStatus(): {
