@@ -7,12 +7,31 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
-import { loadActiveSessions, scanSessions } from '../src/persistence.js';
+import { scanSessions, loadSession } from '../src/persistence.js';
+import type { Session, Hypothesis } from '../src/types.js';
 
 function parseResult(result: any): any {
   const text = result.content?.find((c: any) => c.type === 'text')?.text;
   if (!text) return null;
   try { return JSON.parse(text.split('\n')[0]); } catch { return { raw: text }; }
+}
+
+/**
+ * Loads every session and its hypotheses by composing the production loaders
+ * (scanSessions to enumerate, loadSession to replay each), so these tests
+ * exercise the same code paths the daemon uses rather than a test-only loader.
+ */
+function loadAllSessions(dataDir: string): { sessions: Session[]; hypotheses: Hypothesis[] } {
+  const sessions: Session[] = [];
+  const hypotheses: Hypothesis[] = [];
+  for (const idx of scanSessions(dataDir)) {
+    const loaded = loadSession(idx.filePath);
+    if (loaded) {
+      sessions.push(loaded.session);
+      hypotheses.push(...loaded.hypotheses);
+    }
+  }
+  return { sessions, hypotheses };
 }
 
 describe('Persistence Roundtrip', () => {
@@ -67,7 +86,7 @@ describe('Persistence Roundtrip', () => {
     await cleanup1();
 
     // Session 2: restart and verify state is restored
-    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    const { sessions, hypotheses } = loadAllSessions(tempDir);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe(sessionId);
     expect(sessions[0].problem).toBe('Persistent problem');
@@ -127,21 +146,21 @@ describe('Persistence Roundtrip', () => {
     require('fs').writeFileSync(filePath, corrupted);
 
     // Should load without throwing
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe(sessionId);
   });
 
   it('empty directory results in no sessions', () => {
     const emptyDir = mkdtempSync(join(tmpdir(), 'tot-empty-'));
-    const { sessions, hypotheses } = loadActiveSessions(emptyDir);
+    const { sessions, hypotheses } = loadAllSessions(emptyDir);
     expect(sessions).toHaveLength(0);
     expect(hypotheses).toHaveLength(0);
     rmSync(emptyDir, { recursive: true, force: true });
   });
 
   it('non-existent directory results in no sessions', () => {
-    const { sessions, hypotheses } = loadActiveSessions('/tmp/definitely-not-a-real-path-xyz');
+    const { sessions, hypotheses } = loadAllSessions('/tmp/definitely-not-a-real-path-xyz');
     expect(sessions).toHaveLength(0);
     expect(hypotheses).toHaveLength(0);
   });
@@ -223,7 +242,7 @@ describe('Persistence Roundtrip', () => {
     const filePath = join(tempDir, `${sessionId}.jsonl`);
     writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
-    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    const { sessions, hypotheses } = loadAllSessions(tempDir);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe(sessionId);
     const root = hypotheses.find((h) => h.id === rootId);
@@ -256,7 +275,7 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: childIds[1], reason: 'aside' } });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('abandoned');
     const index = scanSessions(tempDir);
     expect(index[0].status).toBe('abandoned');
@@ -287,7 +306,7 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: decompA.childIds[1], reason: 'aside' } });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('abandoned');
     const index = scanSessions(tempDir);
     expect(index[0].status).toBe('abandoned');
@@ -309,7 +328,7 @@ describe('Persistence Roundtrip', () => {
     });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('abandoned');
     const index = scanSessions(tempDir);
     expect(index[0].status).toBe('abandoned');
@@ -331,7 +350,7 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('resolved');
   });
 
@@ -350,7 +369,7 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: childIds[1], reason: 'aside' } });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('resolved');
   });
 
@@ -386,7 +405,7 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[1], type: 'refutes', content: 'counter-instance' } });
     await cleanup();
 
-    const { sessions, hypotheses } = loadActiveSessions(tempDir);
+    const { sessions, hypotheses } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('open');
     const a2 = hypotheses.find((h) => h.id === decompA1.childIds[1]);
     const a = hypotheses.find((h) => h.id === decompA.childIds[0]);
@@ -432,7 +451,7 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'refutes', content: 'counter-instance' } });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('open');
   });
 
@@ -454,7 +473,7 @@ describe('Persistence Roundtrip', () => {
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'counter-instance' } });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('open');
   });
 
@@ -501,7 +520,7 @@ describe('Persistence Roundtrip', () => {
     });
     await cleanup();
 
-    const { sessions } = loadActiveSessions(tempDir);
+    const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('resolved');
   });
 });

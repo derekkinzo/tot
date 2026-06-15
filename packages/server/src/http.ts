@@ -52,6 +52,17 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
   const subscribedManagers = new Map<string, TreeManager>();
   const subscribedListeners = new Map<string, (event: TreeEvent) => void>();
 
+  // Single chokepoint for removing an SSE client from whichever collection
+  // holds it. Fires onSseDisconnect exactly once — only when the delete truly
+  // removed an entry — so the connect/disconnect count stays balanced whether
+  // a client is reaped by a keepalive write failure or by the req 'close'
+  // event (whichever happens first; the second call is a no-op).
+  function dropClient(client: ServerResponse, from: Set<ServerResponse> | Map<ServerResponse, unknown>): void {
+    if (from.delete(client)) {
+      ctx.onSseDisconnect();
+    }
+  }
+
   // Subscribe to tree events for all registered (and future) projects
   function subscribeProject(state: ProjectState): void {
     const { projectDir, tm } = state;
@@ -131,7 +142,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
         try {
           client.write(': keepalive\n\n');
         } catch {
-          clients.delete(client);
+          dropClient(client, clients);
         }
       }
     }
@@ -139,7 +150,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
       try {
         client.write(': keepalive\n\n');
       } catch {
-        waitingClients.delete(client);
+        dropClient(client, waitingClients);
       }
     }
   }, 30_000).unref();
@@ -160,7 +171,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
 
     if (url.pathname === '/sse') {
       setCorsHeaders(res);
-      handleSSE(req, res, url, ctx, sseClients, waitingClients);
+      handleSSE(req, res, url, ctx, sseClients, waitingClients, dropClient);
       return;
     }
 
@@ -189,7 +200,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
     }
 
     // Static file serving
-    await serveStatic(req, res, url);
+    await serveStatic(req, res);
   });
 
   return new Promise<number>((resolve, reject) => {
@@ -232,6 +243,7 @@ function handleSSE(
   ctx: MultiProjectContext,
   sseClients: Map<string, Set<ServerResponse>>,
   waitingClients: Map<ServerResponse, string | null>,
+  dropClient: (client: ServerResponse, from: Set<ServerResponse> | Map<ServerResponse, unknown>) => void,
 ): void {
   const project = resolveProject(url, ctx);
   if (!project) {
@@ -245,7 +257,7 @@ function handleSSE(
     // the flush only binds it to that project, never an unrelated one.
     waitingClients.set(res, url.searchParams.get('project'));
     ctx.onSseConnect();
-    req.on('close', () => { waitingClients.delete(res); ctx.onSseDisconnect(); });
+    req.on('close', () => dropClient(res, waitingClients));
     return;
   }
 
@@ -277,8 +289,8 @@ function handleSSE(
   ctx.onSseConnect();
 
   req.on('close', () => {
-    sseClients.get(projectDir)?.delete(res);
-    ctx.onSseDisconnect();
+    const clients = sseClients.get(projectDir);
+    if (clients) dropClient(res, clients);
   });
 }
 
@@ -430,7 +442,7 @@ function handleInfoAPI(res: ServerResponse, ctx: MultiProjectContext): void {
   }));
 }
 
-async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!existsSync(STATIC_DIR)) {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end('<html><body><h1>tot-mcp</h1><p>Web UI not built yet. Run <code>npm run build</code> in packages/web-ui.</p></body></html>');
