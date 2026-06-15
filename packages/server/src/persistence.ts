@@ -45,41 +45,6 @@ export class Persistence {
   }
 }
 
-export function loadActiveSessions(dataDir: string): { sessions: Session[]; hypotheses: Hypothesis[] } {
-  if (!existsSync(dataDir)) return { sessions: [], hypotheses: [] };
-
-  const sessions: Session[] = [];
-  const hypotheses: Hypothesis[] = [];
-
-  let files: string[];
-  try {
-    files = readdirSync(dataDir).filter((f) => f.endsWith('.jsonl'));
-  } catch {
-    return { sessions: [], hypotheses: [] };
-  }
-
-  for (const file of files) {
-    const filePath = join(dataDir, file);
-    try {
-      const content = readFileSync(filePath, 'utf-8');
-      const lines = content.split('\n').filter((l) => l.trim());
-
-      for (const line of lines) {
-        try {
-          const entry: JournalEntry = JSON.parse(line);
-          replayEntry(entry, sessions, hypotheses);
-        } catch {
-          console.error(`[tot-mcp] Warning: skipping corrupt JSONL line in ${file}`);
-        }
-      }
-    } catch (err) {
-      console.error(`[tot-mcp] Warning: failed to read ${file}: ${err}`);
-    }
-  }
-
-  return { sessions, hypotheses };
-}
-
 /**
  * Scans session files and returns lightweight metadata without replaying events.
  * Reads only the first line (session-created event) + counts lines for nodeCount estimate.

@@ -77,11 +77,14 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
           verdict === 'corroborated' ? '#052e1620' :
           verdict === 'out-of-scope' ? '#1f1b3a20' :
           '#1c1f26';
+        // Falls back to the raw verdict if a malformed/legacy record carries a
+        // value outside the label map (TS types are erased at the wire boundary).
+        const verdictLabel = STATUS_LABELS[verdict] ?? verdict;
         const label = !isHistorical
-          ? (STATUS_LABELS[verdict] ?? verdict)
+          ? verdictLabel
           : supersededBy === 'descendant'
             ? `Reopened (refuted descendant)`
-            : `Reopened from ${STATUS_LABELS[verdict] ?? verdict}`;
+            : `Reopened from ${verdictLabel}`;
         return (
           <div style={{
             padding: '14px 16px',
