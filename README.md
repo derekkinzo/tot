@@ -159,22 +159,6 @@ The browser UI at `localhost:6274` shows:
 - **Follow mode** — auto-tracks agent activity (press F to toggle)
 - **Export** — download tree as Markdown
 
-## Architecture
-
-A global daemon process serves all projects:
-
-```
-MCP Client (Claude, Kiro, Cursor) → shim (stdio) → daemon (TCP IPC) → TreeManager
-                                                    ↓
-Browser (localhost:6274) ← SSE events ← HTTP server ←┘
-```
-
-- **One port** (6274) for all projects — no port hunting
-- **Shim** auto-starts daemon on first use
-- **Daemon** survives agent disconnect (browser stays connected)
-- **JSONL persistence** in `{project}/.tot/sessions/`
-- **Offline viewing**: run the daemon directly with `node <cli.js> serve`
-
 ## CLI
 
 The build emits a single executable. Manual-clone path:
