@@ -11,20 +11,18 @@
  * reloads its trees from disk, and repos stay free of a per-project .tot dir.
  */
 
-import { resolve, join } from 'node:path';
-import { unlinkSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { TreeManager } from './tree-manager.js';
-import { scanSessions, loadSession, type SessionIndex } from './persistence.js';
+import { scanSessions, loadSession, pickActiveSession } from './persistence.js';
 import { registerTools } from './tools.js';
 import { registerPrompts } from './prompts.js';
 import { startHttpServer, type MultiProjectContext } from './http.js';
 import { makeLock } from './mutex.js';
-import { atomicWrite } from './storage-paths.js';
 import { getCentralSessionsDir, writeProjectMeta } from './central-storage.js';
 import { migrateLegacySessions } from './legacy-migration.js';
-import { STAGNATION_THRESHOLD_DEFAULT } from './defaults.js';
+import { STAGNATION_THRESHOLD_DEFAULT, SHUTDOWN_DEADLINE_MS } from './defaults.js';
 import type { ProjectState } from './project-state.js';
 
 /** A running per-session server: the engine, dashboard URL, and teardown. */
@@ -36,17 +34,8 @@ export interface SessionServer {
   port: number | null;
   /** `http://localhost:<port>`, or null if the HTTP server failed to start. */
   dashboardUrl: string | null;
-  /** Stop the HTTP server and remove the per-session .port hint. Idempotent. */
+  /** Flush the journal and stop the HTTP server. Idempotent; safe to call concurrently. */
   close: () => Promise<void>;
-}
-
-/** Most-recently-open session id, else most-recent overall, else undefined. */
-function pickActiveSessionId(index: SessionIndex[]): string | undefined {
-  if (index.length === 0) return undefined;
-  const sorted = [...index].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
-  return (sorted.find((s) => s.status === 'open') ?? sorted[0]).id;
 }
 
 /**
@@ -72,11 +61,8 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
 
   // Lazy index; eager-load only the most-recent-open (else most-recent) session.
   const sessionIndex = scanSessions(dataDir);
-  if (sessionIndex.length > 0) {
-    const sorted = [...sessionIndex].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    );
-    const target = sorted.find((s) => s.status === 'open') ?? sorted[0];
+  const target = pickActiveSession(sessionIndex);
+  if (target) {
     const loaded = loadSession(target.filePath);
     if (loaded) tm.loadState([loaded.session], loaded.hypotheses);
   }
@@ -101,20 +87,24 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   // tool response — this process is the only one that knows its ephemeral port.
   let dashboardUrl: string | null = null;
 
-  const server = new McpServer({ name: 'tot-mcp', version: '0.1.0' });
-  const { drainAll } = registerTools(server, tm, () => dataDir, () => dashboardUrl);
-  registerPrompts(server);
-
   const projectState: ProjectState = {
     projectDir,
     dataDir,
     tm,
-    handlers: new Map(),
     sessionIndex,
     ensureSessionLoaded,
-    lastAccessTime: Date.now(),
     persistenceHealthy: true,
   };
+
+  const server = new McpServer({ name: 'tot-mcp', version: '0.1.0' });
+  const { drainAll } = registerTools(server, tm, () => dataDir, {
+    getDashboardUrl: () => dashboardUrl,
+    // A failed journal append flips the project's health flag, surfaced via
+    // /api/info so the dashboard can show that writes are not landing.
+    onPersistenceError: () => { projectState.persistenceHealthy = false; },
+  });
+  registerPrompts(server);
+
   const ctx: MultiProjectContext = {
     getProject: (d) => (d === projectDir ? projectState : undefined),
     getAllProjects: () => [projectState],
@@ -126,37 +116,34 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
 
   let port: number | null = null;
   let httpClose: (() => Promise<void>) | null = null;
-  let portFile: string | null = null;
   try {
     const handle = await startHttpServer(0, ctx);
     port = handle.port;
     httpClose = handle.close;
     dashboardUrl = `http://localhost:${port}`;
-
-    // Best-effort hint for external tooling reconnecting to an existing
-    // project. The authoritative URL is the get_status tool response (above);
-    // this file is only written when a session already exists at startup, and
-    // is per-session so concurrent same-project agents do not clobber it.
-    const sid = pickActiveSessionId(sessionIndex);
-    if (sid) {
-      portFile = join(dataDir, `${sid}.port`);
-      try { atomicWrite(portFile, String(port)); } catch { portFile = null; }
-    }
   } catch (err) {
     // MCP still boots without visualization; dashboardUrl stays null so no
-    // Visualization line is advertised.
+    // Visualization line is advertised. The authoritative dashboard URL is the
+    // get_status tool response (this process is the only one that knows its
+    // ephemeral port).
     console.error('[tot-mcp] HTTP visualization disabled:', (err as Error).message);
   }
 
-  let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
-    // Flush any enqueued journal appends before tearing down, so a shutdown
-    // mid-write does not lose an acknowledged mutation.
-    await drainAll();
-    if (portFile) { try { unlinkSync(portFile); } catch { /* best-effort */ } }
-    if (httpClose) await httpClose();
+  // Single-flight teardown: the first call runs the drain+close sequence and
+  // every later call awaits that same promise, so concurrent shutdown triggers
+  // (stdin end/close, a signal) can never let one return early and exit the
+  // process while the journal drain from another is still in flight.
+  let closing: Promise<void> | null = null;
+  const close = (): Promise<void> => {
+    if (!closing) {
+      closing = (async () => {
+        // Flush enqueued journal appends before tearing down, so a shutdown
+        // mid-write does not lose an acknowledged mutation.
+        await drainAll();
+        if (httpClose) await httpClose();
+      })();
+    }
+    return closing;
   };
 
   return { server, projectDir, dataDir, port, dashboardUrl, close };
@@ -169,7 +156,15 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
 export async function startServer(projectDirArg?: string): Promise<void> {
   const session = await createSessionServer({ projectDir: projectDirArg });
 
+  // session.close() is single-flight, so repeated triggers coalesce onto one
+  // drain+teardown. A deadline bounds a stalled drain/close (e.g. a wedged
+  // filesystem) so the process always exits rather than lingering.
+  let exiting = false;
   const shutdown = (code: number) => {
+    if (exiting) return;
+    exiting = true;
+    const deadline = setTimeout(() => process.exit(code), SHUTDOWN_DEADLINE_MS);
+    deadline.unref();
     void session.close().finally(() => process.exit(code));
   };
 
@@ -178,7 +173,7 @@ export async function startServer(projectDirArg?: string): Promise<void> {
 
   process.stdin.on('end', () => shutdown(0));
   process.stdin.on('close', () => shutdown(0));
-  for (const sig of ['SIGTERM', 'SIGINT', 'SIGPIPE'] as const) {
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
     process.on(sig, () => shutdown(0));
   }
 }

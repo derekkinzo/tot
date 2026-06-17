@@ -46,6 +46,20 @@ export class Persistence {
 }
 
 /**
+ * Picks the "active" session from a scanned index: the most recently created
+ * open session, falling back to the most recent overall. Returns undefined for
+ * an empty index. This is the single definition of which session a fresh server
+ * eager-loads and which the CLI/status reports as current.
+ */
+export function pickActiveSession(index: SessionIndex[]): SessionIndex | undefined {
+  if (index.length === 0) return undefined;
+  const sorted = [...index].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+  return sorted.find((s) => s.status === 'open') ?? sorted[0];
+}
+
+/**
  * Scans session files and returns lightweight metadata without replaying events.
  * Reads only the first line (session-created event) + counts lines for nodeCount estimate.
  */

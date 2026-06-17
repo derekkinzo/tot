@@ -600,7 +600,7 @@ describe('MCP Integration', () => {
       // A per-session server knows its own ephemeral port and surfaces it here.
       const tm2 = new TreeManager({ stagnationThreshold: 4 });
       const server2 = new McpServer({ name: 'tot-mcp-test-url', version: '0.1.0' });
-      registerTools(server2, tm2, () => '/tmp/tot-test', () => 'http://localhost:12345');
+      registerTools(server2, tm2, () => '/tmp/tot-test', { getDashboardUrl: () => 'http://localhost:12345' });
       const client2 = new Client({ name: 'c2', version: '1.0.0' }, { capabilities: {} });
       const [ct, st] = InMemoryTransport.createLinkedPair();
       await Promise.all([client2.connect(ct), server2.connect(st)]);

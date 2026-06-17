@@ -32,21 +32,30 @@ export function getCentralSessionsDir(projectDir: string): string {
 /**
  * Records the real project path alongside its hash so a future cross-project
  * listing can display human-readable paths. Atomic (temp + rename); idempotent.
+ * Best-effort: meta.json is non-essential, so any failure is logged and
+ * swallowed rather than aborting server startup.
  */
 export function writeProjectMeta(projectDir: string): void {
-  const dir = getCentralProjectDir(projectDir);
-  mkdirSync(dir, { recursive: true });
-  const metaPath = join(dir, 'meta.json');
   const absPath = resolve(projectDir);
-  if (existsSync(metaPath)) {
-    try {
-      const existing = JSON.parse(readFileSync(metaPath, 'utf-8'));
-      if (existing.projectDir === absPath) return; // unchanged
-    } catch {
-      // fall through to rewrite a corrupt meta
+  try {
+    const dir = getCentralProjectDir(projectDir);
+    mkdirSync(dir, { recursive: true });
+    const metaPath = join(dir, 'meta.json');
+    if (existsSync(metaPath)) {
+      try {
+        const existing: unknown = JSON.parse(readFileSync(metaPath, 'utf-8'));
+        if (typeof existing === 'object' && existing !== null
+          && (existing as { projectDir?: unknown }).projectDir === absPath) {
+          return; // unchanged
+        }
+      } catch {
+        // fall through to rewrite a corrupt or non-object meta
+      }
     }
+    const tmp = metaPath + '.tmp';
+    writeFileSync(tmp, JSON.stringify({ projectDir: absPath }, null, 2));
+    renameSync(tmp, metaPath);
+  } catch (err) {
+    console.error(`[tot-mcp] Warning: failed to write project meta: ${err}`);
   }
-  const tmp = metaPath + '.tmp';
-  writeFileSync(tmp, JSON.stringify({ projectDir: absPath }, null, 2));
-  renameSync(tmp, metaPath);
 }

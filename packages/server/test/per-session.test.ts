@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -61,6 +61,43 @@ describe('per-session server', () => {
     expect(s.dashboardUrl).toBe(`http://localhost:${s.port}`);
   });
 
+  it('close() is idempotent and the port stops accepting connections afterward', async () => {
+    const s = await createSessionServer({ projectDir: projectDir });
+    const port = s.port!;
+    // Concurrent + repeated close() must all resolve (single-flight), not hang
+    // or double-tear-down.
+    await Promise.all([s.close(), s.close()]);
+    await s.close();
+    // The HTTP server is down: a fetch to the old port now fails to connect.
+    await expect(fetch(`http://localhost:${port}/api/info`)).rejects.toThrow();
+  });
+
+  it('flips persistenceHealthy via onPersistenceError when a journal append fails', async () => {
+    // A failed JSONL append must surface through onPersistenceError so the
+    // dashboard's /api/info can report the project as unhealthy.
+    const projForFail = mkdtempSync(join(tmpdir(), 'tot-projfail-'));
+    const s = await createSessionServer({ projectDir: projForFail });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+
+    // Make the sessions dir read-only so appendFile (creating <sid>.jsonl)
+    // fails with EACCES — the dir already exists, so Persistence's mkdirSync
+    // is a no-op and the failure lands on the append, not construction.
+    mkdirSync(s.dataDir, { recursive: true });
+    chmodSync(s.dataDir, 0o555);
+    try {
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'health probe' } });
+
+      const info = await (await fetch(`http://localhost:${s.port}/api/info`)).json();
+      const proj = info.projects.find((p: any) => p.dir === s.projectDir);
+      expect(proj?.persistenceHealthy).toBe(false);
+    } finally {
+      chmodSync(s.dataDir, 0o755); // restore so afterEach cleanup can remove it
+      rmSync(projForFail, { recursive: true, force: true });
+    }
+  });
+
   it('two servers for the same project bind different ephemeral ports', async () => {
     const a = await start();
     const b = await start();
@@ -110,22 +147,6 @@ describe('per-session server', () => {
 
     const full = JSON.parse(getText(await c2.callTool({ name: 'get_tree', arguments: { format: 'full' } })));
     expect(full.session.id).toBe(sessionId);
-  });
-
-  it('writes a <sessionId>.port hint once a session exists at startup', async () => {
-    // Seed a journal so a session exists before the second server boots.
-    const s1 = await start();
-    const c1 = await connect(s1);
-    const { sessionId } = parseResult(
-      await c1.callTool({ name: 'create_tree', arguments: { problem: 'Port hint' } }),
-    );
-    await c1.close();
-    await s1.close();
-
-    const s2 = await start();
-    const portFile = join(getCentralSessionsDir(projectDir), `${sessionId}.port`);
-    expect(existsSync(portFile)).toBe(true);
-    expect(readFileSync(portFile, 'utf-8').trim()).toBe(String(s2.port));
   });
 
   it('migrates legacy {projectDir}/.tot/sessions journals into central storage on startup (non-destructive)', async () => {

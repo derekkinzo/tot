@@ -337,10 +337,16 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
  * @param server - The MCP server instance to register tools on
  * @param tm - TreeManager for hypothesis state
  * @param getDataDir - Thunk returning the persistence directory
- * @param getDashboardUrl - Optional thunk returning the live dashboard URL, surfaced in get_status
+ * @param opts.getDashboardUrl - Optional thunk returning the live dashboard URL, surfaced in get_status
+ * @param opts.onPersistenceError - Optional callback fired when a journal append fails
  */
-export function registerTools(server: McpServer, tm: TreeManager, getDataDir: () => string, getDashboardUrl?: () => string | null): { drainAll: () => Promise<void> } {
-  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, undefined, getDashboardUrl);
+export function registerTools(
+  server: McpServer,
+  tm: TreeManager,
+  getDataDir: () => string,
+  opts: { getDashboardUrl?: () => string | null; onPersistenceError?: (err: Error) => void } = {},
+): { drainAll: () => Promise<void> } {
+  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl);
 
   for (const [name, schema] of Object.entries(TOOL_SCHEMAS)) {
     const handler = handlers.get(name)!;

@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
-import { hashProjectDir, getCentralProjectDir, getCentralSessionsDir } from '../src/central-storage.js';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { hashProjectDir, getCentralProjectDir, getCentralSessionsDir, writeProjectMeta } from '../src/central-storage.js';
 import { getTotDir } from '../src/storage-paths.js';
 
 const savedEnv = { ...process.env };
@@ -60,5 +62,50 @@ describe('central-storage', () => {
 
     process.env['TOT_DATA_DIR'] = '/custom/state';
     expect(getTotDir()).toBe('/custom/state');
+  });
+});
+
+describe('writeProjectMeta', () => {
+  let root: string;
+  const savedEnv = { ...process.env };
+
+  afterEach(() => {
+    if (root) rmSync(root, { recursive: true, force: true });
+    if (savedEnv['TOT_DATA_DIR'] === undefined) delete process.env['TOT_DATA_DIR'];
+    else process.env['TOT_DATA_DIR'] = savedEnv['TOT_DATA_DIR'];
+  });
+
+  it('writes meta.json recording the resolved project path', () => {
+    root = mkdtempSync(join(tmpdir(), 'tot-meta-'));
+    process.env['TOT_DATA_DIR'] = root;
+    const project = '/home/alice/widget';
+    writeProjectMeta(project);
+    const meta = JSON.parse(readFileSync(join(getCentralProjectDir(project), 'meta.json'), 'utf-8'));
+    expect(meta.projectDir).toBe(resolve(project));
+  });
+
+  it('rewrites a meta.json whose JSON parses to a non-object instead of crashing', () => {
+    root = mkdtempSync(join(tmpdir(), 'tot-meta-'));
+    process.env['TOT_DATA_DIR'] = root;
+    const project = '/home/alice/widget';
+    const dir = getCentralProjectDir(project);
+    mkdirSync(dir, { recursive: true });
+    // A bare JSON primitive: parses without throwing but has no .projectDir.
+    writeFileSync(join(dir, 'meta.json'), 'null');
+
+    expect(() => writeProjectMeta(project)).not.toThrow();
+    const meta = JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf-8'));
+    expect(meta.projectDir).toBe(resolve(project));
+  });
+
+  it('is idempotent: a second call with an unchanged path leaves meta.json intact', () => {
+    root = mkdtempSync(join(tmpdir(), 'tot-meta-'));
+    process.env['TOT_DATA_DIR'] = root;
+    const project = '/home/alice/widget';
+    writeProjectMeta(project);
+    const path = join(getCentralProjectDir(project), 'meta.json');
+    const first = readFileSync(path, 'utf-8');
+    writeProjectMeta(project);
+    expect(readFileSync(path, 'utf-8')).toBe(first);
   });
 });

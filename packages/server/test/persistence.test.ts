@@ -7,7 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
-import { scanSessions, loadSession } from '../src/persistence.js';
+import { scanSessions, loadSession, pickActiveSession, type SessionIndex } from '../src/persistence.js';
 import type { Session, Hypothesis } from '../src/types.js';
 
 function parseResult(result: any): any {
@@ -594,4 +594,33 @@ describe('Persistence Roundtrip', () => {
     ]);
   });
 
+});
+
+describe('pickActiveSession', () => {
+  const idx = (over: Partial<SessionIndex>): SessionIndex => ({
+    id: 'id', problem: 'p', status: 'open', createdAt: '2024-01-01T00:00:00.000Z',
+    filePath: '/x.jsonl', nodeCount: 1, ...over,
+  });
+
+  it('returns undefined for an empty index', () => {
+    expect(pickActiveSession([])).toBeUndefined();
+  });
+
+  it('prefers the most recently created OPEN session over a newer terminal one', () => {
+    const oldOpen = idx({ id: 'old-open', status: 'open', createdAt: '2024-01-01T00:00:00.000Z' });
+    const newResolved = idx({ id: 'new-resolved', status: 'resolved', createdAt: '2024-06-01T00:00:00.000Z' });
+    expect(pickActiveSession([newResolved, oldOpen])?.id).toBe('old-open');
+  });
+
+  it('among multiple open sessions, picks the most recently created', () => {
+    const a = idx({ id: 'a', status: 'open', createdAt: '2024-01-01T00:00:00.000Z' });
+    const b = idx({ id: 'b', status: 'open', createdAt: '2024-03-01T00:00:00.000Z' });
+    expect(pickActiveSession([a, b])?.id).toBe('b');
+  });
+
+  it('falls back to the most recent overall when no session is open', () => {
+    const older = idx({ id: 'older', status: 'resolved', createdAt: '2024-01-01T00:00:00.000Z' });
+    const newer = idx({ id: 'newer', status: 'abandoned', createdAt: '2024-09-01T00:00:00.000Z' });
+    expect(pickActiveSession([older, newer])?.id).toBe('newer');
+  });
 });

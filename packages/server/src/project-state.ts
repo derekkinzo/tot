@@ -1,19 +1,16 @@
 import type { TreeManager } from './tree-manager.js';
-import type { ToolHandler } from './tools.js';
 import type { SessionIndex } from './persistence.js';
 
 /**
- * In-memory state for one project's tree: the engine, its tool handlers, a
- * lightweight session index, and a lazy session loader. Shared by the HTTP
- * layer (which reads it to serve the dashboard) and the server host.
+ * In-memory state for one project's tree: the engine, a lightweight session
+ * index, a lazy session loader, and a persistence-health flag. Read by the HTTP
+ * layer to serve the dashboard and its /api endpoints.
  */
 export interface ProjectState {
   projectDir: string;
   dataDir: string;
   tm: TreeManager;
-  handlers: Map<string, ToolHandler>;
   sessionIndex: SessionIndex[];
   ensureSessionLoaded: (sessionId: string) => boolean;
-  lastAccessTime: number;
   persistenceHealthy: boolean;
 }

@@ -146,6 +146,11 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
         port: boundPort,
         close: () => new Promise<void>((res) => {
           clearInterval(keepaliveTimer);
+          // SSE responses are long-lived keep-alive streams; server.close()
+          // only fires its callback once every connection ends, so without
+          // forcibly closing them an open dashboard tab would hang shutdown
+          // (and block process exit) indefinitely.
+          server.closeAllConnections();
           server.close(() => res());
         }),
       });
