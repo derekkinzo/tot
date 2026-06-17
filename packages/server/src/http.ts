@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
 import type { ProjectState } from './project-state.js';
+import { SseHub } from './sse-hub.js';
 
 /** Most recently created active session, falling back to the most recent overall. */
 function pickDefaultSession(tm: TreeManager): Session | null {
@@ -37,123 +38,39 @@ function setCorsHeaders(res: ServerResponse): void {
  * Start the HTTP server for multi-project visualization.
  * Returns the actual port the server is listening on.
  */
+/** Builds the snapshot event for a project's default session (null if no session). */
+function snapshotEvent(tm: TreeManager): TreeEvent {
+  const session = pickDefaultSession(tm);
+  if (!session) return { type: 'snapshot', session: null as any, hypotheses: [] };
+  const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
+  return { type: 'snapshot', session, hypotheses };
+}
+
 export async function startHttpServer(port: number, ctx: MultiProjectContext): Promise<number> {
-  // Track SSE clients per project
-  const sseClients = new Map<string, Set<ServerResponse>>(); // projectDir → clients
-  const eventCounters = new Map<string, number>(); // projectDir → eventId
-  // Clients connected before their project existed. The value is the project
-  // they requested via ?project= (null = no preference), so the flush only
-  // binds a client to the project it actually wanted.
-  const waitingClients = new Map<ServerResponse, string | null>();
-  // The TreeManager instance currently subscribed per project. After an LRU
-  // eviction the daemon rebuilds a project with a fresh TreeManager; tracking
-  // the instance lets ensureSubscribed detect the swap and re-wire the listener
-  // (a projectDir-only check would wrongly treat the stale entry as live).
-  const subscribedManagers = new Map<string, TreeManager>();
-  const subscribedListeners = new Map<string, (event: TreeEvent) => void>();
+  const hub = new SseHub(ctx.onSseConnect, ctx.onSseDisconnect);
 
-  // Single chokepoint for removing an SSE client from whichever collection
-  // holds it. Fires onSseDisconnect exactly once — only when the delete truly
-  // removed an entry — so the connect/disconnect count stays balanced whether
-  // a client is reaped by a keepalive write failure or by the req 'close'
-  // event (whichever happens first; the second call is a no-op).
-  function dropClient(client: ServerResponse, from: Set<ServerResponse> | Map<ServerResponse, unknown>): void {
-    if (from.delete(client)) {
-      ctx.onSseDisconnect();
-    }
-  }
-
-  // Subscribe to tree events for all registered (and future) projects
+  // Subscribe a project (or re-subscribe after its TreeManager is replaced).
   function subscribeProject(state: ProjectState): void {
-    const { projectDir, tm } = state;
-    if (!sseClients.has(projectDir)) {
-      sseClients.set(projectDir, new Set());
-      eventCounters.set(projectDir, 0);
-    }
-    // Remove a listener bound to a previous (evicted) manager so it can be GC'd
-    // and stops firing into a stale closure.
-    const priorTm = subscribedManagers.get(projectDir);
-    const priorListener = subscribedListeners.get(projectDir);
-    if (priorTm && priorListener && priorTm !== tm) {
-      priorTm.removeListener('event', priorListener);
-    }
-
-    const listener = (event: TreeEvent) => {
-      // Flush waiting clients onto this project — but only those that did not
-      // ask for a *different* project. A client that named another project via
-      // ?project= stays waiting until its own project fires/registers, so it
-      // is never bound to the wrong tree.
-      if (waitingClients.size > 0) {
-        const clients = sseClients.get(projectDir)!;
-        for (const [wc, requested] of waitingClients) {
-          if (requested && requested !== projectDir) continue;
-          clients.add(wc);
-          waitingClients.delete(wc);
-          const session = pickDefaultSession(tm);
-          if (session) {
-            const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
-            const snapshot: TreeEvent = { type: 'snapshot', session, hypotheses };
-            try { wc.write(`id: 0\ndata: ${JSON.stringify(snapshot)}\n\n`); } catch { clients.delete(wc); }
-          }
-        }
-      }
-
-      const clients = sseClients.get(projectDir);
-      if (!clients || clients.size === 0) return;
-
-      const counter = (eventCounters.get(projectDir) || 0) + 1;
-      eventCounters.set(projectDir, counter);
-
-      const data = `id: ${counter}\ndata: ${JSON.stringify(event)}\n\n`;
-      for (const client of clients) {
-        try {
-          client.write(data);
-        } catch {
-          clients.delete(client);
-        }
-      }
-    };
-
-    tm.on('event', listener);
-    subscribedManagers.set(projectDir, tm);
-    subscribedListeners.set(projectDir, listener);
+    hub.subscribeProject(state.projectDir, state.tm, () => snapshotEvent(state.tm));
   }
 
-  // Subscribe existing projects and set up a poll for new ones
   for (const state of ctx.getAllProjects()) {
     subscribeProject(state);
   }
 
-  // Check for new projects every time a request comes in (lightweight). Also
-  // re-subscribe a project whose TreeManager was replaced (LRU eviction then
-  // reload builds a fresh instance) so its live events keep reaching clients.
+  // On each request, (re)subscribe any project whose TreeManager instance is
+  // not the one currently wired — catches newly-registered and reloaded
+  // (LRU-evicted then rebuilt) projects so their live events keep flowing.
   function ensureSubscribed(): void {
     for (const state of ctx.getAllProjects()) {
-      if (subscribedManagers.get(state.projectDir) !== state.tm) {
+      if (!hub.isSubscribed(state.projectDir, state.tm)) {
         subscribeProject(state);
       }
     }
   }
 
-  // SSE keepalive every 30s
-  setInterval(() => {
-    for (const [, clients] of sseClients) {
-      for (const client of clients) {
-        try {
-          client.write(': keepalive\n\n');
-        } catch {
-          dropClient(client, clients);
-        }
-      }
-    }
-    for (const client of waitingClients.keys()) {
-      try {
-        client.write(': keepalive\n\n');
-      } catch {
-        dropClient(client, waitingClients);
-      }
-    }
-  }, 30_000).unref();
+  const keepaliveTimer = setInterval(() => hub.keepalive(), 30_000);
+  keepaliveTimer.unref();
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
@@ -171,7 +88,7 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
 
     if (url.pathname === '/sse') {
       setCorsHeaders(res);
-      handleSSE(req, res, url, ctx, sseClients, waitingClients, dropClient);
+      handleSSE(req, res, url, ctx, hub);
       return;
     }
 
@@ -236,62 +153,37 @@ function resolveProject(url: URL, ctx: MultiProjectContext): ProjectState | null
   return all.length > 0 ? all[0] : null;
 }
 
-function handleSSE(
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  ctx: MultiProjectContext,
-  sseClients: Map<string, Set<ServerResponse>>,
-  waitingClients: Map<ServerResponse, string | null>,
-  dropClient: (client: ServerResponse, from: Set<ServerResponse> | Map<ServerResponse, unknown>) => void,
-): void {
-  const project = resolveProject(url, ctx);
-  if (!project) {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    });
-    res.flushHeaders();
-    // No project yet — record which project (if any) this client asked for so
-    // the flush only binds it to that project, never an unrelated one.
-    waitingClients.set(res, url.searchParams.get('project'));
-    ctx.onSseConnect();
-    req.on('close', () => dropClient(res, waitingClients));
-    return;
-  }
-
-  const { projectDir, tm } = project;
-
+function writeSseHeaders(res: ServerResponse): void {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
   });
   res.flushHeaders();
+}
 
-  // Send initial snapshot.
-  const session = pickDefaultSession(tm);
-  if (session) {
-    const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
-    const snapshot: TreeEvent = { type: 'snapshot', session, hypotheses };
-    res.write(`id: 0\ndata: ${JSON.stringify(snapshot)}\n\n`);
-  } else {
-    const empty: TreeEvent = { type: 'snapshot', session: null as any, hypotheses: [] };
-    res.write(`id: 0\ndata: ${JSON.stringify(empty)}\n\n`);
+function handleSSE(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  ctx: MultiProjectContext,
+  hub: SseHub,
+): void {
+  writeSseHeaders(res);
+
+  const project = resolveProject(url, ctx);
+  if (!project) {
+    // No project yet — park the client, recording which project (if any) it
+    // asked for so a later flush binds it only to that project.
+    hub.addWaiting(res, url.searchParams.get('project'));
+    req.on('close', () => hub.removeClient(res));
+    return;
   }
 
-  // Register client for this project
-  if (!sseClients.has(projectDir)) {
-    sseClients.set(projectDir, new Set());
-  }
-  sseClients.get(projectDir)!.add(res);
-  ctx.onSseConnect();
-
-  req.on('close', () => {
-    const clients = sseClients.get(projectDir);
-    if (clients) dropClient(res, clients);
-  });
+  // Send the initial snapshot, then register for live events on this project.
+  res.write(`id: 0\ndata: ${JSON.stringify(snapshotEvent(project.tm))}\n\n`);
+  hub.addClient(res, project.projectDir);
+  req.on('close', () => hub.removeClient(res));
 }
 
 async function handleStateAPI(res: ServerResponse, url: URL, ctx: MultiProjectContext): Promise<void> {
