@@ -34,10 +34,12 @@ function setCorsHeaders(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 }
 
-/**
- * Start the HTTP server for multi-project visualization.
- * Returns the actual port the server is listening on.
- */
+/** A running visualization server: the bound port and a teardown handle. */
+export interface HttpServerHandle {
+  port: number;
+  close: () => Promise<void>;
+}
+
 /** Builds the snapshot event for a project's default session (null if no session). */
 function snapshotEvent(tm: TreeManager): TreeEvent {
   const session = pickDefaultSession(tm);
@@ -46,7 +48,11 @@ function snapshotEvent(tm: TreeManager): TreeEvent {
   return { type: 'snapshot', session, hypotheses };
 }
 
-export async function startHttpServer(port: number, ctx: MultiProjectContext): Promise<number> {
+/**
+ * Start the HTTP visualization server. Pass port 0 for an OS-assigned
+ * ephemeral port; the bound port is returned in the resolved handle.
+ */
+export async function startHttpServer(port: number, ctx: MultiProjectContext): Promise<HttpServerHandle> {
   const hub = new SseHub(ctx.onSseConnect, ctx.onSseDisconnect);
 
   // Subscribe a project (or re-subscribe after its TreeManager is replaced).
@@ -120,19 +126,29 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
     await serveStatic(req, res);
   });
 
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<HttpServerHandle>((resolve, reject) => {
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         console.error(`[tot-mcp] Warning: port ${port} in use, HTTP visualization disabled`);
       } else {
         console.error(`[tot-mcp] HTTP error: ${err.message}`);
       }
+      clearInterval(keepaliveTimer);
       reject(err);
     });
 
+    // listen(0) lets the OS assign a free port; read the bound port back from
+    // address() so the caller can advertise the real URL.
     server.listen(port, 'localhost', () => {
-      console.error(`[tot-mcp] Visualization: http://localhost:${port}`);
-      resolve(port);
+      const boundPort = (server.address() as import('node:net').AddressInfo).port;
+      console.error(`[tot-mcp] Visualization: http://localhost:${boundPort}`);
+      resolve({
+        port: boundPort,
+        close: () => new Promise<void>((res) => {
+          clearInterval(keepaliveTimer);
+          server.close(() => res());
+        }),
+      });
     });
   });
 }

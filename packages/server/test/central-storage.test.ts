@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { hashProjectDir, getCentralProjectDir, getCentralSessionsDir } from '../src/central-storage.js';
-import { getTotDir } from '../src/daemon-lifecycle.js';
+import { getTotDir } from '../src/storage-paths.js';
 
 const savedEnv = { ...process.env };
 afterEach(() => {

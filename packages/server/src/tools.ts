@@ -15,13 +15,12 @@ export interface ToolSchema {
   schema: Record<string, any>;
 }
 
-// ─── Tool Schemas (shared between shim and daemon) ───
+// ─── Tool Schemas ───
 
 /**
- * Canonical tool definitions shared between two execution paths:
- * - The shim uses these for MCP tool discovery (listTools)
- * - The daemon uses them to validate args and dispatch handlers
- * This single source of truth prevents schema drift between the two.
+ * Canonical tool definitions: descriptions and Zod input schemas used both for
+ * MCP tool discovery (listTools) and to validate args before dispatch. A single
+ * source of truth so discovery and validation cannot drift apart.
  */
 export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   create_tree: {
@@ -135,7 +134,7 @@ const schemas = {
   }),
 };
 
-// ─── Tool Handlers (used by daemon directly) ───
+// ─── Tool Handlers ───
 
 /**
  * Creates the map of tool name to handler function.

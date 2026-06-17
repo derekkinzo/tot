@@ -586,8 +586,8 @@ export class TreeManager extends EventEmitter {
    *
    * Does NOT emit events. This is intentional: events are for live mutations
    * only. SSE handles initial state via snapshot-on-connect (the browser
-   * receives full state when it connects to /sse). This method is called by
-   * the daemon at startup before any client connections exist.
+   * receives full state when it connects to /sse). This runs at server startup,
+   * before any client connections exist.
    */
   loadState(sessions: Session[], hypotheses: Hypothesis[]): void {
     for (const s of sessions) {

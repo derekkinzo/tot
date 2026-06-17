@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { writeFileSync, renameSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
-import { getTotDir } from './daemon-lifecycle.js';
+import { getTotDir } from './storage-paths.js';
 
 /**
  * Stable directory key for a project: the first 16 hex chars of
