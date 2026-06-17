@@ -12,11 +12,13 @@
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { TreeManager } from './tree-manager.js';
-import { scanSessions, loadSession, type SessionIndex } from './persistence.js';
+import { scanSessions, loadSession } from './persistence.js';
 import { startHttpServer } from './http.js';
-import { getToolHandlers, type ToolHandler } from './tools.js';
+import { getToolHandlers } from './tools.js';
 import { getTotDir, writeDaemonFiles, cleanup } from './daemon-lifecycle.js';
 import { encode, createLineParser, type ShimToDaemon, type DaemonToShim } from './ipc-protocol.js';
+import { makeLock, type Lock } from './mutex.js';
+import type { ProjectState } from './project-state.js';
 import { HTTP_PORT_DEFAULT, MAX_LOADED_PROJECTS, SHUTDOWN_DEADLINE_MS } from './defaults.js';
 
 const parsedHttpPort = parseInt(process.env['TOT_PORT'] || '', 10);
@@ -30,35 +32,17 @@ if (!httpPortValid && process.env['TOT_PORT']) {
 
 // ─── Per-project state ───
 
-export interface ProjectState {
-  projectDir: string;
-  dataDir: string;
-  tm: TreeManager;
-  handlers: Map<string, ToolHandler>;
-  sessionIndex: SessionIndex[];
-  ensureSessionLoaded: (sessionId: string) => boolean;
-  lastAccessTime: number;
-  persistenceHealthy: boolean;
-}
-
 const projectManagers = new Map<string, ProjectState>();
 
-const projectLocks = new Map<string, Promise<void>>();
+const projectLocks = new Map<string, Lock>();
 
 export function withProjectLock<T>(projectDir: string, fn: () => Promise<T>): Promise<T> {
-  const prev = projectLocks.get(projectDir) ?? Promise.resolve();
-  let release: () => void;
-  const next = new Promise<void>((r) => { release = r; });
-  projectLocks.set(projectDir, next);
-  return prev.then(fn).finally(() => {
-    release!();
-    // Self-prune only when this tail is still the latest: a newer caller may
-    // have chained on after us. This keeps the Map from growing without
-    // dropping an in-flight chain (eviction must NOT delete locks eagerly).
-    if (projectLocks.get(projectDir) === next) {
-      projectLocks.delete(projectDir);
-    }
-  });
+  let lock = projectLocks.get(projectDir);
+  if (!lock) {
+    lock = makeLock();
+    projectLocks.set(projectDir, lock);
+  }
+  return lock(fn);
 }
 
 /** Most recently active project (used as default for HTTP/SSE when no project specified) */

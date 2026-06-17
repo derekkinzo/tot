@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
-import type { ProjectState } from './daemon.js';
+import type { ProjectState } from './project-state.js';
 
 /** Most recently created active session, falling back to the most recent overall. */
 function pickDefaultSession(tm: TreeManager): Session | null {
