@@ -1,79 +1,6 @@
 import { useEffect, useCallback, useReducer, useRef, useState } from 'react';
-import type { Evidence, Hypothesis, Session, TreeEvent } from '../types';
-
-interface TreeState {
-  session: Session | null;
-  hypotheses: Map<string, Hypothesis>;
-  connected: boolean;
-  recentlyChanged: Set<string>;
-  lastAddedId: string | null;
-}
-
-type Action =
-  | { type: 'connected' }
-  | { type: 'disconnected' }
-  | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] }
-  | { type: 'hypothesis-added'; hypothesis: Hypothesis }
-  | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
-  | { type: 'clear-recent' }
-  | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
-  | { type: 'session-created'; session: Session }
-  | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
-  | { type: 'session-reopened'; sessionId: string };
-
-function reducer(state: TreeState, action: Action): TreeState {
-  switch (action.type) {
-    case 'connected':
-      return { ...state, connected: true };
-    case 'disconnected':
-      return { ...state, connected: false };
-    case 'snapshot': {
-      const map = new Map<string, Hypothesis>();
-      for (const h of action.hypotheses) map.set(h.id, h);
-      return { ...state, session: action.session, hypotheses: map, connected: state.connected, recentlyChanged: new Set(), lastAddedId: null };
-    }
-    case 'session-created':
-      return { ...state, session: action.session };
-    case 'hypothesis-added': {
-      const next = new Map(state.hypotheses);
-      next.set(action.hypothesis.id, action.hypothesis);
-      return { ...state, hypotheses: next, lastAddedId: action.hypothesis.id };
-    }
-    case 'hypothesis-updated': {
-      const next = new Map(state.hypotheses);
-      next.set(action.hypothesis.id, action.hypothesis);
-      // Re-append on re-update so the most-recently-changed id is always last
-      // (a plain Set.add keeps the original insertion position). Follow mode
-      // reads the last entry to focus the node that just changed.
-      const recent = new Set(state.recentlyChanged);
-      recent.delete(action.hypothesis.id);
-      recent.add(action.hypothesis.id);
-      return { ...state, hypotheses: next, recentlyChanged: recent };
-    }
-    case 'evidence-added': {
-      const h = state.hypotheses.get(action.hypothesisId);
-      if (!h) return state;
-      const updated = { ...h, evidence: [...h.evidence, action.evidence] };
-      const next = new Map(state.hypotheses);
-      next.set(h.id, updated);
-      return { ...state, hypotheses: next };
-    }
-    case 'session-completed': {
-      if (!state.session || state.session.id !== action.sessionId) return state;
-      return { ...state, session: { ...state.session, status: action.terminalStatus } };
-    }
-    case 'session-reopened': {
-      if (!state.session || state.session.id !== action.sessionId) return state;
-      const next = { ...state.session, status: 'open' as const };
-      delete next.completedAt;
-      return { ...state, session: next };
-    }
-    case 'clear-recent':
-      return { ...state, recentlyChanged: new Set(), lastAddedId: null };
-    default:
-      return state;
-  }
-}
+import type { TreeEvent } from '../types';
+import { reducer, initialTreeState } from './treeReducer';
 
 export interface ProjectInfo {
   dir: string;
@@ -82,14 +9,7 @@ export interface ProjectInfo {
 }
 
 export function useTreeStream(projectDir?: string) {
-  const initialState: TreeState = {
-    session: null,
-    hypotheses: new Map(),
-    connected: false,
-    recentlyChanged: new Set<string>(),
-    lastAddedId: null,
-  };
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, undefined, initialTreeState);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [currentProject, setCurrentProject] = useState<string>(projectDir || '');
   const esRef = useRef<EventSource | null>(null);
