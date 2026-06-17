@@ -20,10 +20,12 @@ export interface DaemonInfo {
 }
 
 /**
- * Returns the global daemon state directory.
- * Uses $XDG_STATE_HOME/tot/ if set, otherwise ~/.tot/.
+ * Returns the tot state root directory.
+ * Precedence: $TOT_DATA_DIR (explicit override) > $XDG_STATE_HOME/tot > ~/.tot.
  */
 export function getTotDir(): string {
+  const override = process.env['TOT_DATA_DIR'];
+  if (override) return override;
   const xdg = process.env['XDG_STATE_HOME'];
   if (xdg) return join(xdg, 'tot');
   return join(homedir(), '.tot');
