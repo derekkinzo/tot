@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useReducer, useRef } from 'react';
+import { useEffect, useCallback, useReducer, useRef, useState } from 'react';
 import type { TreeEvent } from '../types';
 import { reducer, initialTreeState } from './treeReducer';
 
@@ -10,8 +10,25 @@ import { reducer, initialTreeState } from './treeReducer';
  */
 export function useTreeStream() {
   const [state, dispatch] = useReducer(reducer, undefined, initialTreeState);
+  const [persistenceHealthy, setPersistenceHealthy] = useState(true);
   const esRef = useRef<EventSource | null>(null);
   const connectionGenRef = useRef(0);
+
+  // Poll the server's persistence health so the dashboard can warn the user
+  // when journal writes are failing (disk full / permissions) and their tree
+  // is not being saved.
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      fetch('/api/info')
+        .then((r) => r.json())
+        .then((d) => { if (!cancelled) setPersistenceHealthy(d.persistenceHealthy !== false); })
+        .catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   // Clear recently changed after animation duration
   useEffect(() => {
@@ -51,6 +68,9 @@ export function useTreeStream() {
         // without a page reload.
         if (es.readyState === EventSource.CLOSED) {
           es.close();
+          // Clear any prior pending reconnect so repeated CLOSED errors cannot
+          // stack timers and race two EventSources open.
+          if (retryTimer) clearTimeout(retryTimer);
           retryTimer = setTimeout(connect, backoff);
           backoff = Math.min(backoff * 2, 30_000);
         }
@@ -108,5 +128,5 @@ export function useTreeStream() {
     } catch {}
   }, []);
 
-  return { ...state, loadSession };
+  return { ...state, loadSession, persistenceHealthy };
 }

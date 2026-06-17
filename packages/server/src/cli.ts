@@ -60,9 +60,14 @@ export function statusLines(): string[] {
   }
 
   lines.push(`Sessions: ${sessions.length}`);
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  // Open sessions first (then most-recent), so the truncated list always shows
+  // any still-open session — the SessionStart hook greps this output for one.
+  const sorted = [...sessions].sort((a, b) => {
+    const aOpen = a.status === 'open' ? 0 : 1;
+    const bOpen = b.status === 'open' ? 0 : 1;
+    if (aOpen !== bOpen) return aOpen - bOpen;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
   for (const s of sorted.slice(0, 5)) {
     const icon = s.status === 'open' ? '*' : s.status === 'resolved' ? '+' : '-';
     lines.push(`  [${icon}] ${s.id.slice(0, 8)} "${s.problem.slice(0, 50)}" (${s.nodeCount} nodes)`);

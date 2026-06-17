@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLI=\"${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js\"; [ -f \"$CLI\" ] && node \"$CLI\" status 2>/dev/null | grep -q '^\\s*\\[\\*\\]' && echo '[tot-mcp] Active reasoning session detected. Use /tot-inspect to view or /tot-reason to continue.' || true"
+            "command": "CLI=\"${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js\"; [ -f \"$CLI\" ] && node \"$CLI\" status 2>/dev/null | grep -qE '^[[:space:]]*\\[\\*\\]' && echo '[tot-mcp] Active reasoning session detected. Use /tot-inspect to view or /tot-reason to continue.' || true"
           }
         ]
       }

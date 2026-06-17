@@ -6,7 +6,7 @@ import DetailPanel from './components/DetailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
-  const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId } = useTreeStream();
+  const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId, persistenceHealthy } = useTreeStream();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { followMode, followTarget, toggleFollow } = useFollowMode({
@@ -46,6 +46,15 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%' }}>
+      {!persistenceHealthy && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2000,
+          background: '#7f1d1d', color: '#fecaca', textAlign: 'center',
+          padding: '6px 12px', fontSize: 13,
+        }}>
+          ⚠ Saving failed — this tree is not being written to disk. Check the server logs and disk space.
+        </div>
+      )}
       <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
         {hypotheses.size > 0 ? (
           <ErrorBoundary>

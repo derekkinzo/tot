@@ -5,14 +5,12 @@ import { existsSync } from 'node:fs';
 import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
 import type { ProjectState } from './project-state.js';
+import { pickActiveSession } from './persistence.js';
 import { SseHub } from './sse-hub.js';
 
-/** Most recently created active session, falling back to the most recent overall. */
+/** Most recently created open session, falling back to the most recent overall. */
 function pickDefaultSession(tm: TreeManager): Session | null {
-  const sessions = tm.getAllSessions().sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-  return sessions.find((s) => s.status === 'open') ?? sessions[0] ?? null;
+  return pickActiveSession(tm.getAllSessions()) ?? null;
 }
 
 /** Runs `fn` under the project's read/mutate mutex. */
@@ -37,7 +35,7 @@ export interface HttpServerHandle {
 /** Builds the snapshot event for a project's default session (null if no session). */
 function snapshotEvent(tm: TreeManager): TreeEvent {
   const session = pickDefaultSession(tm);
-  if (!session) return { type: 'snapshot', session: null as any, hypotheses: [] };
+  if (!session) return { type: 'snapshot', session: null, hypotheses: [] };
   const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
   return { type: 'snapshot', session, hypotheses };
 }
@@ -55,7 +53,7 @@ export async function startHttpServer(
   onSseDisconnect: () => void,
 ): Promise<HttpServerHandle> {
   const hub = new SseHub(onSseConnect, onSseDisconnect);
-  hub.subscribe(project.tm, () => snapshotEvent(project.tm));
+  hub.subscribe(project.tm);
 
   const keepaliveTimer = setInterval(() => hub.keepalive(), 30_000);
   keepaliveTimer.unref();

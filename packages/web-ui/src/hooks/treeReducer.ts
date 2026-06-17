@@ -15,7 +15,7 @@ export interface TreeState {
 export type Action =
   | { type: 'connected' }
   | { type: 'disconnected' }
-  | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] }
+  | { type: 'snapshot'; session: Session | null; hypotheses: Hypothesis[] }
   | { type: 'hypothesis-added'; hypothesis: Hypothesis }
   | { type: 'hypothesis-updated'; hypothesis: Hypothesis }
   | { type: 'clear-recent' }

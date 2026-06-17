@@ -23,7 +23,7 @@ describe('SseHub', () => {
   it('delivers subsequent broadcasts to a registered client', () => {
     const hub = new SseHub(() => {}, () => {});
     const tm = new EventEmitter();
-    hub.subscribe(tm, () => null);
+    hub.subscribe(tm);
     const c = fakeClient();
     hub.addClient(c);
     tm.emit('event', ev('a'));
@@ -35,7 +35,7 @@ describe('SseHub', () => {
   it('broadcast assigns monotonically increasing event ids', () => {
     const hub = new SseHub(() => {}, () => {});
     const tm = new EventEmitter();
-    hub.subscribe(tm, () => null);
+    hub.subscribe(tm);
     const c = fakeClient();
     hub.addClient(c);
     tm.emit('event', ev('a'));
@@ -48,7 +48,7 @@ describe('SseHub', () => {
     let disconnects = 0;
     const hub = new SseHub(() => {}, () => { disconnects++; });
     const tm = new EventEmitter();
-    hub.subscribe(tm, () => null);
+    hub.subscribe(tm);
     const c = fakeClient();
     hub.addClient(c);
     hub.removeClient(c);
@@ -63,7 +63,7 @@ describe('SseHub', () => {
     let disconnects = 0;
     const hub = new SseHub(() => {}, () => { disconnects++; });
     const tm = new EventEmitter();
-    hub.subscribe(tm, () => null);
+    hub.subscribe(tm);
     const c = fakeClient();
     hub.addClient(c);
     c.failOnce();
@@ -77,7 +77,7 @@ describe('SseHub', () => {
     let disconnects = 0;
     const hub = new SseHub(() => {}, () => { disconnects++; });
     const tm = new EventEmitter();
-    hub.subscribe(tm, () => null);
+    hub.subscribe(tm);
     const c = fakeClient();
     hub.addClient(c);
     c.failOnce();
@@ -90,27 +90,4 @@ describe('SseHub', () => {
     expect(c2.writes.join('')).toContain(': keepalive');
   });
 
-  it('re-subscribing with a new emitter removes the prior listener (no double-fire)', () => {
-    const hub = new SseHub(() => {}, () => {});
-    const tm1 = new EventEmitter();
-    hub.subscribe(tm1, () => null);
-    const c = fakeClient();
-    hub.addClient(c);
-    const tm2 = new EventEmitter();
-    hub.subscribe(tm2, () => null); // swap; client set is preserved
-    tm1.emit('event', ev('old')); // prior emitter must no longer reach the client
-    tm2.emit('event', ev('new'));
-    const joined = c.writes.join('');
-    expect(joined).not.toContain('"sessionId":"old"');
-    expect(joined).toContain('"sessionId":"new"');
-  });
-
-  it('isSubscribed reports whether the given emitter is the current one', () => {
-    const hub = new SseHub(() => {}, () => {});
-    const tm1 = new EventEmitter();
-    const tm2 = new EventEmitter();
-    hub.subscribe(tm1, () => null);
-    expect(hub.isSubscribed(tm1)).toBe(true);
-    expect(hub.isSubscribed(tm2)).toBe(false);
-  });
 });

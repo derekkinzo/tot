@@ -79,12 +79,17 @@ server.stdout?.on('data', (data: Buffer) => {
   }
 });
 
+let stderrBuffer = '';
 server.stderr?.on('data', (data: Buffer) => {
-  const text = data.toString().trim();
-  if (!text) return;
-  const match = /Visualization: (http:\/\/\S+)/.exec(text);
-  if (match) dashboardUrl = match[1];
-  console.log(`  [server] ${text}`);
+  stderrBuffer += data.toString();
+  const lines = stderrBuffer.split('\n');
+  stderrBuffer = lines.pop() || '';
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const match = /Visualization: (http:\/\/\S+)/.exec(line);
+    if (match) dashboardUrl = match[1];
+    console.log(`  [server] ${line}`);
+  }
 });
 
 async function send(method: string, params: any): Promise<any> {

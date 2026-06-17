@@ -46,14 +46,15 @@ export class Persistence {
 }
 
 /**
- * Picks the "active" session from a scanned index: the most recently created
- * open session, falling back to the most recent overall. Returns undefined for
- * an empty index. This is the single definition of which session a fresh server
- * eager-loads and which the CLI/status reports as current.
+ * Picks the "active" entry from a set of sessions: the most recently created
+ * open one, falling back to the most recent overall; undefined when empty.
+ * Generic over anything carrying a status + createdAt, so the server's eager
+ * load (SessionIndex), the dashboard default (Session), and `status` all share
+ * one definition of "which session is current".
  */
-export function pickActiveSession(index: SessionIndex[]): SessionIndex | undefined {
-  if (index.length === 0) return undefined;
-  const sorted = [...index].sort(
+export function pickActiveSession<T extends { status: string; createdAt: string }>(items: T[]): T | undefined {
+  if (items.length === 0) return undefined;
+  const sorted = [...items].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
   return sorted.find((s) => s.status === 'open') ?? sorted[0];
