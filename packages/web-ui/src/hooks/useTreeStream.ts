@@ -24,9 +24,9 @@ export function useTreeStream(projectDir?: string) {
   }, [state.recentlyChanged, state.lastAddedId]);
 
   // Fetch projects list. If the requested project (e.g. from a URL
-  // parameter) is not yet registered with the daemon — typically when
+  // parameter) is not yet registered with the server — typically when
   // a fresh session has not made any MCP tool calls — fall back to the
-  // daemon's last-active project so the dashboard isn't stuck on an
+  // server's active project so the dashboard isn't stuck on an
   // empty SSE stream.
   const refreshProjects = useCallback(() => {
     fetch('/api/projects')
@@ -79,7 +79,7 @@ export function useTreeStream(projectDir?: string) {
         if (connectionGenRef.current !== gen) return;
         dispatch({ type: 'disconnected' });
         // EventSource auto-reconnects while the connection stays in CONNECTING;
-        // once it gives up (CLOSED, e.g. the daemon went away) drive a manual
+        // once it gives up (CLOSED, e.g. the server went away) drive a manual
         // reconnect with bounded exponential backoff so the dashboard recovers
         // without a page reload.
         if (es.readyState === EventSource.CLOSED) {

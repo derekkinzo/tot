@@ -23,9 +23,11 @@ View and interpret the current hypothesis tree state.
 
 4. If there are multiple sessions, list them and ask which to inspect.
 
-5. Remind the user that the visualization is live at `http://localhost:6274`:
+5. Remind the user that the live visualization is available — the
+   `get_status` response ends with a `Visualization: http://localhost:<port>`
+   line (each session has its own port). Open it (or run `/tot-dashboard`) to:
    - Click nodes to see evidence details
-   - Use Sessions dropdown to switch between historical sessions
+   - Use Sessions dropdown to switch between this project's sessions
    - Status bar shows counts by status
 
 ## Interpreting the Tree

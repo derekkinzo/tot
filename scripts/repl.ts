@@ -6,7 +6,7 @@
  * The browser visualization updates in real-time as you issue commands.
  *
  * Usage: npx tsx scripts/repl.ts
- * Then open: http://localhost:6274
+ * The server prints its dashboard URL on startup; the banner echoes it.
  *
  * Commands:
  *   create <problem>              - Create a new tree
@@ -30,21 +30,24 @@ import { rmSync } from 'node:fs';
 const SERVER_PATH = join(process.cwd(), 'packages/server/dist/cli.js');
 let verbose = false; // Toggle with 'verbose' command
 
-// Clean previous REPL state
-rmSync(join(process.cwd(), '.tot-repl'), { recursive: true, force: true });
+// Isolate REPL state in a throwaway directory so a session never touches the
+// developer's real ~/.tot trees.
+const DATA_DIR = join(process.cwd(), '.tot-repl');
+rmSync(DATA_DIR, { recursive: true, force: true });
 
-// Start server (shim → daemon chain)
-const GLOBAL_DIR = join(process.cwd(), '.tot-repl');
+// Start the per-session server; it picks its own ephemeral dashboard port.
 const server = spawn('node', [SERVER_PATH], {
   stdio: ['pipe', 'pipe', 'pipe'],
   env: {
     ...process.env,
     CLAUDE_PROJECT_DIR: process.cwd(),
-    TOT_GLOBAL_DIR: GLOBAL_DIR,
-    TOT_PORT: '6274',
-    TOT_IDLE_TIMEOUT: '300000', // 5min for REPL testing
+    TOT_DATA_DIR: DATA_DIR,
   },
 });
+
+// The server logs `Visualization: http://localhost:<port>` on startup; capture
+// it so the banner shows the live URL instead of a guessed port.
+let dashboardUrl: string | null = null;
 
 let buffer = '';
 let nextId = 1;
@@ -78,14 +81,17 @@ server.stdout?.on('data', (data: Buffer) => {
 
 server.stderr?.on('data', (data: Buffer) => {
   const text = data.toString().trim();
-  if (text) console.log(`  [server] ${text}`);
+  if (!text) return;
+  const match = /Visualization: (http:\/\/\S+)/.exec(text);
+  if (match) dashboardUrl = match[1];
+  console.log(`  [server] ${text}`);
 });
 
 async function send(method: string, params: any): Promise<any> {
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    // Exceed the shim→daemon tool-call timeout (30s) so the REPL never reports
-    // a failure for a call the server is still committing.
+    // Generous local timeout so the REPL never reports a failure for a call the
+    // in-process server is still committing.
     const timeout = setTimeout(() => { pending.delete(id); reject(new Error('Timeout')); }, 35000);
     pending.set(id, (resp) => { clearTimeout(timeout); resolve(resp); });
     server.stdin?.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
@@ -315,8 +321,8 @@ async function main() {
   console.log('╔══════════════════════════════════════════════╗');
   console.log('║   tot-mcp Interactive REPL                    ║');
   console.log('╠══════════════════════════════════════════════╣');
-  console.log('║   Browser: http://localhost:6274              ║');
-  console.log('║   Type "help" for commands                   ║');
+  console.log(`   Browser: ${dashboardUrl ?? '(starting — see [server] log above)'}`);
+  console.log('   Type "help" for commands');
   console.log('╚══════════════════════════════════════════════╝');
   console.log('');
 

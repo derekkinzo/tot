@@ -86,7 +86,9 @@ Before declaring done:
 
 ## Visualization
 
-The tree is visible in real-time at `http://localhost:6274`. Open it to see:
+The tree is visible in real-time. The `get_status` tool response ends with a
+`Visualization: http://localhost:<port>` line (each session has its own port);
+open that URL, or run `/tot-dashboard`, to see:
 - Color-coded hypothesis statuses (blue=pending, yellow=exploring, red=eliminated, green=corroborated, purple=out-of-scope)
 - Evidence attached to each node
 - Path highlighting from root to selected hypothesis

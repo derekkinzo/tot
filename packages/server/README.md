@@ -7,9 +7,11 @@ For installation, usage, architecture, and research background see the
 
 ## Package layout
 
-- `src/cli.ts` — entry point; dispatches between the MCP shim, the daemon, and CLI subcommands (`status`, `stop`, `serve`)
-- `src/shim.ts` — stdio MCP transport that forwards calls to the daemon over TCP
-- `src/daemon.ts` — long-lived process that owns tree state, serves the dashboard, and accepts multiple shim connections
+- `src/cli.ts` — entry point; starts the per-session server by default, plus the `status` subcommand
+- `src/per-session.ts` — the in-process server: one TreeManager, an MCP stdio transport, and an ephemeral-port HTTP dashboard, all living as long as the stdio connection
+- `src/http.ts` — HTTP visualization server (SSE stream + JSON state API)
+- `src/sse-hub.ts` — SSE client lifecycle (subscription, broadcast, keepalive)
+- `src/central-storage.ts` / `src/storage-paths.ts` — central per-project journal layout under the state root
 - `src/tree-manager.ts` — in-memory tree model and mutators
 - `src/persistence.ts` — append-only JSONL session journal
 - `src/responses.ts` — formats MCP tool responses with structural advisories
@@ -34,9 +36,10 @@ install hook.
 npm test
 ```
 
-Vitest covers the tree manager, persistence (JSONL roundtrips), the daemon
-integration surface, and plugin structure (skills, agents, hooks,
-`.mcp.json`).
+Vitest covers the tree manager, persistence (JSONL roundtrips), the MCP
+integration surface, the per-session server (ephemeral port, central
+storage, reload-from-disk, legacy migration), and plugin structure (skills,
+agents, hooks, `.mcp.json`).
 
 ## License
 
