@@ -2,7 +2,7 @@ import { appendFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { subtreeContainsCorroborated } from './closure.js';
-import type { Evidence, Hypothesis, Session } from './types.js';
+import type { Evidence, Hypothesis, Session, TreeEvent } from './types.js';
 
 // ─── Session Index (lightweight metadata for lazy loading) ───
 
@@ -179,6 +179,44 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
   }
 }
 
+/** A journalable record derived from an engine event: which session's file it
+ *  belongs to, and the {type, payload} to append. */
+export interface JournalRecord {
+  sessionId: string;
+  type: string;
+  payload: unknown;
+}
+
+/**
+ * Maps an engine {@link TreeEvent} to the journal record to persist, or `null`
+ * for events that are not journaled. This is the write-side counterpart to
+ * {@link replayEntry} (the read side) and is kept beside it so the two stay in
+ * lockstep: a journaled type must have a matching replay case.
+ *
+ * `evidence-added` is deliberately NOT journaled. The engine appends the
+ * evidence to the hypothesis before emitting, so the `hypothesis-updated` event
+ * that immediately follows already carries it; recording both would have replay
+ * apply the same evidence twice. `snapshot` is never emitted by the engine.
+ * Each journaled event self-carries its session id, so routing needs no
+ * hypothesis→session lookup.
+ */
+export function journalEventToEntry(event: TreeEvent): JournalRecord | null {
+  switch (event.type) {
+    case 'session-created':
+      return { sessionId: event.session.id, type: event.type, payload: event.session };
+    case 'hypothesis-added':
+    case 'hypothesis-updated':
+      return { sessionId: event.hypothesis.sessionId, type: event.type, payload: event.hypothesis };
+    case 'session-completed':
+      return { sessionId: event.sessionId, type: event.type, payload: { sessionId: event.sessionId, terminalStatus: event.terminalStatus } };
+    case 'session-reopened':
+      return { sessionId: event.sessionId, type: event.type, payload: { sessionId: event.sessionId } };
+    case 'evidence-added':
+    case 'snapshot':
+      return null;
+  }
+}
+
 function replayEntry(
   entry: JournalEntry,
   sessions: Session[],
@@ -201,10 +239,10 @@ function replayEntry(
       break;
     }
     case 'evidence-added': {
-      // The current tool layer persists evidence via the full hypothesis-updated
-      // snapshot, not a discrete evidence-added entry, so this branch does not
-      // fire on journals written today. It is retained so a journal that does
-      // carry the SSE-mirrored evidence-added event still replays correctly.
+      // journalEventToEntry never writes evidence-added — the hypothesis-updated
+      // snapshot that follows it already carries the evidence — so this branch
+      // does not fire on journals written today. It is retained so a legacy or
+      // hand-authored journal that does carry the event still replays correctly.
       const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
       const h = hypotheses.find((hyp) => hyp.id === hypothesisId);
       if (h) h.evidence.push(evidence);

@@ -102,7 +102,7 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   let dashboardUrl: string | null = null;
 
   const server = new McpServer({ name: 'tot-mcp', version: '0.1.0' });
-  registerTools(server, tm, () => dataDir, () => dashboardUrl);
+  const { drainAll } = registerTools(server, tm, () => dataDir, () => dashboardUrl);
   registerPrompts(server);
 
   const projectState: ProjectState = {
@@ -152,6 +152,9 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   const close = async (): Promise<void> => {
     if (closed) return;
     closed = true;
+    // Flush any enqueued journal appends before tearing down, so a shutdown
+    // mid-write does not lose an acknowledged mutation.
+    await drainAll();
     if (portFile) { try { unlinkSync(portFile); } catch { /* best-effort */ } }
     if (httpClose) await httpClose();
   };

@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { TreeError, type TreeManager } from './tree-manager.js';
 import { Persistence } from './persistence.js';
+import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
 
@@ -136,15 +137,28 @@ const schemas = {
 
 // ─── Tool Handlers ───
 
+/** Tool handlers plus the journal flush handle a host awaits on shutdown. */
+export interface ToolHandlers {
+  handlers: Map<string, ToolHandler>;
+  /** Resolves once every enqueued journal append has settled (for clean shutdown). */
+  drainAll: () => Promise<void>;
+}
+
 /**
  * Creates the map of tool name to handler function.
- * Handlers own persistence (one Persistence instance per session) and
- * format responses via the responses module.
+ *
+ * Journaling is event-sourced: a {@link JournalSink} subscribes to the engine's
+ * event stream (the same stream the SSE layer consumes) and writes each
+ * journaled event to the per-session JSONL file. Handlers do not append by
+ * hand; after invoking an engine mutator (whose events are emitted
+ * synchronously and enqueued by the sink) a mutating handler awaits
+ * `sink.drain(sessionId)` so the write lands before the tool result returns —
+ * the same write-before-acknowledge barrier the former inline appends provided.
+ *
  * @param tm - The TreeManager instance that owns all hypothesis state
  * @param getDataDir - Thunk returning the data directory path (deferred for testability)
- * @returns Map of tool name to async handler
  */
-export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPersistenceError?: (err: Error) => void, getDashboardUrl?: () => string | null): Map<string, ToolHandler> {
+export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPersistenceError?: (err: Error) => void, getDashboardUrl?: () => string | null): ToolHandlers {
   const persistenceMap = new Map<string, Persistence>();
 
   function getPersistence(sessionId: string): Persistence {
@@ -156,29 +170,10 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return p;
   }
 
-  /**
-   * Journals the wire event corresponding to a session-status transition.
-   * 'session-completed' covers both terminal transitions (resolved and
-   * abandoned); 'session-reopened' covers a corroborated leaf returning
-   * to open after refuting evidence. Callers compute the prior status
-   * before the mutation so the helper sees the transition direction.
-   */
-  async function journalSessionTransition(
-    p: Persistence,
-    sessionId: string,
-    priorStatus: 'open' | 'resolved' | 'abandoned' | undefined,
-    nextStatus: 'open' | 'resolved' | 'abandoned' | undefined,
-  ): Promise<void> {
-    if (!nextStatus || nextStatus === priorStatus) return;
-    if (nextStatus === 'resolved' || nextStatus === 'abandoned') {
-      await p.append('session-completed', { sessionId, terminalStatus: nextStatus });
-    } else if (priorStatus !== 'open' && nextStatus === 'open') {
-      // Both terminal states (resolved, abandoned) can transition back to
-      // open via reopen-on-refute on a corroborated leaf; either path
-      // produces the same wire event.
-      await p.append('session-reopened', { sessionId });
-    }
-  }
+  // One sink per TreeManager, subscribed once at construction (before any
+  // handler can run a mutation) so the first session-created is captured.
+  const sink = new JournalSink(getPersistence);
+  sink.subscribe(tm);
 
   function toolResult(text: string, isError = false) {
     return { content: [{ type: 'text' as const, text }], isError };
@@ -190,9 +185,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     try {
       const { problem } = schemas.create_tree.parse(args);
       const { session, root } = tm.createSession(problem);
-      const p = getPersistence(session.id);
-      await p.append('session-created', session);
-      await p.append('hypothesis-added', root);
+      await sink.drain(session.id);
       return toolResult(fmt.formatCreateTree(session.id, root.id, problem));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -207,10 +200,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       const { parentId, children: childContents } = schemas.decompose.parse(args);
       const created = tm.decompose(parentId, childContents);
       const check = tm.validateDecomposition(parentId);
-      const p = getPersistence(created[0].sessionId);
-      for (const child of created) await p.append('hypothesis-added', child);
-      const parent = tm.getHypothesis(parentId)!;
-      await p.append('hypothesis-updated', parent);
+      await sink.drain(created[0].sessionId);
       return toolResult(fmt.formatDecompose(created, check, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -224,10 +214,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     try {
       const { parentId, content } = schemas.add_hypothesis.parse(args);
       const hypothesis = tm.addHypothesis(parentId, content);
-      const p = getPersistence(hypothesis.sessionId);
-      await p.append('hypothesis-added', hypothesis);
-      const parent = tm.getHypothesis(parentId)!;
-      await p.append('hypothesis-updated', parent);
+      await sink.drain(hypothesis.sessionId);
       return toolResult(fmt.formatAddHypothesis(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -240,24 +227,9 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('add_evidence', async (args) => {
     try {
       const { hypothesisId, type, content, source } = schemas.add_evidence.parse(args);
-      const target = tm.getHypothesis(hypothesisId);
-      const sessionIdForPrior = target?.sessionId;
-      const priorStatus = sessionIdForPrior
-        ? tm.getSession(sessionIdForPrior)?.status
-        : undefined;
-      const { demotedAncestors } = tm.addEvidence(hypothesisId, type, content, source);
+      tm.addEvidence(hypothesisId, type, content, source);
       const hypothesis = tm.getHypothesis(hypothesisId)!;
-      const p = getPersistence(hypothesis.sessionId);
-      // Journal append order mirrors engine SSE emit order: target hypothesis,
-      // then session transition, then cascade-demoted ancestors. Replay reads
-      // the journal as a timeline so audit consumers see the same ordering
-      // SSE consumers do.
-      await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getSession(hypothesis.sessionId);
-      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
-      for (const ancestor of demotedAncestors) {
-        await p.append('hypothesis-updated', ancestor);
-      }
+      await sink.drain(hypothesis.sessionId);
       return toolResult(fmt.formatAddEvidence(hypothesisId, hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -270,16 +242,8 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('eliminate_hypothesis', async (args) => {
     try {
       const { hypothesisId, reason, refutingEvidenceIds } = schemas.eliminate_hypothesis.parse(args);
-      const target = tm.getHypothesis(hypothesisId);
-      const sessionIdForPrior = target?.sessionId;
-      const priorStatus = sessionIdForPrior
-        ? tm.getSession(sessionIdForPrior)?.status
-        : undefined;
       const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
-      const p = getPersistence(hypothesis.sessionId);
-      await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getSession(hypothesis.sessionId);
-      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
+      await sink.drain(hypothesis.sessionId);
       return toolResult(fmt.formatEliminate(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -292,16 +256,8 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('corroborate_hypothesis', async (args) => {
     try {
       const { hypothesisId, reason } = schemas.corroborate_hypothesis.parse(args);
-      const target = tm.getHypothesis(hypothesisId);
-      const sessionIdForPrior = target?.sessionId;
-      const priorStatus = sessionIdForPrior
-        ? tm.getSession(sessionIdForPrior)?.status
-        : undefined;
       const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
-      const p = getPersistence(hypothesis.sessionId);
-      await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getSession(hypothesis.sessionId);
-      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
+      await sink.drain(hypothesis.sessionId);
       return toolResult(fmt.formatCorroborate(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -314,16 +270,8 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('set_out_of_scope', async (args) => {
     try {
       const { hypothesisId, reason } = schemas.set_out_of_scope.parse(args);
-      const target = tm.getHypothesis(hypothesisId);
-      const sessionIdForPrior = target?.sessionId;
-      const priorStatus = sessionIdForPrior
-        ? tm.getSession(sessionIdForPrior)?.status
-        : undefined;
       const hypothesis = tm.setOutOfScope(hypothesisId, reason);
-      const p = getPersistence(hypothesis.sessionId);
-      await p.append('hypothesis-updated', hypothesis);
-      const session = tm.getSession(hypothesis.sessionId);
-      await journalSessionTransition(p, hypothesis.sessionId, priorStatus, session?.status);
+      await sink.drain(hypothesis.sessionId);
       return toolResult(fmt.formatSetOutOfScope(hypothesis, tm));
     } catch (e) {
       if (e instanceof z.ZodError) {
@@ -375,21 +323,24 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     }
   });
 
-  return handlers;
+  return { handlers, drainAll: () => sink.drainAll() };
 }
 
 // ─── MCP Registration (wraps getToolHandlers for McpServer) ───
 
 /**
  * Registers all tools on an McpServer instance (for direct in-process MCP usage).
- * Wraps getToolHandlers to bridge between McpServer's registration API and our handler map.
+ * Wraps getToolHandlers to bridge between McpServer's registration API and our
+ * handler map. Returns `drainAll`, which resolves once every enqueued journal
+ * append has settled — a host awaits it on shutdown so no acknowledged
+ * mutation is lost to process exit.
  * @param server - The MCP server instance to register tools on
  * @param tm - TreeManager for hypothesis state
  * @param getDataDir - Thunk returning the persistence directory
  * @param getDashboardUrl - Optional thunk returning the live dashboard URL, surfaced in get_status
  */
-export function registerTools(server: McpServer, tm: TreeManager, getDataDir: () => string, getDashboardUrl?: () => string | null): void {
-  const handlers = getToolHandlers(tm, getDataDir, undefined, getDashboardUrl);
+export function registerTools(server: McpServer, tm: TreeManager, getDataDir: () => string, getDashboardUrl?: () => string | null): { drainAll: () => Promise<void> } {
+  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, undefined, getDashboardUrl);
 
   for (const [name, schema] of Object.entries(TOOL_SCHEMAS)) {
     const handler = handlers.get(name)!;
@@ -397,6 +348,8 @@ export function registerTools(server: McpServer, tm: TreeManager, getDataDir: ()
       return handler(args);
     });
   }
+
+  return { drainAll };
 }
 
 // ─── Helpers ───
