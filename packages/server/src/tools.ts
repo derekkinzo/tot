@@ -152,8 +152,8 @@ export interface ToolHandlers {
  * journaled event to the per-session JSONL file. Handlers do not append by
  * hand; after invoking an engine mutator (whose events are emitted
  * synchronously and enqueued by the sink) a mutating handler awaits
- * `sink.drain(sessionId)` so the write lands before the tool result returns —
- * the same write-before-acknowledge barrier the former inline appends provided.
+ * `sink.drain(sessionId)` so the write lands before the tool result returns
+ * (write-before-acknowledge).
  *
  * @param tm - The TreeManager instance that owns all hypothesis state
  * @param getDataDir - Thunk returning the data directory path (deferred for testability)

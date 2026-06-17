@@ -255,8 +255,9 @@ function replayEntry(
     case 'evidence-added': {
       // journalEventToEntry never writes evidence-added — the hypothesis-updated
       // snapshot that follows it already carries the evidence — so this branch
-      // does not fire on journals written today. It is retained so a legacy or
-      // hand-authored journal that does carry the event still replays correctly.
+      // does not fire on journals this writer produces. It is retained so a
+      // legacy or hand-authored journal that does carry the event still replays
+      // correctly.
       const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
       const h = hypotheses.find((hyp) => hyp.id === hypothesisId);
       if (h) h.evidence.push(evidence);

@@ -23,21 +23,21 @@ describe('SseHub', () => {
   it('delivers subsequent broadcasts to a registered client', () => {
     const hub = new SseHub(() => {}, () => {});
     const tm = new EventEmitter();
-    hub.subscribeProject('/p', tm, () => null);
+    hub.subscribe(tm, () => null);
     const c = fakeClient();
-    hub.addClient(c, '/p');
+    hub.addClient(c);
     tm.emit('event', ev('a'));
     tm.emit('event', ev('b'));
     expect(c.writes.join('')).toContain('"sessionId":"a"');
     expect(c.writes.join('')).toContain('"sessionId":"b"');
   });
 
-  it('broadcast assigns monotonically increasing event ids per project', () => {
+  it('broadcast assigns monotonically increasing event ids', () => {
     const hub = new SseHub(() => {}, () => {});
     const tm = new EventEmitter();
-    hub.subscribeProject('/p', tm, () => null);
+    hub.subscribe(tm, () => null);
     const c = fakeClient();
-    hub.addClient(c, '/p');
+    hub.addClient(c);
     tm.emit('event', ev('a'));
     tm.emit('event', ev('b'));
     const ids = c.writes.map((w: string) => /id: (\d+)/.exec(w)?.[1]).filter(Boolean);
@@ -48,9 +48,9 @@ describe('SseHub', () => {
     let disconnects = 0;
     const hub = new SseHub(() => {}, () => { disconnects++; });
     const tm = new EventEmitter();
-    hub.subscribeProject('/p', tm, () => null);
+    hub.subscribe(tm, () => null);
     const c = fakeClient();
-    hub.addClient(c, '/p');
+    hub.addClient(c);
     hub.removeClient(c);
     hub.removeClient(c); // second call must be a no-op
     expect(disconnects).toBe(1);
@@ -63,9 +63,9 @@ describe('SseHub', () => {
     let disconnects = 0;
     const hub = new SseHub(() => {}, () => { disconnects++; });
     const tm = new EventEmitter();
-    hub.subscribeProject('/p', tm, () => null);
+    hub.subscribe(tm, () => null);
     const c = fakeClient();
-    hub.addClient(c, '/p');
+    hub.addClient(c);
     c.failOnce();
     tm.emit('event', ev('a')); // write throws → client dropped
     expect(disconnects).toBe(1);
@@ -73,35 +73,31 @@ describe('SseHub', () => {
     expect(c.writes.join('')).not.toContain('"sessionId":"b"');
   });
 
-  it('waiting-client flush binds a client only to the project it requested', () => {
-    const hub = new SseHub(() => {}, () => {});
-    const pA = new EventEmitter();
-    const pB = new EventEmitter();
-    hub.subscribeProject('/A', pA, () => null);
-    hub.subscribeProject('/B', pB, () => null);
-    const wantsA = fakeClient();
-    const noPref = fakeClient();
-    hub.addWaiting(wantsA, '/A');
-    hub.addWaiting(noPref, null);
-
-    // Project B fires first: must NOT capture the client that asked for A.
-    pB.emit('event', ev('b1'));
-    expect(noPref.writes.join('')).toContain('"sessionId":"b1"'); // no-preference binds to B
-    expect(wantsA.writes.join('')).not.toContain('"sessionId":"b1"'); // stays waiting
-
-    // Now A fires: the A-requester binds and receives A's events.
-    pA.emit('event', ev('a1'));
-    expect(wantsA.writes.join('')).toContain('"sessionId":"a1"');
+  it('keepalive reaps a client whose write fails', () => {
+    let disconnects = 0;
+    const hub = new SseHub(() => {}, () => { disconnects++; });
+    const tm = new EventEmitter();
+    hub.subscribe(tm, () => null);
+    const c = fakeClient();
+    hub.addClient(c);
+    c.failOnce();
+    hub.keepalive();
+    expect(disconnects).toBe(1);
+    // The healthy path writes a keepalive comment to live clients.
+    const c2 = fakeClient();
+    hub.addClient(c2);
+    hub.keepalive();
+    expect(c2.writes.join('')).toContain(': keepalive');
   });
 
-  it('re-subscribing a project with a new emitter removes the prior listener (no double-fire)', () => {
+  it('re-subscribing with a new emitter removes the prior listener (no double-fire)', () => {
     const hub = new SseHub(() => {}, () => {});
     const tm1 = new EventEmitter();
-    hub.subscribeProject('/p', tm1, () => null);
+    hub.subscribe(tm1, () => null);
     const c = fakeClient();
-    hub.addClient(c, '/p');
+    hub.addClient(c);
     const tm2 = new EventEmitter();
-    hub.subscribeProject('/p', tm2, () => null); // swap
+    hub.subscribe(tm2, () => null); // swap; client set is preserved
     tm1.emit('event', ev('old')); // prior emitter must no longer reach the client
     tm2.emit('event', ev('new'));
     const joined = c.writes.join('');
@@ -109,13 +105,12 @@ describe('SseHub', () => {
     expect(joined).toContain('"sessionId":"new"');
   });
 
-  it('isSubscribed reports whether the given emitter is the current one for a project', () => {
+  it('isSubscribed reports whether the given emitter is the current one', () => {
     const hub = new SseHub(() => {}, () => {});
     const tm1 = new EventEmitter();
     const tm2 = new EventEmitter();
-    hub.subscribeProject('/p', tm1, () => null);
-    expect(hub.isSubscribed('/p', tm1)).toBe(true);
-    expect(hub.isSubscribed('/p', tm2)).toBe(false);
-    expect(hub.isSubscribed('/other', tm1)).toBe(false);
+    hub.subscribe(tm1, () => null);
+    expect(hub.isSubscribed(tm1)).toBe(true);
+    expect(hub.isSubscribed(tm2)).toBe(false);
   });
 });

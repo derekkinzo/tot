@@ -5,13 +5,8 @@ import TreeView from './components/TreeView';
 import DetailPanel from './components/DetailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-function readProjectFromUrl(): string | undefined {
-  const param = new URLSearchParams(window.location.search).get('project');
-  return param ? param : undefined;
-}
-
 export default function App() {
-  const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId, projects, currentProject, switchProject } = useTreeStream(readProjectFromUrl());
+  const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId } = useTreeStream();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { followMode, followTarget, toggleFollow } = useFollowMode({
@@ -49,8 +44,6 @@ export default function App() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [toggleFollow]);
 
-  const projectLabel = currentProject ? currentProject.split('/').slice(-2).join('/') : '';
-
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%' }}>
       <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
@@ -69,10 +62,6 @@ export default function App() {
               followMode={followMode}
               onToggleFollow={toggleFollow}
               onLoadSession={loadSession}
-              projects={projects}
-              currentProject={currentProject}
-              onSwitchProject={switchProject}
-              projectLabel={projectLabel}
             />
           </ErrorBoundary>
         ) : (

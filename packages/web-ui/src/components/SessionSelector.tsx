@@ -11,10 +11,9 @@ interface SessionSummary {
 interface Props {
   currentSessionId: string | null;
   onSwitch: (sessionId: string) => void;
-  project?: string;
 }
 
-export default function SessionSelector({ currentSessionId, onSwitch, project }: Props) {
+export default function SessionSelector({ currentSessionId, onSwitch }: Props) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -22,15 +21,14 @@ export default function SessionSelector({ currentSessionId, onSwitch, project }:
 
   useEffect(() => {
     if (!open) return;
-    const projectParam = project ? `?project=${encodeURIComponent(project)}` : '';
     setLoading(true);
     setError(null);
-    fetch(`/api/sessions${projectParam}`)
+    fetch('/api/sessions')
       .then((r) => r.json())
       .then((d) => setSessions(d.sessions ?? []))
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [open, project]);
+  }, [open]);
 
   if (!currentSessionId) return null;
 

@@ -162,34 +162,22 @@ port and reports the URL in the `get_status` tool response
 - **Follow mode** — auto-tracks agent activity (press F to toggle)
 - **Export** — download tree as Markdown
 
-## CLI
+## Where your trees are stored
 
-The build emits a single executable. Manual-clone path:
-`packages/server/dist/cli.js`. Plugin path:
-`${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js`.
-
-```bash
-node <cli.js>              # Start the per-session MCP server (stdio) — what clients spawn
-node <cli.js> status       # Show this project's storage location + recent sessions
-node <cli.js> --help       # Usage
-```
-
-Each client spawns its own server process. There is no shared background
-daemon: the server lives as long as the client's stdio connection, picks a
-free port for its dashboard, and reports that URL through `get_status`.
-
-### Storage
-
-Session journals are stored centrally, keyed by the project's absolute path:
+Each reasoning tree is saved as an append-only JSON file under your home
+directory, grouped by project:
 
 ```
-~/.tot/projects/<sha256(abspath)/16>/sessions/<sessionId>.jsonl
+~/.tot/projects/<project-id>/sessions/<sessionId>.jsonl
 ```
 
-Set `TOT_DATA_DIR` to override the state root (defaults to
-`$XDG_STATE_HOME/tot`, then `~/.tot`). Journals from an older
-`{project}/.tot/sessions/` layout are copied into central storage on
-startup, non-destructively.
+Trees persist across restarts — reopen a project and its sessions are still
+there. To store them somewhere else, set the `TOT_DATA_DIR` environment
+variable to any directory (it otherwise defaults to `$XDG_STATE_HOME/tot`,
+then `~/.tot`).
+
+Run `tot-mcp status` from a project to see where that project's trees live and
+list its recent sessions.
 
 ## Research Background
 

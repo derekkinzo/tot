@@ -18,7 +18,7 @@ import { TreeManager } from './tree-manager.js';
 import { scanSessions, loadSession, pickActiveSession } from './persistence.js';
 import { registerTools } from './tools.js';
 import { registerPrompts } from './prompts.js';
-import { startHttpServer, type MultiProjectContext } from './http.js';
+import { startHttpServer } from './http.js';
 import { makeLock } from './mutex.js';
 import { getCentralSessionsDir, writeProjectMeta } from './central-storage.js';
 import { migrateLegacySessions } from './legacy-migration.js';
@@ -77,9 +77,9 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
     return true;
   }
 
-  // Single-project async mutex (the task #59 read/mutate barrier): the HTTP
-  // state read runs ensureSessionLoaded under this lock so it cannot interleave
-  // with a tool handler mid-mutation across an await point.
+  // Single-project async mutex: the HTTP state read runs ensureSessionLoaded
+  // under this lock so it cannot interleave with a tool handler mid-mutation
+  // across an await point.
   const lock = makeLock();
 
   // Resolved once the HTTP server binds; threaded into get_status/get_tree so
@@ -105,19 +105,10 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   });
   registerPrompts(server);
 
-  const ctx: MultiProjectContext = {
-    getProject: (d) => (d === projectDir ? projectState : undefined),
-    getAllProjects: () => [projectState],
-    getLastActiveProject: () => projectDir,
-    withLock: (_d, fn) => lock(fn),
-    onSseConnect: () => {},
-    onSseDisconnect: () => {},
-  };
-
   let port: number | null = null;
   let httpClose: (() => Promise<void>) | null = null;
   try {
-    const handle = await startHttpServer(0, ctx);
+    const handle = await startHttpServer(0, projectState, lock, () => {}, () => {});
     port = handle.port;
     httpClose = handle.close;
     dashboardUrl = `http://localhost:${port}`;

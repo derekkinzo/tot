@@ -90,8 +90,8 @@ describe('per-session server', () => {
       await client.callTool({ name: 'create_tree', arguments: { problem: 'health probe' } });
 
       const info = await (await fetch(`http://localhost:${s.port}/api/info`)).json();
-      const proj = info.projects.find((p: any) => p.dir === s.projectDir);
-      expect(proj?.persistenceHealthy).toBe(false);
+      expect(info.projectDir).toBe(s.projectDir);
+      expect(info.persistenceHealthy).toBe(false);
     } finally {
       chmodSync(s.dataDir, 0o755); // restore so afterEach cleanup can remove it
       rmSync(projForFail, { recursive: true, force: true });

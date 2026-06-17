@@ -701,9 +701,9 @@ export class TreeManager extends EventEmitter {
    *     aside; its descendants are moot. Do not descend.
    *   - corroborated: resolution. corroborateHypothesis enforces a one-hop
    *     terminal-children gate, but accepts an eliminated direct child.
-   *     Through such an intermediate a corroborated top-level can today
-   *     legally sit over a pending grandchild, so terminality must be
-   *     verified by walking the corroborated subtree.
+   *     Through such an intermediate a corroborated top-level can legally
+   *     sit over a pending grandchild, so terminality must be verified by
+   *     walking the corroborated subtree.
    *
    * Multiple corroborated leaves are first-class (Mackie INUS). pending /
    * exploring at any visited node fails the predicate.

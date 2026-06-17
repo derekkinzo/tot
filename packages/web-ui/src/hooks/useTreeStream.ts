@@ -1,17 +1,15 @@
-import { useEffect, useCallback, useReducer, useRef, useState } from 'react';
+import { useEffect, useCallback, useReducer, useRef } from 'react';
 import type { TreeEvent } from '../types';
 import { reducer, initialTreeState } from './treeReducer';
 
-export interface ProjectInfo {
-  dir: string;
-  activeProblem: string | null;
-  sessionCount: number;
-}
-
-export function useTreeStream(projectDir?: string) {
+/**
+ * Subscribes the dashboard to its server's live tree: an SSE stream that
+ * delivers a snapshot on connect then incremental events, reduced into tree
+ * state. The server serves exactly one project, so there is no project
+ * selection — the stream is always `/sse`.
+ */
+export function useTreeStream() {
   const [state, dispatch] = useReducer(reducer, undefined, initialTreeState);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [currentProject, setCurrentProject] = useState<string>(projectDir || '');
   const esRef = useRef<EventSource | null>(null);
   const connectionGenRef = useRef(0);
 
@@ -23,37 +21,7 @@ export function useTreeStream(projectDir?: string) {
     }
   }, [state.recentlyChanged, state.lastAddedId]);
 
-  // Fetch projects list. If the requested project (e.g. from a URL
-  // parameter) is not yet registered with the server — typically when
-  // a fresh session has not made any MCP tool calls — fall back to the
-  // server's active project so the dashboard isn't stuck on an
-  // empty SSE stream.
-  const refreshProjects = useCallback(() => {
-    fetch('/api/projects')
-      .then((r) => r.json())
-      .then((d) => {
-        const list: ProjectInfo[] = d.projects ?? [];
-        setProjects(list);
-        if (currentProject) {
-          const known = list.some((p) => p.dir === currentProject);
-          if (!known && d.lastActive) {
-            setCurrentProject(d.lastActive);
-          }
-        } else if (d.lastActive) {
-          setCurrentProject(d.lastActive);
-        }
-      })
-      .catch(() => {});
-  }, [currentProject]);
-
-  useEffect(() => {
-    refreshProjects();
-    // Re-poll projects periodically
-    const interval = setInterval(refreshProjects, 10_000);
-    return () => clearInterval(interval);
-  }, [refreshProjects]);
-
-  // Connect to SSE for the selected project
+  // Connect to the SSE stream.
   useEffect(() => {
     if (esRef.current) {
       esRef.current.close();
@@ -61,13 +29,12 @@ export function useTreeStream(projectDir?: string) {
     }
 
     const gen = ++connectionGenRef.current;
-    const sseUrl = currentProject ? `/sse?project=${encodeURIComponent(currentProject)}` : '/sse';
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let backoff = 1000;
 
     const connect = () => {
       if (connectionGenRef.current !== gen) return;
-      const es = new EventSource(sseUrl);
+      const es = new EventSource('/sse');
       esRef.current = es;
 
       es.onopen = () => {
@@ -129,31 +96,17 @@ export function useTreeStream(projectDir?: string) {
       esRef.current?.close();
       esRef.current = null;
     };
-  }, [currentProject]);
+  }, []);
 
   const loadSession = useCallback(async (sessionId: string) => {
     try {
-      const projectParam = currentProject ? `&project=${encodeURIComponent(currentProject)}` : '';
-      const resp = await fetch(`/api/state?sessionId=${sessionId}${projectParam}`);
+      const resp = await fetch(`/api/state?sessionId=${sessionId}`);
       const data = await resp.json();
       if (data.session) {
         dispatch({ type: 'snapshot', session: data.session, hypotheses: data.hypotheses });
       }
     } catch {}
-  }, [currentProject]);
-
-  const switchProject = useCallback((dir: string) => {
-    setCurrentProject(dir);
-    if (typeof window !== 'undefined' && window.history?.replaceState) {
-      const url = new URL(window.location.href);
-      if (dir) {
-        url.searchParams.set('project', dir);
-      } else {
-        url.searchParams.delete('project');
-      }
-      window.history.replaceState(null, '', url.toString());
-    }
   }, []);
 
-  return { ...state, loadSession, projects, currentProject, switchProject };
+  return { ...state, loadSession };
 }

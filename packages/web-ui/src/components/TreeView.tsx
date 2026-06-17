@@ -20,9 +20,7 @@ import Breadcrumb from './Breadcrumb';
 import Legend from './Legend';
 import FollowIndicator from './FollowIndicator';
 import SessionSelector from './SessionSelector';
-import ProjectSelector from './ProjectSelector';
 import { isPruned, type Hypothesis, type Session } from '../types';
-import type { ProjectInfo } from '../hooks/useTreeStream';
 import { STATUS_COLORS, HIGHLIGHT_COLORS } from '../theme';
 
 const NODE_WIDTH = 240;
@@ -52,10 +50,6 @@ interface Props {
   followMode: 'following' | 'paused';
   onToggleFollow: () => void;
   onLoadSession: (id: string) => void;
-  projects: ProjectInfo[];
-  currentProject: string;
-  onSwitchProject: (dir: string) => void;
-  projectLabel: string;
 }
 
 interface ContextMenuState {
@@ -64,7 +58,7 @@ interface ContextMenuState {
   y: number;
 }
 
-function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, projects, currentProject, onSwitchProject, projectLabel }: Props) {
+function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession }: Props) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const { fitView } = useReactFlow();
@@ -296,26 +290,12 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
                 {session ? (
                   <>
                     <span>{session.problem.slice(0, 50)}{session.problem.length > 50 ? '...' : ''}</span>
-                    <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onSelect(null); }} project={currentProject} />
-                    {projects.length > 1 && (
-                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onSelect(null); }} />
-                    )}
+                    <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onSelect(null); }} />
                   </>
                 ) : (
-                  <span style={{ color: '#8b949e' }}>
-                    Waiting for session...
-                    {projects.length > 1 && (
-                      <ProjectSelector projects={projects} currentProject={currentProject} onSwitch={(dir) => { onSwitchProject(dir); onSelect(null); }} />
-                    )}
-                    {projectLabel && <span style={{ fontSize: 10, color: '#6b7280', marginLeft: 8 }}>{projectLabel}</span>}
-                  </span>
+                  <span style={{ color: '#8b949e' }}>Waiting for session...</span>
                 )}
               </div>
-              {session && projectLabel && (
-                <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2, fontFamily: 'monospace' }}>
-                  {projectLabel}
-                </div>
-              )}
             </div>
             {selectedId && <Breadcrumb selectedId={selectedId} hypotheses={hypotheses} onNavigate={onSelect} />}
           </div>
