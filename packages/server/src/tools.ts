@@ -145,7 +145,7 @@ const schemas = {
  * @param getDataDir - Thunk returning the data directory path (deferred for testability)
  * @returns Map of tool name to async handler
  */
-export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPersistenceError?: (err: Error) => void): Map<string, ToolHandler> {
+export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPersistenceError?: (err: Error) => void, getDashboardUrl?: () => string | null): Map<string, ToolHandler> {
   const persistenceMap = new Map<string, Persistence>();
 
   function getPersistence(sessionId: string): Persistence {
@@ -360,7 +360,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   });
 
   handlers.set('get_status', async () => {
-    return toolResult(fmt.formatStatus(tm));
+    return toolResult(fmt.formatStatus(tm, getDashboardUrl?.() ?? null));
   });
 
   handlers.set('validate_decomposition', async (args) => {
@@ -387,9 +387,10 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
  * @param server - The MCP server instance to register tools on
  * @param tm - TreeManager for hypothesis state
  * @param getDataDir - Thunk returning the persistence directory
+ * @param getDashboardUrl - Optional thunk returning the live dashboard URL, surfaced in get_status
  */
-export function registerTools(server: McpServer, tm: TreeManager, getDataDir: () => string): void {
-  const handlers = getToolHandlers(tm, getDataDir);
+export function registerTools(server: McpServer, tm: TreeManager, getDataDir: () => string, getDashboardUrl?: () => string | null): void {
+  const handlers = getToolHandlers(tm, getDataDir, undefined, getDashboardUrl);
 
   for (const [name, schema] of Object.entries(TOOL_SCHEMAS)) {
     const handler = handlers.get(name)!;

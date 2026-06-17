@@ -587,6 +587,32 @@ describe('MCP Integration', () => {
       expect(text).toContain('H3');
     });
 
+    it('omits any Visualization URL when no dashboard-url thunk is provided', async () => {
+      // The default wiring (used by these integration tests) passes no URL
+      // thunk; get_status must not advertise a dashboard URL it cannot resolve.
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'NoUrl' } });
+      const text = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+      expect(text).not.toContain('Visualization');
+      expect(text).not.toContain('http://');
+    });
+
+    it('appends the dashboard URL when a getDashboardUrl thunk is provided', async () => {
+      // A per-session server knows its own ephemeral port and surfaces it here.
+      const tm2 = new TreeManager({ stagnationThreshold: 4 });
+      const server2 = new McpServer({ name: 'tot-mcp-test-url', version: '0.1.0' });
+      registerTools(server2, tm2, () => '/tmp/tot-test', () => 'http://localhost:12345');
+      const client2 = new Client({ name: 'c2', version: '1.0.0' }, { capabilities: {} });
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await Promise.all([client2.connect(ct), server2.connect(st)]);
+      try {
+        await client2.callTool({ name: 'create_tree', arguments: { problem: 'WithUrl' } });
+        const text = getText(await client2.callTool({ name: 'get_status', arguments: {} }));
+        expect(text).toContain('Visualization: http://localhost:12345');
+      } finally {
+        await client2.close();
+      }
+    });
+
     it('separates resolved and active counts in the progress breakdown', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Topic' } }),

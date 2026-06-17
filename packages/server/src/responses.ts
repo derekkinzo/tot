@@ -395,7 +395,7 @@ export function formatValidateDecomposition(parentId: string, check: StructuralC
   return result;
 }
 
-export function formatStatus(tm: TreeManager): string {
+export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null): string {
   const status = tm.getStatus();
 
   if (!status.session) {
@@ -424,6 +424,10 @@ export function formatStatus(tm: TreeManager): string {
     const others = openSessions.filter((s) => s.id !== session.id);
     result += `\nNote: ${openSessions.length} open sessions. View another by passing its full id to get_tree(sessionId): ` +
       others.map((s) => s.id).join(', ');
+  }
+
+  if (dashboardUrl) {
+    result += `\nVisualization: ${dashboardUrl}`;
   }
 
   return result;
