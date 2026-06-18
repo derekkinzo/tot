@@ -179,108 +179,83 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return { content: [{ type: 'text' as const, text }], isError };
   }
 
+  /**
+   * Wraps a tool body in the invariant skeleton shared by every mutating
+   * handler: Zod parse → run `fn` → (when `fn` reports a sessionId) await the
+   * journal drain so the write lands before the result returns → toolResult.
+   * The one error mapping (ZodError → validation message, TreeError → its
+   * message, anything else → "Unknown error") lives here once. `fn` supplies
+   * only the varying body and returns the response text plus, for mutators, the
+   * sessionId whose journal must be flushed.
+   */
+  function dispatch<S extends z.ZodTypeAny>(
+    schema: S,
+    fn: (input: z.infer<S>) => { text: string; sessionId?: string },
+  ): ToolHandler {
+    return async (args) => {
+      try {
+        const { text, sessionId } = fn(schema.parse(args));
+        if (sessionId) await sink.drain(sessionId);
+        return toolResult(text);
+      } catch (e) {
+        if (e instanceof z.ZodError) {
+          return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+        }
+        return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
+      }
+    };
+  }
+
   const handlers = new Map<string, ToolHandler>();
 
-  handlers.set('create_tree', async (args) => {
-    try {
-      const { problem } = schemas.create_tree.parse(args);
-      const { session, root } = tm.createSession(problem);
-      await sink.drain(session.id);
-      return toolResult(fmt.formatCreateTree(session.id, root.id, problem));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
+  handlers.set('create_tree', dispatch(schemas.create_tree, ({ problem }) => {
+    const { session, root } = tm.createSession(problem);
+    return { text: fmt.formatCreateTree(session.id, root.id, problem), sessionId: session.id };
+  }));
 
-  handlers.set('decompose', async (args) => {
-    try {
-      const { parentId, children: childContents } = schemas.decompose.parse(args);
-      const created = tm.decompose(parentId, childContents);
-      const check = tm.validateDecomposition(parentId);
-      await sink.drain(created[0].sessionId);
-      return toolResult(fmt.formatDecompose(created, check, tm));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
+  handlers.set('decompose', dispatch(schemas.decompose, ({ parentId, children }) => {
+    const created = tm.decompose(parentId, children);
+    const check = tm.validateDecomposition(parentId);
+    return { text: fmt.formatDecompose(created, check, tm), sessionId: created[0].sessionId };
+  }));
 
-  handlers.set('add_hypothesis', async (args) => {
-    try {
-      const { parentId, content } = schemas.add_hypothesis.parse(args);
-      const hypothesis = tm.addHypothesis(parentId, content);
-      await sink.drain(hypothesis.sessionId);
-      return toolResult(fmt.formatAddHypothesis(hypothesis, tm));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
+  handlers.set('add_hypothesis', dispatch(schemas.add_hypothesis, ({ parentId, content }) => {
+    const hypothesis = tm.addHypothesis(parentId, content);
+    return { text: fmt.formatAddHypothesis(hypothesis, tm), sessionId: hypothesis.sessionId };
+  }));
 
-  handlers.set('add_evidence', async (args) => {
-    try {
-      const { hypothesisId, type, content, source } = schemas.add_evidence.parse(args);
-      tm.addEvidence(hypothesisId, type, content, source);
-      const hypothesis = tm.getHypothesis(hypothesisId)!;
-      await sink.drain(hypothesis.sessionId);
-      return toolResult(fmt.formatAddEvidence(hypothesisId, hypothesis, tm));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
+  handlers.set('add_evidence', dispatch(schemas.add_evidence, ({ hypothesisId, type, content, source }) => {
+    tm.addEvidence(hypothesisId, type, content, source);
+    // Re-read: addEvidence returns the cascade detail, but the formatter needs
+    // the post-mutation hypothesis snapshot.
+    const hypothesis = tm.getHypothesis(hypothesisId)!;
+    return { text: fmt.formatAddEvidence(hypothesisId, hypothesis, tm), sessionId: hypothesis.sessionId };
+  }));
 
-  handlers.set('eliminate_hypothesis', async (args) => {
-    try {
-      const { hypothesisId, reason, refutingEvidenceIds } = schemas.eliminate_hypothesis.parse(args);
-      const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
-      await sink.drain(hypothesis.sessionId);
-      return toolResult(fmt.formatEliminate(hypothesis, tm));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
+  handlers.set('eliminate_hypothesis', dispatch(schemas.eliminate_hypothesis, ({ hypothesisId, reason, refutingEvidenceIds }) => {
+    const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
+    return { text: fmt.formatEliminate(hypothesis, tm), sessionId: hypothesis.sessionId };
+  }));
 
-  handlers.set('corroborate_hypothesis', async (args) => {
-    try {
-      const { hypothesisId, reason } = schemas.corroborate_hypothesis.parse(args);
-      const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
-      await sink.drain(hypothesis.sessionId);
-      return toolResult(fmt.formatCorroborate(hypothesis, tm));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
+  handlers.set('corroborate_hypothesis', dispatch(schemas.corroborate_hypothesis, ({ hypothesisId, reason }) => {
+    const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
+    return { text: fmt.formatCorroborate(hypothesis, tm), sessionId: hypothesis.sessionId };
+  }));
 
-  handlers.set('set_out_of_scope', async (args) => {
-    try {
-      const { hypothesisId, reason } = schemas.set_out_of_scope.parse(args);
-      const hypothesis = tm.setOutOfScope(hypothesisId, reason);
-      await sink.drain(hypothesis.sessionId);
-      return toolResult(fmt.formatSetOutOfScope(hypothesis, tm));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
-  });
+  handlers.set('set_out_of_scope', dispatch(schemas.set_out_of_scope, ({ hypothesisId, reason }) => {
+    const hypothesis = tm.setOutOfScope(hypothesisId, reason);
+    return { text: fmt.formatSetOutOfScope(hypothesis, tm), sessionId: hypothesis.sessionId };
+  }));
 
+  // Read-only: no sessionId → dispatch skips the drain.
+  handlers.set('validate_decomposition', dispatch(schemas.validate_decomposition, ({ parentId }) => {
+    const check = tm.validateDecomposition(parentId);
+    return { text: fmt.formatValidateDecomposition(parentId, check) };
+  }));
+
+  // get_tree returns a non-thrown isError result ("No such session"), which the
+  // dispatch {text, sessionId} contract has no channel for, so it registers
+  // directly.
   handlers.set('get_tree', async (args) => {
     try {
       const { format, sessionId } = schemas.get_tree.parse(args);
@@ -308,19 +283,6 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
 
   handlers.set('get_status', async () => {
     return toolResult(fmt.formatStatus(tm, getDashboardUrl?.() ?? null));
-  });
-
-  handlers.set('validate_decomposition', async (args) => {
-    try {
-      const { parentId } = schemas.validate_decomposition.parse(args);
-      const check = tm.validateDecomposition(parentId);
-      return toolResult(fmt.formatValidateDecomposition(parentId, check));
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
-      }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
-    }
   });
 
   return { handlers, drainAll: () => sink.drainAll() };
