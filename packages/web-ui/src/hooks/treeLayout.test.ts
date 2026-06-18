@@ -93,6 +93,20 @@ describe('computeLayout', () => {
     expect(nodes.map((n) => n.id)).toEqual(['root']);
   });
 
+  it('does not stack-overflow on a children[] cycle among visible nodes; lays each node once', () => {
+    // root → a → b → a: a corrupt children cycle reachable from root. buildTree
+    // must visit each node once and terminate rather than infinitely recurse.
+    const m = tree(
+      hyp('root', null, ['a']),
+      hyp('a', 'root', ['b']),
+      hyp('b', 'a', ['a']), // cycle back to a
+    );
+    const { nodes } = computeLayout(m, 'root', null, NO_PATH, NO_COLLAPSE);
+    expect(nodes.map((n) => n.id).sort()).toEqual(['a', 'b', 'root']);
+    // No duplicate nodes from re-descending the cycle.
+    expect(new Set(nodes.map((n) => n.id)).size).toBe(nodes.length);
+  });
+
   it('styles an edge as on-path only when BOTH endpoints are on the path', () => {
     const m = tree(hyp('root', null, ['a']), hyp('a', 'root', ['b']), hyp('b', 'a', []));
     const path = getPathToRoot('b', m); // {b, a, root}

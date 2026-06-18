@@ -80,16 +80,23 @@ export function computeLayout(
     }
   }
 
-  // Build hierarchy for flextree
+  // Build hierarchy for flextree. `visited` guards against a children[] cycle
+  // in a corrupt tree so the recursion cannot stack-overflow the render thread;
+  // a single shared set is correct because each node has at most one parent, so
+  // a node reached twice is a cycle, not legitimate re-parenting.
   interface TreeData { id: string; children?: TreeData[] }
-  function buildTree(id: string): TreeData {
+  function buildTree(id: string, visited: Set<string> = new Set()): TreeData {
     const h = hypotheses.get(id);
     if (!h || collapsedIds.has(id)) return { id };
-    // Merge real children with any adopted orphans not yet in h.children.
-    const declared = h.children.filter((c) => visibleIds.has(c));
-    const adopted = (orphanChildren.get(id) ?? []).filter((c) => !declared.includes(c));
+    visited.add(id);
+    // Merge real children with any adopted orphans not yet in h.children, and
+    // drop any child already on the current path — a back-edge is a cycle in a
+    // corrupt tree, and skipping it both prevents infinite recursion and avoids
+    // emitting the node twice into the layout.
+    const declared = h.children.filter((c) => visibleIds.has(c) && !visited.has(c));
+    const adopted = (orphanChildren.get(id) ?? []).filter((c) => !declared.includes(c) && !visited.has(c));
     const childIds = [...declared, ...adopted];
-    const children = childIds.map(buildTree);
+    const children = childIds.map((c) => buildTree(c, visited));
     return children.length > 0 ? { id, children } : { id };
   }
 

@@ -9,8 +9,11 @@ import type { Hypothesis } from './types.js';
  * prose and the engine reads; this module owns the decisions.
  */
 
-const SUPPORTING = (h: Hypothesis) => h.evidence.filter((e) => e.type === 'supports').length;
-const REFUTING = (h: Hypothesis) => h.evidence.filter((e) => e.type === 'refutes').length;
+/** Count of supporting / refuting evidence on a hypothesis. Exported so the
+ *  formatter and the predicates share one definition (no drift between the
+ *  gate that fires and the number printed). */
+export const countSupporting = (h: Hypothesis): number => h.evidence.filter((e) => e.type === 'supports').length;
+export const countRefuting = (h: Hypothesis): number => h.evidence.filter((e) => e.type === 'refutes').length;
 
 /** Inference-language detector: ≥2 hedging keywords reads as inference, not direct observation. */
 const INFERENCE_KEYWORDS = /\b(suggests?|impl(y|ies)|could|might|possibly|consistent with|indicates?|likely|appears?)\b/gi;
@@ -40,7 +43,7 @@ export function readsAsInference(hypothesis: Hypothesis): boolean {
  */
 export function isConfirmationBias(hypothesis: Hypothesis, siblings: Hypothesis[]): boolean {
   const activeSiblings = siblings.filter((s) => isLive(s.status));
-  return SUPPORTING(hypothesis) >= 3 && REFUTING(hypothesis) === 0 && activeSiblings.length > 0;
+  return countSupporting(hypothesis) >= 3 && countRefuting(hypothesis) === 0 && activeSiblings.length > 0;
 }
 
 /**
@@ -55,7 +58,7 @@ export function lacksSourceDiversity(hypothesis: Hypothesis): boolean {
 
 /** Elimination nudge (Bacon/Mill eliminative induction): ≥2 refuting, zero supporting. */
 export function suggestsElimination(hypothesis: Hypothesis): boolean {
-  return REFUTING(hypothesis) >= 2 && SUPPORTING(hypothesis) === 0;
+  return countRefuting(hypothesis) >= 2 && countSupporting(hypothesis) === 0;
 }
 
 /**

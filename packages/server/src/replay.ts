@@ -12,10 +12,14 @@ export interface JournalEntry {
 export interface ReplayState {
   sessions: Session[];
   hypotheses: Hypothesis[];
+  /** id → index into `hypotheses`, so update/evidence events resolve a node in
+   *  O(1) instead of a linear scan per event (replay is O(n) over the journal,
+   *  not O(updates × nodes)). */
+  hypothesisIndex: Map<string, number>;
 }
 
 export function emptyReplayState(): ReplayState {
-  return { sessions: [], hypotheses: [] };
+  return { sessions: [], hypotheses: [], hypothesisIndex: new Map() };
 }
 
 /**
@@ -31,21 +35,27 @@ export function emptyReplayState(): ReplayState {
  * truncated/legacy log; the writer never produces that order).
  */
 export function applyEntry(state: ReplayState, entry: JournalEntry): void {
-  const { sessions, hypotheses } = state;
+  const { sessions, hypotheses, hypothesisIndex } = state;
+  // Upsert a hypothesis by id in O(1): replace in place if known, else append
+  // and record its index. Shared by add (writer never re-adds an id, but upsert
+  // is safe) and update (order-tolerant: an update with no prior add lands it).
+  const upsertHypothesis = (h: Hypothesis): void => {
+    const idx = hypothesisIndex.get(h.id);
+    if (idx !== undefined) {
+      hypotheses[idx] = h;
+    } else {
+      hypothesisIndex.set(h.id, hypotheses.length);
+      hypotheses.push(h);
+    }
+  };
   switch (entry.type) {
     case 'session-created': {
       sessions.push(entry.payload as Session);
       break;
     }
-    case 'hypothesis-added': {
-      hypotheses.push(entry.payload as Hypothesis);
-      break;
-    }
+    case 'hypothesis-added':
     case 'hypothesis-updated': {
-      const updated = entry.payload as Hypothesis;
-      const idx = hypotheses.findIndex((h) => h.id === updated.id);
-      if (idx >= 0) hypotheses[idx] = updated;
-      else hypotheses.push(updated);
+      upsertHypothesis(entry.payload as Hypothesis);
       break;
     }
     case 'evidence-added': {
@@ -55,8 +65,8 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
       // legacy or hand-authored journal that does carry the event still replays
       // correctly.
       const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
-      const h = hypotheses.find((hyp) => hyp.id === hypothesisId);
-      if (h) h.evidence.push(evidence);
+      const idx = hypothesisIndex.get(hypothesisId);
+      if (idx !== undefined) hypotheses[idx].evidence.push(evidence);
       break;
     }
     case 'session-completed': {

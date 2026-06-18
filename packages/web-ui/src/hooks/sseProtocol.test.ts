@@ -14,6 +14,15 @@ describe('wireEventToAction', () => {
     expect(wireEventToAction('not json')).toBeNull();
   });
 
+  it('is total: parseable-but-non-object JSON returns null and never throws', () => {
+    // JSON.parse succeeds for these (null/number/string/bool/array); reading
+    // .type off them must not throw — the function maps them all to null.
+    for (const raw of ['null', '42', '"snapshot"', 'true', '[]']) {
+      expect(() => wireEventToAction(raw)).not.toThrow();
+      expect(wireEventToAction(raw)).toBeNull();
+    }
+  });
+
   it('returns null for an unknown event type', () => {
     expect(wireEventToAction(JSON.stringify({ type: 'mystery' }))).toBeNull();
   });

@@ -21,12 +21,17 @@ export function nextBackoff(prev: number): number {
  * have no wire source and are dispatched by the hook directly.
  */
 export function wireEventToAction(raw: string): Action | null {
-  let data: TreeEvent;
+  let parsed: unknown;
   try {
-    data = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  // JSON.parse succeeds for primitives too ('null' → null, '42' → 42), so guard
+  // for a non-null object before reading .type — this keeps the function total
+  // (always returns, never throws) so onmessage needs no try/catch of its own.
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const data = parsed as TreeEvent;
   switch (data.type) {
     case 'snapshot':
       return { type: 'snapshot', session: data.session, hypotheses: data.hypotheses };

@@ -58,6 +58,31 @@ describe('applyEntry (shared event interpreter)', () => {
     expect(s.hypotheses[0].evidence).toEqual([ev]);
   });
 
+  it('keeps hypothesisIndex consistent with the array across interleaved adds/updates', () => {
+    const s = fold(
+      entry('hypothesis-added', hyp('a')),
+      entry('hypothesis-added', hyp('b')),
+      entry('hypothesis-updated', hyp('a', { status: 'corroborated' })),
+      entry('hypothesis-added', hyp('c')),
+      entry('hypothesis-updated', hyp('c', { status: 'eliminated' })),
+    );
+    expect(s.hypotheses.map((h) => h.id)).toEqual(['a', 'b', 'c']);
+    // Every index entry resolves to the matching node — the O(1) lookup is sound.
+    for (const [id, idx] of s.hypothesisIndex) {
+      expect(s.hypotheses[idx].id).toBe(id);
+    }
+    expect(s.hypotheses[s.hypothesisIndex.get('a')!].status).toBe('corroborated');
+    expect(s.hypotheses[s.hypothesisIndex.get('c')!].status).toBe('eliminated');
+  });
+
+  it('resolves update/evidence in O(1) — applyEntry performs no linear array scan', () => {
+    // Guard the algorithmic invariant (not wall-clock): the reducer must not
+    // reintroduce findIndex/find over the hypotheses array.
+    const src = applyEntry.toString();
+    expect(src).not.toMatch(/\.findIndex\(/);
+    expect(src).not.toMatch(/hypotheses\.find\(/);
+  });
+
   it('session-completed sets terminal status + completedAt; session-reopened reverts', () => {
     const completed = fold(
       entry('session-created', session()),

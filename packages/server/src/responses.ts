@@ -39,6 +39,8 @@
 
 import { isLive, isOpen, undisposedNodes } from './closure.js';
 import {
+  countSupporting,
+  countRefuting,
   needsBaselinePrompt,
   readsAsInference,
   isConfirmationBias,
@@ -165,8 +167,10 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
 }
 
 export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, tm: TreeManager): string {
-  const supporting = hypothesis.evidence.filter((e) => e.type === 'supports').length;
-  const refuting = hypothesis.evidence.filter((e) => e.type === 'refutes').length;
+  // Reuse the advisory module's counts so the gate that fires and the number
+  // printed in the warning string cannot drift apart.
+  const supporting = countSupporting(hypothesis);
+  const refuting = countRefuting(hypothesis);
 
   const siblings = tm.getSiblings(hypothesisId);
   const activeSiblings = siblings.filter((s) => isLive(s.status));

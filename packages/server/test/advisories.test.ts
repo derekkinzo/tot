@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  countSupporting, countRefuting,
   needsBaselinePrompt, readsAsInference, isConfirmationBias,
   lacksSourceDiversity, suggestsElimination, lacksDiagnosticity,
 } from '../src/advisories.js';
@@ -21,6 +22,18 @@ function sib(id: string, status: HypothesisStatus, evidence: Evidence[] = []): H
     evidence, metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
   };
 }
+
+describe('countSupporting / countRefuting (shared source of truth)', () => {
+  it('count each evidence type independently', () => {
+    const h = hyp([ev('supports'), ev('supports'), ev('refutes'), ev('neutral')]);
+    expect(countSupporting(h)).toBe(2);
+    expect(countRefuting(h)).toBe(1);
+  });
+  it('are zero on an empty hypothesis', () => {
+    expect(countSupporting(hyp([]))).toBe(0);
+    expect(countRefuting(hyp([]))).toBe(0);
+  });
+});
 
 describe('needsBaselinePrompt', () => {
   it('true on the first non-refuting evidence item', () => {

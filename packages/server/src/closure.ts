@@ -72,8 +72,11 @@ export function subtreeContainsCorroborated(
   lookup: (id: string) => Hypothesis | undefined,
 ): boolean {
   const stack: string[] = [rootId];
+  const seen = new Set<string>();
   while (stack.length > 0) {
     const id = stack.pop()!;
+    if (seen.has(id)) continue; // guard against a children cycle in a corrupt journal
+    seen.add(id);
     const node = lookup(id);
     if (!node) continue;
     if (isPruned(node.status)) continue;
@@ -97,8 +100,11 @@ export function fullyTerminal(
   lookup: (id: string) => Hypothesis | undefined,
 ): boolean {
   const stack: string[] = [rootId];
+  const seen = new Set<string>();
   while (stack.length > 0) {
     const id = stack.pop()!;
+    if (seen.has(id)) continue; // guard against a children cycle in a corrupt journal
+    seen.add(id);
     const node = lookup(id);
     if (!node) continue;
     if (!isTerminal(node.status)) return false;

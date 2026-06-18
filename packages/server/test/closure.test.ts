@@ -105,3 +105,40 @@ describe('undisposedNodes vs fullyTerminal divergence (stop-AT vs descend-THROUG
     expect(subtreeContainsCorroborated('root', lookup)).toBe(false);
   });
 });
+
+describe('cycle safety (corrupt journal: children[] cycle)', () => {
+  // A self-referential children edge must terminate, not hang, on the scan/
+  // close paths. Each assertion would loop forever without the seen-set guard;
+  // the test timing out is the regression signal.
+  it('fullyTerminal terminates on an all-terminal cycle and returns true', () => {
+    const lookup = lookupOf(
+      hyp('a', 'corroborated', ['b']),
+      hyp('b', 'corroborated', ['a'], 'a'),
+    );
+    expect(fullyTerminal('a', lookup)).toBe(true);
+  });
+
+  it('fullyTerminal still short-circuits to false on a non-terminal node within a cycle', () => {
+    const lookup = lookupOf(
+      hyp('a', 'corroborated', ['b']),
+      hyp('b', 'exploring', ['a'], 'a'),
+    );
+    expect(fullyTerminal('a', lookup)).toBe(false);
+  });
+
+  it('subtreeContainsCorroborated terminates on a non-corroborated cycle and returns false', () => {
+    const lookup = lookupOf(
+      hyp('a', 'exploring', ['b']),
+      hyp('b', 'exploring', ['a'], 'a'),
+    );
+    expect(subtreeContainsCorroborated('a', lookup)).toBe(false);
+  });
+
+  it('subtreeContainsCorroborated finds a corroborated node despite a cycle', () => {
+    const lookup = lookupOf(
+      hyp('a', 'exploring', ['b']),
+      hyp('b', 'corroborated', ['a'], 'a'),
+    );
+    expect(subtreeContainsCorroborated('a', lookup)).toBe(true);
+  });
+});
