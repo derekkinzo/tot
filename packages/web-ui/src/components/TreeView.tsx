@@ -8,11 +8,8 @@ import {
   Panel,
   useReactFlow,
   type Node,
-  type Edge,
   type NodeMouseHandler,
 } from '@xyflow/react';
-import { flextree } from 'd3-flextree';
-import { hierarchy } from 'd3-hierarchy';
 import '@xyflow/react/dist/style.css';
 import HypothesisNode, { type HypothesisData } from './HypothesisNode';
 import StatusSummary from './StatusSummary';
@@ -20,11 +17,10 @@ import Breadcrumb from './Breadcrumb';
 import Legend from './Legend';
 import FollowIndicator from './FollowIndicator';
 import SessionSelector from './SessionSelector';
-import { isPruned, type Hypothesis, type Session } from '../types';
-import { STATUS_COLORS, HIGHLIGHT_COLORS } from '../theme';
+import { type Hypothesis, type Session } from '../types';
+import { STATUS_COLORS } from '../theme';
+import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
 
-const NODE_WIDTH = 240;
-const NODE_HEIGHT = 100;
 const FIT_MAX_ZOOM = 1.5;
 const FIT_PADDING_FOCUSED = 0.3;
 const FIT_PADDING_OVERVIEW = 0.12;
@@ -395,144 +391,3 @@ function MenuItem({ label, shortcut, onClick }: { label: string; shortcut: strin
   );
 }
 
-// ─── Path highlighting ───
-
-function getPathToRoot(nodeId: string, hypotheses: Map<string, Hypothesis>): Set<string> {
-  const path = new Set<string>();
-  let current: string | null = nodeId;
-  // Stop on a revisit so a malformed parentId cycle (corrupt journal) cannot
-  // spin this useMemo forever and freeze the render thread.
-  while (current && !path.has(current)) {
-    path.add(current);
-    const node = hypotheses.get(current);
-    current = node?.parentId ?? null;
-  }
-  return path;
-}
-
-// ─── Layout computation ───
-
-function computeLayout(
-  hypotheses: Map<string, Hypothesis>,
-  rootId: string,
-  selectedId: string | null,
-  pathToRoot: Set<string>,
-  collapsedIds: Set<string>,
-): { nodes: Node<HypothesisData>[]; edges: Edge[] } {
-  // Determine visible nodes
-  const visibleIds = new Set<string>();
-  const queue = [rootId];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    if (visibleIds.has(id)) continue;
-    visibleIds.add(id);
-    if (!collapsedIds.has(id)) {
-      const h = hypotheses.get(id);
-      if (h) queue.push(...h.children);
-    }
-  }
-
-  // Adopt transient orphans: a 'hypothesis-added' child can arrive a render
-  // before its parent's 'hypothesis-updated' appends it to parent.children.
-  // Such a node carries a valid parentId reaching a visible ancestor, so pull
-  // it (and its own children) in via the parentId chain rather than dropping
-  // it for that frame. Skip nodes whose nearest visible ancestor is collapsed.
-  const orphanChildren = new Map<string, string[]>(); // parentId → [childId]
-  for (const [id, h] of hypotheses) {
-    if (visibleIds.has(id) || !h.parentId) continue;
-    // Walk up parentId to decide visibility; guard against cycles.
-    const chain: string[] = [];
-    let cursor: string | null = id;
-    const seen = new Set<string>();
-    while (cursor && !seen.has(cursor)) {
-      seen.add(cursor);
-      chain.push(cursor);
-      if (visibleIds.has(cursor)) break;
-      cursor = hypotheses.get(cursor)?.parentId ?? null;
-    }
-    const anchor = cursor;
-    if (anchor && visibleIds.has(anchor) && !collapsedIds.has(anchor)) {
-      for (const cid of chain) {
-        if (cid === anchor) continue;
-        visibleIds.add(cid);
-        const parentId = hypotheses.get(cid)?.parentId;
-        if (parentId) {
-          const list = orphanChildren.get(parentId) ?? [];
-          if (!list.includes(cid)) list.push(cid);
-          orphanChildren.set(parentId, list);
-        }
-      }
-    }
-  }
-
-  // Build hierarchy for flextree
-  interface TreeData { id: string; children?: TreeData[] }
-  function buildTree(id: string): TreeData {
-    const h = hypotheses.get(id);
-    if (!h || collapsedIds.has(id)) return { id };
-    // Merge real children with any adopted orphans not yet in h.children.
-    const declared = h.children.filter((c) => visibleIds.has(c));
-    const adopted = (orphanChildren.get(id) ?? []).filter((c) => !declared.includes(c));
-    const childIds = [...declared, ...adopted];
-    const children = childIds.map(buildTree);
-    return children.length > 0 ? { id, children } : { id };
-  }
-
-  const root = hierarchy(buildTree(rootId), (d) => d.children);
-
-  // Run flextree layout (keeps children grouped under parent)
-  const layout = flextree<TreeData>()
-    .nodeSize(() => [NODE_WIDTH + 40, NODE_HEIGHT + 60])
-    .spacing((a, b) => (a.parent === b.parent ? 20 : 40));
-
-  const tree = layout(root);
-
-  // Convert to React Flow nodes + edges
-  const nodes: Node<HypothesisData>[] = [];
-  const edges: Edge[] = [];
-
-  for (const treeNode of tree.descendants()) {
-    const id = treeNode.data.id;
-    const h = hypotheses.get(id);
-    if (!h) continue;
-
-    const isOnPath = pathToRoot.has(id);
-    const isCollapsed = collapsedIds.has(id) && h.children.length > 0;
-
-    nodes.push({
-      id,
-      type: 'hypothesis',
-      position: { x: treeNode.x - NODE_WIDTH / 2, y: treeNode.y },
-      data: {
-        label: h.content,
-        status: h.status,
-        evidenceCount: h.evidence.length,
-        selected: id === selectedId,
-        childCount: h.children.length,
-        onPath: isOnPath,
-        collapsed: isCollapsed,
-        hiddenChildren: isCollapsed ? h.children.length : 0,
-      },
-    });
-
-    if (h.parentId && visibleIds.has(h.parentId)) {
-      const isEdgeOnPath = pathToRoot.has(id) && pathToRoot.has(h.parentId);
-      edges.push({
-        id: `${h.parentId}-${id}`,
-        source: h.parentId,
-        target: id,
-        style: {
-          stroke: isEdgeOnPath
-            ? HIGHLIGHT_COLORS.pathEdge
-            : isPruned(h.status)
-              ? HIGHLIGHT_COLORS.prunedEdge
-              : HIGHLIGHT_COLORS.defaultEdge,
-          strokeWidth: isEdgeOnPath ? 2.5 : 1.5,
-        },
-        animated: h.status === 'exploring',
-      });
-    }
-  }
-
-  return { nodes, edges };
-}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Hypothesis, Session } from '../types';
 import { STATUS_NODE_STYLES } from '../theme';
+import { conclusionStatus } from '../tree/conclusion';
 
 interface Props {
   session: Session | null;
@@ -96,17 +97,14 @@ function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines
 
   lines.push(`${indent}- ${icon} **${node.content}**${ev} [${node.status}]`);
 
-  if (node.conclusion) {
-    const supersededBy = node.conclusion.supersededBy;
-    // supersededBy is the explicit signal; the status/verdict mismatch is
-    // the legacy fallback for journals written before the field existed.
-    const isHistorical = supersededBy !== undefined || node.status !== node.conclusion.verdict;
-    const prefix = !isHistorical
-      ? node.conclusion.verdict
-      : supersededBy === 'descendant'
-        ? `historically ${node.conclusion.verdict} (reopened by refuted descendant)`
-        : `historically ${node.conclusion.verdict}`;
-    lines.push(`${indent}  > ${prefix}: ${node.conclusion.reason}`);
+  const concl = conclusionStatus(node);
+  if (concl) {
+    const prefix = !concl.isHistorical
+      ? concl.verdict
+      : concl.supersededByDescendant
+        ? `historically ${concl.verdict} (reopened by refuted descendant)`
+        : `historically ${concl.verdict}`;
+    lines.push(`${indent}  > ${prefix}: ${node.conclusion!.reason}`);
   }
 
   for (const ev of node.evidence) {

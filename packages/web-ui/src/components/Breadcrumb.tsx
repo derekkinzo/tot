@@ -1,4 +1,5 @@
 import type { Hypothesis } from '../types';
+import { walkToRoot } from '../tree/walk';
 
 interface Props {
   selectedId: string | null;
@@ -9,16 +10,8 @@ interface Props {
 export default function Breadcrumb({ selectedId, hypotheses, onNavigate }: Props) {
   if (!selectedId) return null;
 
-  const path: Hypothesis[] = [];
-  const seen = new Set<string>();
-  let current: string | null = selectedId;
-  // Stop on a revisit so a malformed parentId cycle can't loop forever.
-  while (current && !seen.has(current)) {
-    seen.add(current);
-    const h = hypotheses.get(current);
-    if (h) path.unshift(h);
-    current = h?.parentId ?? null;
-  }
+  // walkToRoot yields selected→root (ancestor-first); reverse to root→selected.
+  const path: Hypothesis[] = [...walkToRoot(selectedId, hypotheses)].reverse();
 
   if (path.length <= 1) return null;
 

@@ -13,6 +13,20 @@ export function isPruned(status: HypothesisStatus): boolean {
   return status === 'eliminated' || status === 'out-of-scope';
 }
 
+/** React Flow node payload for a hypothesis. Shared by the layout module and the node renderer. */
+export type HypothesisData = {
+  label: string;
+  status: HypothesisStatus;
+  evidenceCount: number;
+  selected: boolean;
+  childCount: number;
+  onPath: boolean;
+  collapsed: boolean;
+  hiddenChildren: number;
+  pulseClass?: string;
+  onToggleCollapse?: (id: string) => void;
+};
+
 export interface Hypothesis {
   id: string;
   parentId: string | null;
