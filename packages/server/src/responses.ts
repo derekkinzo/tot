@@ -38,6 +38,14 @@
  */
 
 import { isLive, isOpen, undisposedNodes } from './closure.js';
+import {
+  needsBaselinePrompt,
+  readsAsInference,
+  isConfirmationBias,
+  lacksSourceDiversity,
+  suggestsElimination,
+  lacksDiagnosticity,
+} from './advisories.js';
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
@@ -180,32 +188,24 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   }
 
   // Baseline prompt: first evidence on this hypothesis
-  const lastEvidence = hypothesis.evidence[hypothesis.evidence.length - 1];
-  if (hypothesis.evidence.length === 1 && lastEvidence && lastEvidence.type !== 'refutes') {
+  if (needsBaselinePrompt(hypothesis)) {
     result += `\nHave you established the baseline? Knowing what 'normal' looks like before the problem makes this observation more diagnostic.\n`;
   }
 
   // Directness detection: inference-language in evidence content
-  if (lastEvidence && (lastEvidence.type === 'supports' || lastEvidence.type === 'neutral')) {
-    const inferenceKeywords = /\b(suggests?|impl(y|ies)|could|might|possibly|consistent with|indicates?|likely|appears?)\b/gi;
-    const matches = lastEvidence.content.match(inferenceKeywords);
-    if (matches && matches.length >= 2) {
-      result += `\nThis reads as inference rather than direct observation. What specific record, measurement, or test would DIRECTLY show the state you're inferring?\n`;
-    }
+  if (readsAsInference(hypothesis)) {
+    result += `\nThis reads as inference rather than direct observation. What specific record, measurement, or test would DIRECTLY show the state you're inferring?\n`;
   }
 
-  // Confirmation bias detection + confounder check (Mill 1843)
-  if (supporting >= 3 && refuting === 0 && activeSiblings.length > 0) {
+  // Confirmation bias detection + confounder check (Popper asymmetry; Mill 1843)
+  if (isConfirmationBias(hypothesis, siblings)) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
   }
 
-  // Source diversity check: all evidence from same source
-  if (hypothesis.evidence.length >= 3) {
-    const sources = hypothesis.evidence.filter((e) => e.source).map((e) => e.source);
-    if (sources.length >= 2 && new Set(sources).size === 1) {
-      result += `\nAll evidence cites the same source. Independent corroboration from a different data source would strengthen this.\n`;
-    }
+  // Source independence (Heuer 1999)
+  if (lacksSourceDiversity(hypothesis)) {
+    result += `\nAll evidence cites the same source. Independent corroboration from a different data source would strengthen this.\n`;
   }
 
   // Unexplored siblings warning
@@ -214,21 +214,18 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     result += `\nUnexplored: ${unexplored.map((u) => truncate(u.content, 25)).join(', ')}\n`;
   }
 
-  // Elimination nudge
-  if (refuting >= 2 && supporting === 0) {
+  // Elimination nudge (Bacon/Mill eliminative induction)
+  if (suggestsElimination(hypothesis)) {
     result += `\n→ ${refuting} refuting, 0 supporting — consider elimination.\n`;
   }
 
   // Diagnosticity: evidence that doesn't discriminate (Heuer 1999, Popper 1959)
-  if (lastEvidence && lastEvidence.type === 'supports' && openSiblings.length > 0) {
-    const noSiblingsRefuted = openSiblings.every((s) => s.evidence.filter((e) => e.type === 'refutes').length === 0);
-    if (noSiblingsRefuted && hypothesis.evidence.length >= 2) {
-      // Name an open rival to make the discrimination concrete. openSiblings is
-      // non-empty here, and excludes corroborated siblings (settled verdicts,
-      // not competitors).
-      const topSibling = openSiblings[0];
-      result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
-    }
+  if (lacksDiagnosticity(hypothesis, siblings)) {
+    // Name an open rival to make the discrimination concrete. openSiblings is
+    // non-empty here (lacksDiagnosticity requires it), and excludes
+    // corroborated siblings (settled verdicts, not competitors).
+    const topSibling = openSiblings[0];
+    result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
   }
 
   // Stale tree detection
