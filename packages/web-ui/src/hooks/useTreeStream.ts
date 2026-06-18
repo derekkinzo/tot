@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useReducer, useRef, useState } from 'react';
-import type { TreeEvent } from '../types';
 import { reducer, initialTreeState } from './treeReducer';
+import { wireEventToAction, nextBackoff, INITIAL_BACKOFF_MS } from './sseProtocol';
 
 /**
  * Subscribes the dashboard to its server's live tree: an SSE stream that
@@ -47,7 +47,7 @@ export function useTreeStream() {
 
     const gen = ++connectionGenRef.current;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let backoff = 1000;
+    let backoff = INITIAL_BACKOFF_MS;
 
     const connect = () => {
       if (connectionGenRef.current !== gen) return;
@@ -56,7 +56,7 @@ export function useTreeStream() {
 
       es.onopen = () => {
         if (connectionGenRef.current !== gen) return;
-        backoff = 1000; // reset after a successful connect
+        backoff = INITIAL_BACKOFF_MS; // reset after a successful connect
         dispatch({ type: 'connected' });
       };
       es.onerror = () => {
@@ -72,40 +72,14 @@ export function useTreeStream() {
           // stack timers and race two EventSources open.
           if (retryTimer) clearTimeout(retryTimer);
           retryTimer = setTimeout(connect, backoff);
-          backoff = Math.min(backoff * 2, 30_000);
+          backoff = nextBackoff(backoff);
         }
       };
 
       es.onmessage = (event) => {
         if (connectionGenRef.current !== gen) return;
-        try {
-          const data: TreeEvent = JSON.parse(event.data);
-          switch (data.type) {
-            case 'snapshot':
-              dispatch({ type: 'snapshot', session: data.session, hypotheses: data.hypotheses });
-              break;
-            case 'session-created':
-              dispatch({ type: 'session-created', session: data.session });
-              break;
-            case 'hypothesis-added':
-              dispatch({ type: 'hypothesis-added', hypothesis: data.hypothesis });
-              break;
-            case 'hypothesis-updated':
-              dispatch({ type: 'hypothesis-updated', hypothesis: data.hypothesis });
-              break;
-            case 'evidence-added':
-              dispatch({ type: 'evidence-added', hypothesisId: data.hypothesisId, evidence: data.evidence });
-              break;
-            case 'session-completed':
-              dispatch({ type: 'session-completed', sessionId: data.sessionId, terminalStatus: data.terminalStatus });
-              break;
-            case 'session-reopened':
-              dispatch({ type: 'session-reopened', sessionId: data.sessionId });
-              break;
-          }
-        } catch {
-          // Ignore unparseable events (keepalive comments, etc.)
-        }
+        const action = wireEventToAction(event.data);
+        if (action) dispatch(action);
       };
     };
 
