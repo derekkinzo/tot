@@ -72,8 +72,11 @@ export function subtreeContainsCorroborated(
   lookup: (id: string) => Hypothesis | undefined,
 ): boolean {
   const stack: string[] = [rootId];
+  const seen = new Set<string>();
   while (stack.length > 0) {
     const id = stack.pop()!;
+    if (seen.has(id)) continue; // guard against a children cycle in a corrupt journal
+    seen.add(id);
     const node = lookup(id);
     if (!node) continue;
     if (isPruned(node.status)) continue;
@@ -81,4 +84,61 @@ export function subtreeContainsCorroborated(
     for (const childId of node.children) stack.push(childId);
   }
   return false;
+}
+
+/**
+ * True when every node in the subtree (inclusive) carries a terminal status.
+ * Unlike {@link undisposedNodes}, this descends THROUGH pruned intermediates:
+ * the one-hop terminal-children gate on corroboration accepts an eliminated
+ * direct child, and pruning never cascades, so a pending grandchild can hide
+ * under a pruned intermediate. Closure requires every reachable node terminal,
+ * so the walk visits every status that has children and short-circuits on the
+ * first non-terminal node.
+ */
+export function fullyTerminal(
+  rootId: string,
+  lookup: (id: string) => Hypothesis | undefined,
+): boolean {
+  const stack: string[] = [rootId];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue; // guard against a children cycle in a corrupt journal
+    seen.add(id);
+    const node = lookup(id);
+    if (!node) continue;
+    if (!isTerminal(node.status)) return false;
+    for (const childId of node.children) stack.push(childId);
+  }
+  return true;
+}
+
+/**
+ * Closure predicate: true when every top-level branch of the session tree has
+ * been disposed of. Disposition splits by the top-level child's status:
+ *   - pruned (eliminated / out-of-scope): the branch is moot; do not descend.
+ *   - corroborated: resolution, but only if its whole subtree is terminal
+ *     ({@link fullyTerminal}) — a corroborated top-level can sit over a pending
+ *     grandchild through an eliminated intermediate, which must NOT count.
+ *   - pending / exploring: undisposed → returns false.
+ * Multiple corroborated leaves are first-class (Mackie INUS). Returns false if
+ * the root is missing.
+ */
+export function topLevelBranchesDisposed(
+  rootId: string,
+  lookup: (id: string) => Hypothesis | undefined,
+): boolean {
+  const root = lookup(rootId);
+  if (!root) return false;
+  for (const childId of root.children) {
+    const child = lookup(childId);
+    if (!child) continue; // missing child → skip (matches prior behavior)
+    if (isPruned(child.status)) continue;
+    if (child.status === 'corroborated') {
+      if (!fullyTerminal(childId, lookup)) return false;
+      continue;
+    }
+    return false; // pending / exploring
+  }
+  return true;
 }

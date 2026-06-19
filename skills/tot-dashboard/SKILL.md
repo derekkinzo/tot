@@ -1,40 +1,32 @@
 ---
 name: tot-dashboard
-description: Use this skill when the user asks to "open the dashboard", "show the visualization", "view the tree in the browser", or wants to launch the live tot-mcp web UI. Opens the system browser to the running daemon's visualization at http://localhost:6274.
+description: Use this skill when the user asks to "open the dashboard", "show the visualization", "view the tree in the browser", or wants to launch the live tot-mcp web UI in the system browser.
 ---
 
 # /tot-dashboard
 
 Open the live Tree of Thought visualization in the default browser.
 
-The tot-mcp daemon serves the dashboard on `http://localhost:6274` whenever it is running. The daemon auto-starts on any MCP tool call, so this skill ensures it is up, then launches the browser.
+Each Claude Code session runs its own tot-mcp server on a private,
+OS-assigned port. The server reports its own dashboard URL through the
+`get_status` MCP tool — there is no fixed address and no separate process
+to start.
 
 ## Instructions
 
-1. **Ensure the daemon is running.** Call the `get_status` MCP tool. The shim auto-starts the daemon if it is not already running. If `get_status` fails (e.g., MCP not connected), fall back to the bundled CLI built by the plugin's SessionStart hook:
-   ```bash
-   if [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
-     echo "CLAUDE_PLUGIN_DATA is not set; this skill must run inside a Claude Code plugin context."
-     exit 1
-   fi
-   CLI="${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js"
-   if [ ! -f "$CLI" ]; then
-     echo "MCP server not built yet. Restart Claude Code to trigger the SessionStart install hook."
-     exit 1
-   fi
-   node "$CLI" status
+1. **Call the `get_status` MCP tool.** Read the final line of its response:
    ```
-   If status reports the daemon is down, start it in the background:
-   ```bash
-   LOG_DIR="${HOME}/.tot"
-   mkdir -p "$LOG_DIR"
-   nohup node "$CLI" serve >"$LOG_DIR/daemon.log" 2>&1 &
-   disown
+   Visualization: http://localhost:<port>
    ```
+   - Present → that is the dashboard URL for this session's tree.
+   - `No open session` → there is no tree yet; tell the user to run
+     `/tot-reason` to start one, then stop.
+   - No `Visualization:` line → the in-process HTTP server did not start;
+     tell the user the dashboard is unavailable and offer `/tot-inspect`.
 
-2. **Open the browser** to the dashboard URL using the first command available on the platform:
+2. **Open the browser** to that URL, substituting the port you read:
    ```bash
-   URL="http://localhost:6274"
+   URL="http://localhost:<port>"   # from the get_status response
    (command -v xdg-open >/dev/null && xdg-open "$URL") \
      || (command -v open >/dev/null && open "$URL") \
      || (command -v start >/dev/null && start "$URL") \
@@ -43,14 +35,16 @@ The tot-mcp daemon serves the dashboard on `http://localhost:6274` whenever it i
 
 3. **Report to the user**, including the URL as a fallback:
    ```
-   Dashboard open at http://localhost:6274
+   Dashboard open at http://localhost:<port>
    - Click nodes to see evidence details
-   - Use the Sessions dropdown to switch between historical sessions
+   - Use the Sessions dropdown to switch between this project's sessions
    - Status bar shows counts by hypothesis status
    ```
 
 ## Notes
 
-- If the browser does not open (headless host, SSH session without forwarding, missing opener), the printed URL is the fallback. The user can also forward the port with `ssh -L 6274:localhost:6274`.
+- If the browser does not open (headless host, SSH session without
+  forwarding, missing opener), the printed URL is the fallback. Forward the
+  reported port with `ssh -L <port>:localhost:<port> <host>`.
 - For a textual summary of the tree without opening a browser, use `/tot-inspect`.
 - For a markdown report of a completed investigation, use `/tot-export`.

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { v4 as uuid } from 'uuid';
-import { isPruned, isTerminal, subtreeContainsCorroborated } from './closure.js';
+import { isPruned, isTerminal, subtreeContainsCorroborated, topLevelBranchesDisposed } from './closure.js';
 import type {
   Evidence,
   Hypothesis,
@@ -586,8 +586,8 @@ export class TreeManager extends EventEmitter {
    *
    * Does NOT emit events. This is intentional: events are for live mutations
    * only. SSE handles initial state via snapshot-on-connect (the browser
-   * receives full state when it connects to /sse). This method is called by
-   * the daemon at startup before any client connections exist.
+   * receives full state when it connects to /sse). This runs at server startup,
+   * before any client connections exist.
    */
   loadState(sessions: Session[], hypotheses: Hypothesis[]): void {
     for (const s of sessions) {
@@ -682,52 +682,11 @@ export class TreeManager extends EventEmitter {
    * the session was closed.
    */
   private tryCloseSession(session: Session, timestamp: string): boolean {
-    if (!this.allTopLevelBranchesDisposed(session)) return false;
-    const root = this.hypotheses.get(session.rootNodeId);
-    if (!root) return false;
+    const lookup = (id: string) => this.hypotheses.get(id);
+    if (!topLevelBranchesDisposed(session.rootNodeId, lookup)) return false;
     const terminal: 'resolved' | 'abandoned' =
-      subtreeContainsCorroborated(root.id, (id) => this.hypotheses.get(id))
-        ? 'resolved'
-        : 'abandoned';
+      subtreeContainsCorroborated(session.rootNodeId, lookup) ? 'resolved' : 'abandoned';
     this.closeSession(session, terminal, timestamp);
-    return true;
-  }
-
-  /**
-   * Closure predicate. Returns true when every top-level branch of the
-   * session tree has been disposed of, where disposition splits into:
-   *
-   *   - eliminated / out-of-scope: pruning. The branch is refuted or set
-   *     aside; its descendants are moot. Do not descend.
-   *   - corroborated: resolution. corroborateHypothesis enforces a one-hop
-   *     terminal-children gate, but accepts an eliminated direct child.
-   *     Through such an intermediate a corroborated top-level can today
-   *     legally sit over a pending grandchild, so terminality must be
-   *     verified by walking the corroborated subtree.
-   *
-   * Multiple corroborated leaves are first-class (Mackie INUS). pending /
-   * exploring at any visited node fails the predicate.
-   */
-  private allTopLevelBranchesDisposed(session: Session): boolean {
-    const root = this.hypotheses.get(session.rootNodeId);
-    if (!root) return false;
-
-    for (const childId of root.children) {
-      const child = this.hypotheses.get(childId);
-      if (!child) continue;
-
-      if (isPruned(child.status)) {
-        continue; // descendants of a pruned branch are moot
-      }
-
-      if (child.status === 'corroborated') {
-        if (!this.subtreeFullyTerminal(childId)) return false;
-        continue;
-      }
-
-      // pending / exploring: undisposed
-      return false;
-    }
     return true;
   }
 
@@ -762,27 +721,6 @@ export class TreeManager extends EventEmitter {
       cursor = cursor.parentId ? this.hypotheses.get(cursor.parentId) : undefined;
     }
     return demoted;
-  }
-
-  /**
-   * Returns true when every descendant in the subtree (inclusive) carries a
-   * terminal status. Pruned intermediates do not short-circuit the walk: the
-   * one-hop terminal-children gate on corroborateHypothesis accepts an
-   * eliminated direct child, and elimination/out-of-scope never cascade, so
-   * a pending grandchild can legally hide under a pruned intermediate. The
-   * closure rule requires every reachable node to be terminal, so the walk
-   * descends through every status that has children.
-   */
-  private subtreeFullyTerminal(rootId: string): boolean {
-    const stack: string[] = [rootId];
-    while (stack.length > 0) {
-      const id = stack.pop()!;
-      const node = this.hypotheses.get(id);
-      if (!node) continue;
-      if (!isTerminal(node.status)) return false;
-      for (const childId of node.children) stack.push(childId);
-    }
-    return true;
   }
 
   private getHypothesisOrThrow(id: string): Hypothesis {

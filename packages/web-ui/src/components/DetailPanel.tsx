@@ -1,5 +1,6 @@
 import type { Hypothesis } from '../types';
 import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
+import { conclusionStatus } from '../tree/conclusion';
 
 interface Props {
   hypothesis: Hypothesis;
@@ -65,13 +66,9 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
           source of truth. supersededBy distinguishes a direct refute from
           a cascade demote triggered by a refute on a descendant. */}
       {hypothesis.conclusion && (() => {
-        const verdict = hypothesis.conclusion.verdict;
-        const supersededBy = hypothesis.conclusion.supersededBy;
-        // supersededBy is the explicit signal; the status/verdict mismatch
-        // is the legacy fallback for journals written before the field
-        // existed (older reopen-on-refute records carry status='exploring'
-        // and verdict='corroborated' without supersededBy).
-        const isHistorical = supersededBy !== undefined || hypothesis.status !== verdict;
+        const status = conclusionStatus(hypothesis)!;
+        const verdict = status.verdict;
+        const isHistorical = status.isHistorical;
         const accent = STATUS_COLORS[verdict] ?? STATUS_COLORS.eliminated;
         const tint =
           verdict === 'corroborated' ? '#052e1620' :
@@ -82,7 +79,7 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
         const verdictLabel = STATUS_LABELS[verdict] ?? verdict;
         const label = !isHistorical
           ? verdictLabel
-          : supersededBy === 'descendant'
+          : status.supersededByDescendant
             ? `Reopened (refuted descendant)`
             : `Reopened from ${verdictLabel}`;
         return (

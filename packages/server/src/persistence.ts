@@ -1,8 +1,8 @@
 import { appendFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { subtreeContainsCorroborated } from './closure.js';
-import type { Evidence, Hypothesis, Session } from './types.js';
+import { applyEntry, deriveScanStatus, emptyReplayState, type JournalEntry } from './replay.js';
+import type { Hypothesis, Session, TreeEvent } from './types.js';
 
 // ─── Session Index (lightweight metadata for lazy loading) ───
 
@@ -13,12 +13,6 @@ export interface SessionIndex {
   createdAt: string;
   filePath: string;
   nodeCount: number; // estimated from line count
-}
-
-interface JournalEntry {
-  timestamp: string;
-  type: string;
-  payload: unknown;
 }
 
 export class Persistence {
@@ -46,8 +40,25 @@ export class Persistence {
 }
 
 /**
- * Scans session files and returns lightweight metadata without replaying events.
- * Reads only the first line (session-created event) + counts lines for nodeCount estimate.
+ * Picks the "active" entry from a set of sessions: the most recently created
+ * open one, falling back to the most recent overall; undefined when empty.
+ * Generic over anything carrying a status + createdAt, so the server's eager
+ * load (SessionIndex), the dashboard default (Session), and `status` all share
+ * one definition of "which session is current".
+ */
+export function pickActiveSession<T extends { status: string; createdAt: string }>(items: T[]): T | undefined {
+  if (items.length === 0) return undefined;
+  const sorted = [...items].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+  return sorted.find((s) => s.status === 'open') ?? sorted[0];
+}
+
+/**
+ * Scans session files and returns lightweight metadata. Folds every line
+ * through the shared {@link applyEntry} reducer (so scan and full replay agree
+ * by construction), then projects the index status via {@link deriveScanStatus}.
+ * Corrupt lines are skipped rather than discarding an otherwise-recoverable file.
  */
 export function scanSessions(dataDir: string): SessionIndex[] {
   if (!existsSync(dataDir)) return [];
@@ -68,76 +79,31 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       const lines = content.split('\n').filter((l) => l.trim());
       if (lines.length === 0) continue;
 
-      // Find the session-created header, tolerating a corrupt/truncated first
-      // line (e.g. a crash mid-first-append) by scanning forward rather than
-      // discarding the whole — otherwise recoverable — file.
-      let session: Session | undefined;
+      const state = emptyReplayState();
+      // Whether any session-completed entry carried an explicit terminalStatus;
+      // when it did, deriveScanStatus trusts it instead of re-deriving via the
+      // spine walk (a legacy/hand-authored terminal session has none).
+      let sawExplicitTerminal = false;
       for (const line of lines) {
         try {
           const entry: JournalEntry = JSON.parse(line);
-          if (entry.type === 'session-created') {
-            session = entry.payload as Session;
-            break;
+          if (entry.type === 'session-completed'
+            && (entry.payload as { terminalStatus?: string }).terminalStatus) {
+            sawExplicitTerminal = true;
           }
+          applyEntry(state, entry);
         } catch {
-          // skip corrupt line, keep scanning for the header
+          // skip corrupt line, keep folding the rest
         }
       }
-      if (!session) continue;
 
-      // Determine final status by tracking the last session-level event.
-      // session-reopened wins over an earlier session-completed; the
-      // session-completed payload's terminalStatus disambiguates resolved
-      // from abandoned, and falls back to a pruning-aware spine walk if
-      // the field is missing.
-      let status: SessionIndex['status'] = session.status;
-      let lastSessionEvent: 'completed' | 'reopened' | null = null;
-      let lastTerminalStatus: 'resolved' | 'abandoned' | undefined;
-      const latestHypothesis = new Map<string, Hypothesis>();
-      for (let i = 1; i < lines.length; i++) {
-        try {
-          const entry: JournalEntry = JSON.parse(lines[i]);
-          if (entry.type === 'session-completed') {
-            lastSessionEvent = 'completed';
-            lastTerminalStatus = (entry.payload as { terminalStatus?: 'resolved' | 'abandoned' }).terminalStatus;
-          } else if (entry.type === 'session-reopened') {
-            lastSessionEvent = 'reopened';
-            lastTerminalStatus = undefined;
-          } else if (entry.type === 'hypothesis-added' || entry.type === 'hypothesis-updated') {
-            const h = entry.payload as Hypothesis;
-            latestHypothesis.set(h.id, h);
-          }
-        } catch {
-          // skip corrupt lines
-        }
-      }
-      if (lastSessionEvent === 'reopened') {
-        status = 'open';
-      } else {
-        const reachedTerminal =
-          lastSessionEvent === 'completed' ||
-          (lastSessionEvent === null && status !== 'open');
-        if (reachedTerminal) {
-          if (lastTerminalStatus) {
-            status = lastTerminalStatus;
-          } else {
-            // Discriminate by the hypothesis tree's final state. The walker
-            // skips descendants of pruned ancestors so it agrees with the
-            // engine's closure choice: only a corroborated hypothesis on a
-            // non-pruned lineage counts as survival.
-            const hasCorroborated = subtreeContainsCorroborated(
-              session.rootNodeId,
-              (id) => latestHypothesis.get(id),
-            );
-            status = hasCorroborated ? 'resolved' : 'abandoned';
-          }
-        }
-      }
+      const session = state.sessions[0];
+      if (!session) continue; // no session-created header → not a usable session file
 
       index.push({
         id: session.id,
         problem: session.problem,
-        status,
+        status: deriveScanStatus(session, state.hypotheses, sawExplicitTerminal),
         createdAt: session.createdAt,
         filePath,
         nodeCount: lines.length, // rough estimate (includes non-hypothesis events)
@@ -160,73 +126,57 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
     const lines = content.split('\n').filter((l) => l.trim());
     if (lines.length === 0) return null;
 
-    const sessions: Session[] = [];
-    const hypotheses: Hypothesis[] = [];
-
+    const state = emptyReplayState();
     for (const line of lines) {
       try {
-        const entry: JournalEntry = JSON.parse(line);
-        replayEntry(entry, sessions, hypotheses);
+        applyEntry(state, JSON.parse(line) as JournalEntry);
       } catch {
         // skip corrupt lines
       }
     }
 
-    if (sessions.length === 0) return null;
-    return { session: sessions[0], hypotheses };
+    if (state.sessions.length === 0) return null;
+    return { session: state.sessions[0], hypotheses: state.hypotheses };
   } catch {
     return null;
   }
 }
 
-function replayEntry(
-  entry: JournalEntry,
-  sessions: Session[],
-  hypotheses: Hypothesis[],
-): void {
-  switch (entry.type) {
-    case 'session-created': {
-      sessions.push(entry.payload as Session);
-      break;
-    }
-    case 'hypothesis-added': {
-      hypotheses.push(entry.payload as Hypothesis);
-      break;
-    }
-    case 'hypothesis-updated': {
-      const updated = entry.payload as Hypothesis;
-      const idx = hypotheses.findIndex((h) => h.id === updated.id);
-      if (idx >= 0) hypotheses[idx] = updated;
-      else hypotheses.push(updated);
-      break;
-    }
-    case 'evidence-added': {
-      // The current tool layer persists evidence via the full hypothesis-updated
-      // snapshot, not a discrete evidence-added entry, so this branch does not
-      // fire on journals written today. It is retained so a journal that does
-      // carry the SSE-mirrored evidence-added event still replays correctly.
-      const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
-      const h = hypotheses.find((hyp) => hyp.id === hypothesisId);
-      if (h) h.evidence.push(evidence);
-      break;
-    }
-    case 'session-completed': {
-      const payload = entry.payload as { sessionId: string; terminalStatus: 'resolved' | 'abandoned' };
-      const s = sessions.find((sess) => sess.id === payload.sessionId);
-      if (!s) break;
-      s.status = payload.terminalStatus;
-      s.completedAt = entry.timestamp;
-      break;
-    }
-    case 'session-reopened': {
-      const { sessionId } = entry.payload as { sessionId: string };
-      const s = sessions.find((sess) => sess.id === sessionId);
-      if (s) {
-        s.status = 'open';
-        s.completedAt = undefined;
-      }
-      break;
-    }
+/** A journalable record derived from an engine event: which session's file it
+ *  belongs to, and the {type, payload} to append. */
+export interface JournalRecord {
+  sessionId: string;
+  type: string;
+  payload: unknown;
+}
+
+/**
+ * Maps an engine {@link TreeEvent} to the journal record to persist, or `null`
+ * for events that are not journaled. This is the write-side counterpart to
+ * applyEntry in replay.ts (the read side); a journaled type must have a
+ * matching applyEntry case.
+ *
+ * `evidence-added` is deliberately NOT journaled. The engine appends the
+ * evidence to the hypothesis before emitting, so the `hypothesis-updated` event
+ * that immediately follows already carries it; recording both would have replay
+ * apply the same evidence twice. `snapshot` is never emitted by the engine.
+ * Each journaled event self-carries its session id, so routing needs no
+ * hypothesis→session lookup.
+ */
+export function journalEventToEntry(event: TreeEvent): JournalRecord | null {
+  switch (event.type) {
+    case 'session-created':
+      return { sessionId: event.session.id, type: event.type, payload: event.session };
+    case 'hypothesis-added':
+    case 'hypothesis-updated':
+      return { sessionId: event.hypothesis.sessionId, type: event.type, payload: event.hypothesis };
+    case 'session-completed':
+      return { sessionId: event.sessionId, type: event.type, payload: { sessionId: event.sessionId, terminalStatus: event.terminalStatus } };
+    case 'session-reopened':
+      return { sessionId: event.sessionId, type: event.type, payload: { sessionId: event.sessionId } };
+    case 'evidence-added':
+    case 'snapshot':
+      return null;
   }
 }
 

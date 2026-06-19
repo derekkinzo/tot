@@ -34,7 +34,7 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 - **Hypothesis trees** — decompose problems into competing hypotheses at multiple levels
 - **Evidence tracking** — typed evidence (supports/refutes/neutral) attached to each hypothesis
 - **Systematic elimination** — mark dead ends with documented reasoning
-- **Live visualization** — watch the tree build in real-time at `localhost:6274`
+- **Live visualization** — watch the tree build in real-time in your browser (the URL is reported by `get_status`)
 - **Decomposition guidance** — structural checks flag sibling overlap, missing coverage, and uneven abstraction levels
 - **Adaptive signals** — tool responses prompt agents to seek refuting evidence and avoid confirmation bias
 
@@ -86,8 +86,9 @@ client's MCP configuration:
 }
 ```
 
-Open `http://localhost:6274` after the first MCP tool call to see the
-visualization.
+Call the `get_status` tool after creating a tree; its response ends with a
+`Visualization: http://localhost:<port>` line. Open that URL to see the live
+tree. Each MCP server instance picks its own free port at startup.
 
 ### Requirements
 
@@ -120,11 +121,11 @@ MCP tools. Point Claude Code at the cloned directory to load them.
 
 | Slash command | Purpose |
 |-------|---------|
-| `/tot` | Open the live tree visualization scoped to the current project (`?project=<cwd>`) — the right command when several Claude Code sessions share one daemon |
+| `/tot` | Open the live tree visualization for the current project in the browser |
 | `/tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
 | `/tot-inspect` | View current tree state, progress, and visualization |
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |
-| `/tot-dashboard` | Open the dashboard at `localhost:6274` showing whichever project was last active across all sessions |
+| `/tot-dashboard` | Open the live dashboard in the browser (URL reported by `get_status`) |
 
 | Agent | Purpose |
 |-------|---------|
@@ -150,7 +151,9 @@ The tool responses guide the agent through this process — prompting for refuti
 
 ## Visualization
 
-The browser UI at `localhost:6274` shows:
+Each MCP server instance starts an in-process web server on an OS-assigned
+port and reports the URL in the `get_status` tool response
+(`Visualization: http://localhost:<port>`). The browser UI shows:
 
 - **Live tree updates** via Server-Sent Events (no polling)
 - **Color-coded status** — pending (blue), exploring (yellow), eliminated (dimmed), corroborated (green)
@@ -159,19 +162,22 @@ The browser UI at `localhost:6274` shows:
 - **Follow mode** — auto-tracks agent activity (press F to toggle)
 - **Export** — download tree as Markdown
 
-## CLI
+## Where your trees are stored
 
-The build emits a single executable. Manual-clone path:
-`packages/server/dist/cli.js`. Plugin path:
-`${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js`.
+Each reasoning tree is saved as an append-only JSON file under your home
+directory, grouped by project:
 
-```bash
-node <cli.js>              # Start MCP shim (what clients spawn)
-node <cli.js> serve        # Start daemon for offline viewing
-node <cli.js> status       # Show daemon + session info
-node <cli.js> stop         # Stop daemon
-node <cli.js> --help       # Usage
 ```
+~/.tot/projects/<project-id>/sessions/<sessionId>.jsonl
+```
+
+Trees persist across restarts — reopen a project and its sessions are still
+there. To store them somewhere else, set the `TOT_DATA_DIR` environment
+variable to any directory (it otherwise defaults to `$XDG_STATE_HOME/tot`,
+then `~/.tot`).
+
+Run `tot-mcp status` from a project to see where that project's trees live and
+list its recent sessions.
 
 ## Research Background
 

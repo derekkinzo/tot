@@ -7,7 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
-import { scanSessions, loadSession } from '../src/persistence.js';
+import { scanSessions, loadSession, pickActiveSession, type SessionIndex } from '../src/persistence.js';
 import type { Session, Hypothesis } from '../src/types.js';
 
 function parseResult(result: any): any {
@@ -522,5 +522,105 @@ describe('Persistence Roundtrip', () => {
 
     const { sessions } = loadAllSessions(tempDir);
     expect(sessions[0].status).toBe('resolved');
+  });
+
+  // ─── Event-sourced journaling: on-disk format contract ───
+  //
+  // Journaling is driven by the engine event stream. These tests pin the
+  // resulting on-disk format so a future "journal every event" change cannot
+  // silently re-introduce the evidence double-apply path or reorder the log.
+
+  function readJournalTypes(): string[] {
+    const files = require('fs').readdirSync(tempDir).filter((f: string) => f.endsWith('.jsonl'));
+    const content = readFileSync(join(tempDir, files[0]), 'utf-8');
+    return content.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l).type);
+  }
+
+  it('add_evidence journals exactly one hypothesis-updated and zero evidence-added lines', async () => {
+    // The engine emits evidence-added THEN hypothesis-updated; the journal must
+    // record only the latter (which already carries the evidence), so replay
+    // cannot apply the same evidence twice.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree', arguments: { problem: 'Evidence omission' },
+    }));
+    await client.callTool({
+      name: 'add_evidence', arguments: { hypothesisId: rootId, type: 'supports', content: 'datum' },
+    });
+    await cleanup();
+
+    const types = readJournalTypes();
+    expect(types.filter((t) => t === 'evidence-added')).toHaveLength(0);
+    // session-created + hypothesis-added(root) + hypothesis-updated(root, post-evidence)
+    expect(types).toEqual(['session-created', 'hypothesis-added', 'hypothesis-updated']);
+  });
+
+  it('journal line order on disk equals engine emit order for the reopen+cascade path', async () => {
+    // The journal now inherits its ordering from the engine emit sequence
+    // rather than hand-curated appends. Pin the exact disk order so a future
+    // emit reorder in the engine fails here instead of silently reordering
+    // the audit log.
+    const { client, cleanup } = await createServerWithClient(tempDir);
+    const { rootId } = parseResult(await client.callTool({
+      name: 'create_tree', arguments: { problem: 'Order pin' },
+    }));
+    const { childIds } = parseResult(await client.callTool({
+      name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] },
+    }));
+    // Resolve via A corroborated, B eliminated → session-completed.
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
+    // Now refute the corroborated A: engine demotes A (hypothesis-updated) then
+    // reopens the session (session-reopened) — in that order.
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'counter' } });
+    await cleanup();
+
+    const types = readJournalTypes();
+    expect(types).toEqual([
+      'session-created',
+      'hypothesis-added',   // root
+      'hypothesis-added',   // A
+      'hypothesis-added',   // B
+      'hypothesis-updated', // parent (root) after decompose
+      'hypothesis-updated', // A after supports evidence
+      'hypothesis-updated', // A corroborated
+      'hypothesis-updated', // B after refutes evidence
+      'hypothesis-updated', // B eliminated
+      'session-completed',  // session resolves (A corroborated, B eliminated)
+      'hypothesis-updated', // A demoted by the counter-evidence
+      'session-reopened',   // session reopens — AFTER the demotion
+    ]);
+  });
+
+});
+
+describe('pickActiveSession', () => {
+  const idx = (over: Partial<SessionIndex>): SessionIndex => ({
+    id: 'id', problem: 'p', status: 'open', createdAt: '2024-01-01T00:00:00.000Z',
+    filePath: '/x.jsonl', nodeCount: 1, ...over,
+  });
+
+  it('returns undefined for an empty index', () => {
+    expect(pickActiveSession([])).toBeUndefined();
+  });
+
+  it('prefers the most recently created OPEN session over a newer terminal one', () => {
+    const oldOpen = idx({ id: 'old-open', status: 'open', createdAt: '2024-01-01T00:00:00.000Z' });
+    const newResolved = idx({ id: 'new-resolved', status: 'resolved', createdAt: '2024-06-01T00:00:00.000Z' });
+    expect(pickActiveSession([newResolved, oldOpen])?.id).toBe('old-open');
+  });
+
+  it('among multiple open sessions, picks the most recently created', () => {
+    const a = idx({ id: 'a', status: 'open', createdAt: '2024-01-01T00:00:00.000Z' });
+    const b = idx({ id: 'b', status: 'open', createdAt: '2024-03-01T00:00:00.000Z' });
+    expect(pickActiveSession([a, b])?.id).toBe('b');
+  });
+
+  it('falls back to the most recent overall when no session is open', () => {
+    const older = idx({ id: 'older', status: 'resolved', createdAt: '2024-01-01T00:00:00.000Z' });
+    const newer = idx({ id: 'newer', status: 'abandoned', createdAt: '2024-09-01T00:00:00.000Z' });
+    expect(pickActiveSession([older, newer])?.id).toBe('newer');
   });
 });

@@ -4,24 +4,17 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
-import type { ProjectState } from './daemon.js';
+import type { ProjectState } from './project-state.js';
+import { pickActiveSession } from './persistence.js';
+import { SseHub } from './sse-hub.js';
 
-/** Most recently created active session, falling back to the most recent overall. */
+/** Most recently created open session, falling back to the most recent overall. */
 function pickDefaultSession(tm: TreeManager): Session | null {
-  const sessions = tm.getAllSessions().sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-  return sessions.find((s) => s.status === 'open') ?? sessions[0] ?? null;
+  return pickActiveSession(tm.getAllSessions()) ?? null;
 }
 
-export interface MultiProjectContext {
-  getProject: (projectDir: string) => ProjectState | undefined;
-  getAllProjects: () => ProjectState[];
-  getLastActiveProject: () => string | null;
-  withLock: <T>(projectDir: string, fn: () => Promise<T>) => Promise<T>;
-  onSseConnect: () => void;
-  onSseDisconnect: () => void;
-}
+/** Runs `fn` under the project's read/mutate mutex. */
+export type ProjectLock = <T>(fn: () => Promise<T>) => Promise<T>;
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const STATIC_DIR = resolve(__dirname, '..', 'static');
@@ -33,133 +26,40 @@ function setCorsHeaders(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 }
 
+/** A running visualization server: the bound port and a teardown handle. */
+export interface HttpServerHandle {
+  port: number;
+  close: () => Promise<void>;
+}
+
+/** Builds the snapshot event for a project's default session (null if no session). */
+function snapshotEvent(tm: TreeManager): TreeEvent {
+  const session = pickDefaultSession(tm);
+  if (!session) return { type: 'snapshot', session: null, hypotheses: [] };
+  const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
+  return { type: 'snapshot', session, hypotheses };
+}
+
 /**
- * Start the HTTP server for multi-project visualization.
- * Returns the actual port the server is listening on.
+ * Start the HTTP visualization server for one project. Pass port 0 for an
+ * OS-assigned ephemeral port; the bound port is returned in the resolved
+ * handle. `lock` serializes the state read against MCP mutations.
  */
-export async function startHttpServer(port: number, ctx: MultiProjectContext): Promise<number> {
-  // Track SSE clients per project
-  const sseClients = new Map<string, Set<ServerResponse>>(); // projectDir → clients
-  const eventCounters = new Map<string, number>(); // projectDir → eventId
-  // Clients connected before their project existed. The value is the project
-  // they requested via ?project= (null = no preference), so the flush only
-  // binds a client to the project it actually wanted.
-  const waitingClients = new Map<ServerResponse, string | null>();
-  // The TreeManager instance currently subscribed per project. After an LRU
-  // eviction the daemon rebuilds a project with a fresh TreeManager; tracking
-  // the instance lets ensureSubscribed detect the swap and re-wire the listener
-  // (a projectDir-only check would wrongly treat the stale entry as live).
-  const subscribedManagers = new Map<string, TreeManager>();
-  const subscribedListeners = new Map<string, (event: TreeEvent) => void>();
+export async function startHttpServer(
+  port: number,
+  project: ProjectState,
+  lock: ProjectLock,
+  onSseConnect: () => void,
+  onSseDisconnect: () => void,
+): Promise<HttpServerHandle> {
+  const hub = new SseHub(onSseConnect, onSseDisconnect);
+  hub.subscribe(project.tm);
 
-  // Single chokepoint for removing an SSE client from whichever collection
-  // holds it. Fires onSseDisconnect exactly once — only when the delete truly
-  // removed an entry — so the connect/disconnect count stays balanced whether
-  // a client is reaped by a keepalive write failure or by the req 'close'
-  // event (whichever happens first; the second call is a no-op).
-  function dropClient(client: ServerResponse, from: Set<ServerResponse> | Map<ServerResponse, unknown>): void {
-    if (from.delete(client)) {
-      ctx.onSseDisconnect();
-    }
-  }
-
-  // Subscribe to tree events for all registered (and future) projects
-  function subscribeProject(state: ProjectState): void {
-    const { projectDir, tm } = state;
-    if (!sseClients.has(projectDir)) {
-      sseClients.set(projectDir, new Set());
-      eventCounters.set(projectDir, 0);
-    }
-    // Remove a listener bound to a previous (evicted) manager so it can be GC'd
-    // and stops firing into a stale closure.
-    const priorTm = subscribedManagers.get(projectDir);
-    const priorListener = subscribedListeners.get(projectDir);
-    if (priorTm && priorListener && priorTm !== tm) {
-      priorTm.removeListener('event', priorListener);
-    }
-
-    const listener = (event: TreeEvent) => {
-      // Flush waiting clients onto this project — but only those that did not
-      // ask for a *different* project. A client that named another project via
-      // ?project= stays waiting until its own project fires/registers, so it
-      // is never bound to the wrong tree.
-      if (waitingClients.size > 0) {
-        const clients = sseClients.get(projectDir)!;
-        for (const [wc, requested] of waitingClients) {
-          if (requested && requested !== projectDir) continue;
-          clients.add(wc);
-          waitingClients.delete(wc);
-          const session = pickDefaultSession(tm);
-          if (session) {
-            const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
-            const snapshot: TreeEvent = { type: 'snapshot', session, hypotheses };
-            try { wc.write(`id: 0\ndata: ${JSON.stringify(snapshot)}\n\n`); } catch { clients.delete(wc); }
-          }
-        }
-      }
-
-      const clients = sseClients.get(projectDir);
-      if (!clients || clients.size === 0) return;
-
-      const counter = (eventCounters.get(projectDir) || 0) + 1;
-      eventCounters.set(projectDir, counter);
-
-      const data = `id: ${counter}\ndata: ${JSON.stringify(event)}\n\n`;
-      for (const client of clients) {
-        try {
-          client.write(data);
-        } catch {
-          clients.delete(client);
-        }
-      }
-    };
-
-    tm.on('event', listener);
-    subscribedManagers.set(projectDir, tm);
-    subscribedListeners.set(projectDir, listener);
-  }
-
-  // Subscribe existing projects and set up a poll for new ones
-  for (const state of ctx.getAllProjects()) {
-    subscribeProject(state);
-  }
-
-  // Check for new projects every time a request comes in (lightweight). Also
-  // re-subscribe a project whose TreeManager was replaced (LRU eviction then
-  // reload builds a fresh instance) so its live events keep reaching clients.
-  function ensureSubscribed(): void {
-    for (const state of ctx.getAllProjects()) {
-      if (subscribedManagers.get(state.projectDir) !== state.tm) {
-        subscribeProject(state);
-      }
-    }
-  }
-
-  // SSE keepalive every 30s
-  setInterval(() => {
-    for (const [, clients] of sseClients) {
-      for (const client of clients) {
-        try {
-          client.write(': keepalive\n\n');
-        } catch {
-          dropClient(client, clients);
-        }
-      }
-    }
-    for (const client of waitingClients.keys()) {
-      try {
-        client.write(': keepalive\n\n');
-      } catch {
-        dropClient(client, waitingClients);
-      }
-    }
-  }, 30_000).unref();
+  const keepaliveTimer = setInterval(() => hub.keepalive(), 30_000);
+  keepaliveTimer.unref();
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
-
-    // Ensure all projects are subscribed (catches newly registered ones)
-    ensureSubscribed();
 
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
@@ -171,31 +71,25 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
 
     if (url.pathname === '/sse') {
       setCorsHeaders(res);
-      handleSSE(req, res, url, ctx, sseClients, waitingClients, dropClient);
+      handleSSE(req, res, project, hub);
       return;
     }
 
     if (url.pathname === '/api/state') {
       setCorsHeaders(res);
-      await handleStateAPI(res, url, ctx);
+      await handleStateAPI(res, url, project, lock);
       return;
     }
 
     if (url.pathname === '/api/sessions') {
       setCorsHeaders(res);
-      handleSessionsAPI(res, url, ctx);
-      return;
-    }
-
-    if (url.pathname === '/api/projects') {
-      setCorsHeaders(res);
-      handleProjectsAPI(res, ctx);
+      handleSessionsAPI(res, project);
       return;
     }
 
     if (url.pathname === '/api/info') {
       setCorsHeaders(res);
-      handleInfoAPI(res, ctx);
+      handleInfoAPI(res, project);
       return;
     }
 
@@ -203,113 +97,69 @@ export async function startHttpServer(port: number, ctx: MultiProjectContext): P
     await serveStatic(req, res);
   });
 
-  return new Promise<number>((resolve, reject) => {
+  return new Promise<HttpServerHandle>((resolve, reject) => {
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         console.error(`[tot-mcp] Warning: port ${port} in use, HTTP visualization disabled`);
       } else {
         console.error(`[tot-mcp] HTTP error: ${err.message}`);
       }
+      clearInterval(keepaliveTimer);
       reject(err);
     });
 
+    // listen(0) lets the OS assign a free port; read the bound port back from
+    // address() so the caller can advertise the real URL.
     server.listen(port, 'localhost', () => {
-      console.error(`[tot-mcp] Visualization: http://localhost:${port}`);
-      resolve(port);
+      const boundPort = (server.address() as import('node:net').AddressInfo).port;
+      console.error(`[tot-mcp] Visualization: http://localhost:${boundPort}`);
+      resolve({
+        port: boundPort,
+        close: () => new Promise<void>((res) => {
+          clearInterval(keepaliveTimer);
+          // SSE responses are long-lived keep-alive streams; server.close()
+          // only fires its callback once every connection ends, so without
+          // forcibly closing them an open dashboard tab would hang shutdown
+          // (and block process exit) indefinitely.
+          server.closeAllConnections();
+          server.close(() => res());
+        }),
+      });
     });
   });
 }
 
-function resolveProject(url: URL, ctx: MultiProjectContext): ProjectState | null {
-  const projectParam = url.searchParams.get('project');
-  if (projectParam) {
-    const p = ctx.getProject(projectParam);
-    return p ?? null;
-  }
-  // Default: most recently active project
-  const last = ctx.getLastActiveProject();
-  if (last) {
-    return ctx.getProject(last) ?? null;
-  }
-  // Fallback: first registered project
-  const all = ctx.getAllProjects();
-  return all.length > 0 ? all[0] : null;
-}
-
-function handleSSE(
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  ctx: MultiProjectContext,
-  sseClients: Map<string, Set<ServerResponse>>,
-  waitingClients: Map<ServerResponse, string | null>,
-  dropClient: (client: ServerResponse, from: Set<ServerResponse> | Map<ServerResponse, unknown>) => void,
-): void {
-  const project = resolveProject(url, ctx);
-  if (!project) {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-    });
-    res.flushHeaders();
-    // No project yet — record which project (if any) this client asked for so
-    // the flush only binds it to that project, never an unrelated one.
-    waitingClients.set(res, url.searchParams.get('project'));
-    ctx.onSseConnect();
-    req.on('close', () => dropClient(res, waitingClients));
-    return;
-  }
-
-  const { projectDir, tm } = project;
-
+function writeSseHeaders(res: ServerResponse): void {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
   });
   res.flushHeaders();
-
-  // Send initial snapshot.
-  const session = pickDefaultSession(tm);
-  if (session) {
-    const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
-    const snapshot: TreeEvent = { type: 'snapshot', session, hypotheses };
-    res.write(`id: 0\ndata: ${JSON.stringify(snapshot)}\n\n`);
-  } else {
-    const empty: TreeEvent = { type: 'snapshot', session: null as any, hypotheses: [] };
-    res.write(`id: 0\ndata: ${JSON.stringify(empty)}\n\n`);
-  }
-
-  // Register client for this project
-  if (!sseClients.has(projectDir)) {
-    sseClients.set(projectDir, new Set());
-  }
-  sseClients.get(projectDir)!.add(res);
-  ctx.onSseConnect();
-
-  req.on('close', () => {
-    const clients = sseClients.get(projectDir);
-    if (clients) dropClient(res, clients);
-  });
 }
 
-async function handleStateAPI(res: ServerResponse, url: URL, ctx: MultiProjectContext): Promise<void> {
-  const project = resolveProject(url, ctx);
-  if (!project) {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ session: null, hypotheses: [] }));
-    return;
-  }
+function handleSSE(
+  req: IncomingMessage,
+  res: ServerResponse,
+  project: ProjectState,
+  hub: SseHub,
+): void {
+  writeSseHeaders(res);
+  // Send the initial snapshot, then register for live events.
+  res.write(`id: 0\ndata: ${JSON.stringify(snapshotEvent(project.tm))}\n\n`);
+  hub.addClient(res);
+  req.on('close', () => hub.removeClient(res));
+}
 
-  const { tm, projectDir } = project;
+async function handleStateAPI(res: ServerResponse, url: URL, project: ProjectState, lock: ProjectLock): Promise<void> {
+  const { tm } = project;
   const requestedSessionId = url.searchParams.get('sessionId');
 
-  // Lazy-load + read snapshot under the per-project lock so ensureSessionLoaded
+  // Lazy-load + read snapshot under the project lock so ensureSessionLoaded
   // (which writes the in-memory sessions/hypotheses Maps) cannot interleave
   // with an MCP handler mid-mutation.
   try {
-    const payload = await ctx.withLock(projectDir, async () => {
+    const payload = await lock(async () => {
       if (requestedSessionId) {
         project.ensureSessionLoaded(requestedSessionId);
       }
@@ -332,14 +182,8 @@ async function handleStateAPI(res: ServerResponse, url: URL, ctx: MultiProjectCo
   }
 }
 
-function handleSessionsAPI(res: ServerResponse, url: URL, ctx: MultiProjectContext): void {
+function handleSessionsAPI(res: ServerResponse, project: ProjectState): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
-
-  const project = resolveProject(url, ctx);
-  if (!project) {
-    res.end(JSON.stringify({ sessions: [] }));
-    return;
-  }
 
   const { tm, sessionIndex } = project;
 
@@ -397,48 +241,19 @@ function handleSessionsAPI(res: ServerResponse, url: URL, ctx: MultiProjectConte
   res.end(JSON.stringify({ sessions: summaries }));
 }
 
-function handleProjectsAPI(res: ServerResponse, ctx: MultiProjectContext): void {
+function handleInfoAPI(res: ServerResponse, project: ProjectState): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
 
-  const projects = ctx.getAllProjects().map((p) => {
-    const openSessions = p.tm.getAllSessions().filter((s) => s.status === 'open');
-    const latestOpen = openSessions.sort((a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )[0];
-
-    return {
-      dir: p.projectDir,
-      activeProblem: latestOpen?.problem ?? null,
-      sessionCount: p.sessionIndex.length || p.tm.getAllSessions().length,
-    };
-  });
-
-  res.end(JSON.stringify({ projects, lastActive: ctx.getLastActiveProject() }));
-}
-
-function handleInfoAPI(res: ServerResponse, ctx: MultiProjectContext): void {
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-
-  const projects = ctx.getAllProjects().map((p) => {
-    const openSessions = p.tm.getAllSessions().filter((s) => s.status === 'open');
-    const latestOpen = openSessions.sort((a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )[0];
-
-    return {
-      dir: p.projectDir,
-      activeProblem: latestOpen?.problem ?? null,
-      sessionCount: p.sessionIndex.length || p.tm.getAllSessions().length,
-      persistenceHealthy: p.persistenceHealthy,
-    };
-  });
-
-  const lastActive = ctx.getLastActiveProject();
+  const openSessions = project.tm.getAllSessions().filter((s) => s.status === 'open');
+  const latestOpen = openSessions.sort((a, b) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )[0];
 
   res.end(JSON.stringify({
-    projectDir: lastActive || (projects.length > 0 ? projects[0].dir : ''),
-    projects,
-    lastActive,
+    projectDir: project.projectDir,
+    activeProblem: latestOpen?.problem ?? null,
+    sessionCount: project.sessionIndex.length || project.tm.getAllSessions().length,
+    persistenceHealthy: project.persistenceHealthy,
   }));
 }
 

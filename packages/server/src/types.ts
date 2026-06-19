@@ -80,7 +80,7 @@ export type TreeEvent =
   | { type: 'evidence-added'; hypothesisId: string; evidence: Evidence }
   | { type: 'session-completed'; sessionId: string; terminalStatus: 'resolved' | 'abandoned' }
   | { type: 'session-reopened'; sessionId: string }
-  | { type: 'snapshot'; session: Session; hypotheses: Hypothesis[] };
+  | { type: 'snapshot'; session: Session | null; hypotheses: Hypothesis[] };
 
 export interface StructuralCheck {
   childCount: number;

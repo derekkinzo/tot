@@ -1,20 +1,9 @@
 import { memo, useState, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { STATUS_NODE_STYLES } from '../theme';
-import { isPruned, type HypothesisStatus } from '../types';
+import { isPruned, type HypothesisData } from '../types';
 
-export type HypothesisData = {
-  label: string;
-  status: HypothesisStatus;
-  evidenceCount: number;
-  selected: boolean;
-  childCount: number;
-  onPath: boolean;
-  collapsed: boolean;
-  hiddenChildren: number;
-  pulseClass?: string;
-  onToggleCollapse?: (id: string) => void;
-};
+export type { HypothesisData };
 
 function HypothesisNode({ id: nodeId, data }: NodeProps) {
   const d = data as unknown as HypothesisData;
