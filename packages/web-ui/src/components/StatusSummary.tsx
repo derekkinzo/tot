@@ -28,6 +28,8 @@ export default function StatusSummary({ hypotheses, session }: Props) {
   return (
     <div className="overlay-widget" style={{
       display: 'flex',
+      flexWrap: 'wrap',
+      alignItems: 'center',
       gap: 12,
       fontSize: 12,
     }}>
