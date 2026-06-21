@@ -271,13 +271,17 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#30363d" gap={20} />
-        <Controls position="bottom-right" />
+        {/* Controls and MiniMap each own a bottom corner; no Panel shares
+            those corners, so the zoom/fit buttons stay clickable. */}
+        <Controls position="bottom-left" />
         <MiniMap
+          position="bottom-right"
           nodeColor={(n) => STATUS_COLORS[(n.data as HypothesisData)?.status as keyof typeof STATUS_COLORS] ?? '#6b7280'}
           style={{ background: '#1c1f26', border: '1px solid #30363d' }}
         />
 
-        {/* Overlays via Panel */}
+        {/* Info overlays cluster in the top corners, each corner a vertical
+            stack so widgets flow instead of overlapping. */}
         <Panel position="top-left">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div className="overlay-widget" style={{ fontSize: 13 }}>
@@ -294,21 +298,17 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
               </div>
             </div>
             {selectedId && <Breadcrumb selectedId={selectedId} hypotheses={hypotheses} onNavigate={onSelect} />}
+            <StatusSummary hypotheses={hypotheses} session={session} />
           </div>
         </Panel>
 
         <Panel position="top-right">
-          {session && (
-            <FollowIndicator followMode={followMode} onToggle={onToggleFollow} />
-          )}
-        </Panel>
-
-        <Panel position="bottom-left">
-          <StatusSummary hypotheses={hypotheses} session={session} />
-        </Panel>
-
-        <Panel position="bottom-right">
-          <Legend />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+            {session && (
+              <FollowIndicator followMode={followMode} onToggle={onToggleFollow} />
+            )}
+            <Legend />
+          </div>
         </Panel>
       </ReactFlow>
 

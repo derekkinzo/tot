@@ -49,7 +49,7 @@ export default function ExportButton({ session, hypotheses }: Props) {
       </button>
       {showMenu && (
         <div style={{
-          position: 'absolute', bottom: '100%', left: 0, marginBottom: 4,
+          position: 'absolute', top: '100%', left: 0, marginTop: 4,
           background: '#1c1f26', border: '1px solid #30363d', borderRadius: 6,
           boxShadow: '0 4px 12px rgba(0,0,0,0.4)', padding: '4px 0', minWidth: 160, zIndex: 1000,
         }}>
