@@ -132,6 +132,9 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
         // mid-write does not lose an acknowledged mutation.
         await drainAll();
         if (httpClose) await httpClose();
+        // Close the MCP server + its transport so the protocol layer tears down
+        // cleanly rather than relying on the process exit alone.
+        await server.close().catch(() => { /* already closed / never connected */ });
       })();
     }
     return closing;

@@ -1,11 +1,21 @@
 import { subtreeContainsCorroborated } from './closure.js';
 import type { Evidence, Hypothesis, Session } from './types.js';
 
-/** A journal entry as stored on disk: a timestamped, typed payload. */
+/**
+ * Current journal schema version, stamped on every entry written. Bump when the
+ * on-disk entry/payload shape changes incompatibly; {@link applyEntry} can then
+ * branch on `entry.v` to upcast older entries. Entries with no `v` predate
+ * versioning and are treated as v1.
+ */
+export const JOURNAL_SCHEMA_VERSION = 1;
+
+/** A journal entry as stored on disk: a timestamped, typed, versioned payload. */
 export interface JournalEntry {
   timestamp: string;
   type: string;
   payload: unknown;
+  /** Schema version; absent in pre-versioning journals (treated as v1). */
+  v?: number;
 }
 
 /** In-memory state rebuilt by folding journal entries. */

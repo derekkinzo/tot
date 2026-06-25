@@ -1,7 +1,7 @@
 import { appendFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyEntry, deriveScanStatus, emptyReplayState, type JournalEntry } from './replay.js';
+import { applyEntry, deriveScanStatus, emptyReplayState, JOURNAL_SCHEMA_VERSION, type JournalEntry } from './replay.js';
 import type { Hypothesis, Session, TreeEvent } from './types.js';
 
 // ─── Session Index (lightweight metadata for lazy loading) ───
@@ -28,6 +28,7 @@ export class Persistence {
 
   async append(type: string, payload: unknown): Promise<void> {
     const entry: JournalEntry = {
+      v: JOURNAL_SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       type,
       payload,

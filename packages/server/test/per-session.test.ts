@@ -98,6 +98,22 @@ describe('per-session server', () => {
     }
   });
 
+  it('close() tears down the MCP server so further tool calls fail', async () => {
+    // Graceful shutdown must close the MCP protocol layer, not just the HTTP
+    // server — otherwise the transport lingers. After close(), the connected
+    // client can no longer invoke tools.
+    const s = await createSessionServer({ projectDir: projectDir });
+    open.push(s);
+    const client = await connect(s);
+    // Sanity: the tool works before close.
+    await client.callTool({ name: 'create_tree', arguments: { problem: 'pre-close' } });
+    await s.close();
+    await expect(
+      client.callTool({ name: 'get_status', arguments: {} }),
+    ).rejects.toThrow();
+    try { await client.close(); } catch { /* already torn down */ }
+  });
+
   it('two servers for the same project bind different ephemeral ports', async () => {
     const a = await start();
     const b = await start();

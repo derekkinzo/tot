@@ -22,9 +22,9 @@
  * - Advisory, never blocking (agents retain autonomy)
  * - Grounded in quantitative signals (evidence counts, depths)
  * - Client-agnostic vocabulary: these strings ship to every MCP client, so
- *   they avoid client-specific concepts (subagent dispatch, slash commands).
- *   Client-specific guidance lives in `skills/` and `agents/`, which are
- *   loaded only by clients that recognize that surface.
+ *   they avoid concepts specific to any one client's feature surface.
+ *   Client-specific guidance lives in `skills/` and `agents/`, loaded only by
+ *   clients that recognize that surface.
  *
  * Threshold rationale:
  * - Confirmation bias: 3+ supporting with 0 refuting (ACH unidirectional evidence)

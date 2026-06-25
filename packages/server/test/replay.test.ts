@@ -41,6 +41,19 @@ describe('applyEntry (shared event interpreter)', () => {
     expect(s.hypotheses[0].status).toBe('corroborated');
   });
 
+  it('replays an entry that carries an explicit schema version', () => {
+    // Forward-compat: entries may carry a version field. The current schema
+    // replays as today; the field exists so a future format change has a branch
+    // point rather than an ambiguous bare type.
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: hyp('a'), v: 1 } as JournalEntry);
+    expect(s.hypotheses.map((h) => h.id)).toEqual(['a']);
+  });
+
+  it('replays a legacy entry with no version field (treated as v1)', () => {
+    const s = fold(entry('hypothesis-added', hyp('a')));
+    expect(s.hypotheses.map((h) => h.id)).toEqual(['a']);
+  });
+
   it('is order-tolerant: an update for a node with no prior add still lands it (total replay over a truncated log)', () => {
     // The writer never emits this order; the branch makes replay total over a
     // log whose hypothesis-added line was dropped/truncated.
