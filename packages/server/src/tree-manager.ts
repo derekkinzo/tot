@@ -93,6 +93,7 @@ export class TreeManager extends EventEmitter {
   decompose(parentId: string, childContents: string[]): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
 
+    this.assertSessionOpen(parent.sessionId, 'decompose');
     if (isTerminal(parent.status)) {
       throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
     }
@@ -156,6 +157,7 @@ export class TreeManager extends EventEmitter {
   addHypothesis(parentId: string, content: string): Hypothesis {
     const parent = this.getHypothesisOrThrow(parentId);
 
+    this.assertSessionOpen(parent.sessionId, 'add a hypothesis');
     // Mirror decompose's terminal-parent guard. Without this, a new pending
     // child can appear under a terminal ancestor, leaving structural debt
     // that the closure predicate would silently overlook.
@@ -227,6 +229,13 @@ export class TreeManager extends EventEmitter {
     // accumulating positive evidence, the satisficing trap Popper rejects.
     if (hypothesis.status === 'corroborated' && type !== 'refutes') {
       throw new TreeError('Only refuting evidence is admitted on a corroborated hypothesis');
+    }
+    // A closed session accepts no new evidence EXCEPT a refute on a corroborated
+    // branch, which is the sanctioned way to reopen it (handled below). Any other
+    // evidence on a leaked pending/exploring descendant of a pruned branch would
+    // mutate a completed investigation without re-running closure.
+    if (!(type === 'refutes' && hypothesis.status === 'corroborated')) {
+      this.assertSessionOpen(hypothesis.sessionId, 'add evidence');
     }
 
     const now = new Date().toISOString();
@@ -305,6 +314,7 @@ export class TreeManager extends EventEmitter {
   eliminateHypothesis(hypothesisId: string, reason: string, refutingEvidenceIds?: string[]): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
+    this.assertSessionOpen(hypothesis.sessionId, 'eliminate a hypothesis');
     if (isTerminal(hypothesis.status)) {
       const message = hypothesis.status === 'eliminated'
         ? 'Hypothesis is already eliminated'
@@ -366,6 +376,7 @@ export class TreeManager extends EventEmitter {
   corroborateHypothesis(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
+    this.assertSessionOpen(hypothesis.sessionId, 'corroborate');
     if (isTerminal(hypothesis.status)) {
       const message = hypothesis.status === 'corroborated'
         ? 'Hypothesis is already corroborated'
@@ -419,6 +430,7 @@ export class TreeManager extends EventEmitter {
    */
   setOutOfScope(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
+    this.assertSessionOpen(hypothesis.sessionId, 'set a hypothesis out-of-scope');
     if (isTerminal(hypothesis.status)) {
       throw new TreeError(`Cannot set out-of-scope a ${hypothesis.status} hypothesis`);
     }
@@ -727,6 +739,24 @@ export class TreeManager extends EventEmitter {
     const h = this.hypotheses.get(id);
     if (!h) throw new TreeError(`Hypothesis not found: ${id}`);
     return h;
+  }
+
+  /**
+   * Rejects a mutation targeting a node whose session is already closed
+   * (resolved/abandoned). Pruning never cascades, so a closed session can retain
+   * pending/exploring descendants under a pruned branch; mutating those leaked
+   * nodes would grow or re-verdict a completed investigation with no closure
+   * re-evaluation. The one sanctioned way to act on a closed session is a refute
+   * that reopens it (see {@link addEvidence}), which calls this before the
+   * reopen and is therefore exempted by its caller.
+   */
+  private assertSessionOpen(sessionId: string, verb: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session && session.status !== 'open') {
+      throw new TreeError(
+        `Cannot ${verb} in a ${session.status} session; add refuting evidence to a corroborated branch to reopen it first`,
+      );
+    }
   }
 
   private incrementMutationCounter(sessionId: string): void {
