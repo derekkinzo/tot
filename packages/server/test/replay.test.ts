@@ -58,6 +58,33 @@ describe('applyEntry (shared event interpreter)', () => {
     expect(s.hypotheses[0].evidence).toEqual([ev]);
   });
 
+  it('does not lose an evidence-added that precedes its hypothesis (order-tolerant)', () => {
+    // The replay contract is order-tolerant for hypothesis events; evidence must
+    // be too. A legacy/hand-authored journal can order evidence-added before the
+    // hypothesis-added that creates its target. The evidence must land once the
+    // hypothesis appears, not be silently dropped.
+    const ev = { id: 'e1', type: 'refutes' as const, content: 'counter', timestamp: ts };
+    const s = fold(
+      entry('evidence-added', { hypothesisId: 'a', evidence: ev }),
+      entry('hypothesis-added', hyp('a')),
+    );
+    expect(s.hypotheses.map((h) => h.id)).toEqual(['a']);
+    expect(s.hypotheses[0].evidence).toEqual([ev]);
+  });
+
+  it('merges buffered out-of-order evidence ahead of evidence carried on the later snapshot', () => {
+    // If the hypothesis-added/updated snapshot itself already carries evidence,
+    // the buffered earlier evidence is appended without dropping the snapshot's.
+    const early = { id: 'e1', type: 'refutes' as const, content: 'early', timestamp: ts };
+    const carried = { id: 'e2', type: 'supports' as const, content: 'carried', timestamp: ts };
+    const s = fold(
+      entry('evidence-added', { hypothesisId: 'a', evidence: early }),
+      entry('hypothesis-added', hyp('a', { evidence: [carried] })),
+    );
+    const ids = s.hypotheses[0].evidence.map((e) => e.id).sort();
+    expect(ids).toEqual(['e1', 'e2']);
+  });
+
   it('keeps hypothesisIndex consistent with the array across interleaved adds/updates', () => {
     const s = fold(
       entry('hypothesis-added', hyp('a')),
