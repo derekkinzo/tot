@@ -54,6 +54,23 @@ describe('legacy-migration', () => {
     expect(readFileSync(join(central, 'a.jsonl'), 'utf-8')).toBe('CENTRAL-ADVANCED\n');
   });
 
+  it('copies atomically with exclusive create, so a concurrently-created central file is never clobbered', () => {
+    // The guard against clobbering a diverged central file must not depend on a
+    // racy existsSync check: a second server (the plugin reconnect race) can
+    // create the central file between this process's check and copy. Exclusive
+    // create (COPYFILE_EXCL) makes the copy fail closed rather than overwrite.
+    // Here the central file already exists with diverged content and the legacy
+    // file is present; migration must leave the central content intact and not
+    // throw.
+    seedLegacy('race.jsonl', 'LEGACY\n');
+    const central = getCentralSessionsDir(tmp);
+    mkdirSync(central, { recursive: true });
+    writeFileSync(join(central, 'race.jsonl'), 'CENTRAL-WINS\n');
+
+    expect(() => migrateLegacySessions(tmp)).not.toThrow();
+    expect(readFileSync(join(central, 'race.jsonl'), 'utf-8')).toBe('CENTRAL-WINS\n');
+  });
+
   it('is a no-op when no legacy .tot/ dir exists (no throw, no spurious central files)', () => {
     expect(() => migrateLegacySessions(tmp)).not.toThrow();
     const central = getCentralSessionsDir(tmp);
