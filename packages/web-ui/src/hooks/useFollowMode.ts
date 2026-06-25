@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { nextFollowTarget } from './followTarget';
 
 type FollowState = 'following' | 'paused';
 
 interface UseFollowModeOptions {
+  /** The session currently displayed; a change resets the follow target. */
+  sessionId: string | null;
   lastAddedId: string | null;
   recentlyChanged: Set<string>;
 }
@@ -18,19 +21,20 @@ interface UseFollowModeReturn {
  * following. Follow mode is toggled only by the user (button or F key); it
  * is never paused by selection or viewport changes. `followTarget` retains
  * the last active node id even after the transient highlight clears, so
- * enabling follow during a quiet moment still focuses the active hypothesis.
+ * enabling follow during a quiet moment still focuses the active hypothesis —
+ * except across a session switch, which drops the prior session's target so
+ * follow cannot pin to a node absent from the new tree.
  */
-export function useFollowMode({ lastAddedId, recentlyChanged }: UseFollowModeOptions): UseFollowModeReturn {
+export function useFollowMode({ sessionId, lastAddedId, recentlyChanged }: UseFollowModeOptions): UseFollowModeReturn {
   const [followMode, setFollowMode] = useState<FollowState>('following');
   const [followTarget, setFollowTarget] = useState<string | null>(null);
+  const prevSessionIdRef = useRef<string | null>(sessionId);
 
   useEffect(() => {
-    if (lastAddedId) {
-      setFollowTarget(lastAddedId);
-    } else if (recentlyChanged.size > 0) {
-      setFollowTarget([...recentlyChanged][recentlyChanged.size - 1]);
-    }
-  }, [lastAddedId, recentlyChanged]);
+    const prevSessionId = prevSessionIdRef.current;
+    prevSessionIdRef.current = sessionId;
+    setFollowTarget((prev) => nextFollowTarget(prev, { sessionId, prevSessionId, lastAddedId, recentlyChanged }));
+  }, [sessionId, lastAddedId, recentlyChanged]);
 
   const toggleFollow = useCallback(() => {
     setFollowMode((prev) => (prev === 'following' ? 'paused' : 'following'));

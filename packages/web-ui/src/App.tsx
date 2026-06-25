@@ -10,6 +10,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { followMode, followTarget, toggleFollow } = useFollowMode({
+    sessionId: session?.id ?? null,
     lastAddedId,
     recentlyChanged,
   });
