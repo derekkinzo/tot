@@ -195,7 +195,18 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return async (args) => {
       try {
         const { text, sessionId } = fn(schema.parse(args));
-        if (sessionId) await sink.drain(sessionId);
+        if (sessionId) {
+          await sink.drain(sessionId);
+          // The in-memory mutation succeeded, but if its journal append failed
+          // the state was not durably recorded — acknowledge the failure rather
+          // than reporting a success the next restart would silently drop.
+          if (sink.hadFailure(sessionId)) {
+            return toolResult(
+              `Error: the change was applied in memory but could not be saved to disk; it will be lost on restart. Check the data directory is writable.`,
+              true,
+            );
+          }
+        }
         return toolResult(text);
       } catch (e) {
         if (e instanceof z.ZodError) {

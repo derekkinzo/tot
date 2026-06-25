@@ -154,4 +154,37 @@ describe('JournalSink', () => {
     await expect(sink.drain('s1')).resolves.toBeUndefined();
     expect(ok).toEqual(['session-created', 'hypothesis-updated']);
   });
+
+  it('records a per-session append failure so a caller can surface it after drain', async () => {
+    const writer: JournalWriter = {
+      append: async () => { throw new Error('disk full'); },
+    };
+    const sink = new JournalSink(() => writer);
+    const tm = new EventEmitter();
+    sink.subscribe(tm);
+
+    expect(sink.hadFailure('s1')).toBe(false);
+    tm.emit('event', { type: 'session-created', session: session('s1') });
+    await sink.drain('s1');
+
+    // The append rejected, so the session is flagged unhealthy. A mutating tool
+    // handler reads this after draining to acknowledge with isError rather than
+    // reporting a success for state that never reached disk.
+    expect(sink.hadFailure('s1')).toBe(true);
+    // A session whose appends all succeeded is unaffected.
+    expect(sink.hadFailure('other')).toBe(false);
+  });
+
+  it('does not flag a session whose appends all succeed', async () => {
+    const w = recordingWriter();
+    const sink = new JournalSink(() => w);
+    const tm = new EventEmitter();
+    sink.subscribe(tm);
+
+    tm.emit('event', { type: 'session-created', session: session('s1') });
+    tm.emit('event', { type: 'hypothesis-added', hypothesis: hyp('h1', 's1') });
+    await sink.drain('s1');
+
+    expect(sink.hadFailure('s1')).toBe(false);
+  });
 });

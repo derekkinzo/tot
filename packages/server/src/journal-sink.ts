@@ -28,6 +28,11 @@ interface EventSource {
  */
 export class JournalSink {
   private locks = new Map<string, Lock>();
+  // Sessions whose append rejected at least once. A failed write does not poison
+  // the per-session chain (subsequent events are still attempted), but the
+  // session is flagged so a mutating handler can acknowledge with isError after
+  // draining instead of reporting a success for state that never reached disk.
+  private failed = new Set<string>();
 
   constructor(private getWriter: (sessionId: string) => JournalWriter) {}
 
@@ -49,10 +54,22 @@ export class JournalSink {
     const record = journalEventToEntry(event);
     if (!record) return;
     const writer = this.getWriter(record.sessionId);
-    // Per-session serialization preserves emit order on disk. append() reports
-    // its own errors and never rejects, so the chain is not poisoned; the
-    // trailing catch is defensive against a writer that violates that.
-    void this.lockFor(record.sessionId)(() => writer.append(record.type, record.payload)).catch(() => {});
+    const sessionId = record.sessionId;
+    // Per-session serialization preserves emit order on disk. A rejected append
+    // is caught here so the chain is not poisoned (later events still attempt to
+    // write), but the session is recorded as failed so drain-then-check can
+    // surface the data loss to the tool caller.
+    void this.lockFor(sessionId)(() => writer.append(record.type, record.payload))
+      .catch(() => { this.failed.add(sessionId); });
+  }
+
+  /**
+   * Whether any append for this session has rejected. A mutating tool handler
+   * checks this after {@link drain} to decide whether to acknowledge success or
+   * report a persistence failure.
+   */
+  hadFailure(sessionId: string): boolean {
+    return this.failed.has(sessionId);
   }
 
   /** Resolves once every append enqueued for this session so far has settled. */

@@ -4,6 +4,9 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
+import { mkdtempSync, mkdirSync, chmodSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 function parseResult(result: any): any {
   const text = result.content?.find((c: any) => c.type === 'text')?.text;
@@ -916,5 +919,53 @@ describe('MCP Integration', () => {
       });
       expect(getText(elimResult)).toContain('Progress:');
     });
+  });
+});
+
+// ─── Persistence failure surfacing ───
+
+describe('MCP Integration — persistence failure surfacing', () => {
+  let client: Client;
+  let server: McpServer;
+  let tm: TreeManager;
+  let roDir: string;
+
+  beforeEach(async () => {
+    // The sessions dir exists but is read-only, so the Persistence constructor's
+    // recursive mkdir of an existing dir succeeds while appendFile (the journal
+    // write) fails with EACCES — the exact split where the in-memory mutation
+    // succeeds but the durable write does not, which must NOT be acknowledged as
+    // success.
+    roDir = mkdtempSync(join(tmpdir(), 'tot-ro-'));
+    const sessionsDir = join(roDir, 'sessions');
+    mkdirSync(sessionsDir);
+    chmodSync(sessionsDir, 0o500);
+
+    tm = new TreeManager({ stagnationThreshold: 4 });
+    server = new McpServer({ name: 'tot-mcp-test', version: '0.1.0' });
+    registerTools(server, tm, () => sessionsDir);
+
+    client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      client.connect(clientTransport),
+      server.connect(serverTransport),
+    ]);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    try { chmodSync(roDir, 0o700); rmSync(roDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
+  it('a mutating tool returns isError when its journal write fails (no silent data loss)', async () => {
+    const result = await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'this will fail to persist' },
+    });
+    // The mutation cannot be durably recorded, so the agent must be told it
+    // failed rather than receiving a success for state that never hit disk.
+    expect(result.isError).toBe(true);
+    expect(getText(result)).toMatch(/persist|save|disk|write/i);
   });
 });
