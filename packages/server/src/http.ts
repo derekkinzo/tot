@@ -32,9 +32,16 @@ export interface HttpServerHandle {
   close: () => Promise<void>;
 }
 
-/** Builds the snapshot event for a project's default session (null if no session). */
-function snapshotEvent(tm: TreeManager): TreeEvent {
-  const session = pickDefaultSession(tm);
+/**
+ * Builds the snapshot event for a session: the requested one when `sessionId`
+ * resolves to a loaded session, otherwise the project default (null if no
+ * session at all). Honoring the request keeps a reconnecting dashboard on the
+ * session the user is viewing instead of snapping it back to the default.
+ */
+function snapshotEvent(tm: TreeManager, sessionId?: string | null): TreeEvent {
+  const session = (sessionId
+    ? tm.getAllSessions().find((s) => s.id === sessionId)
+    : undefined) ?? pickDefaultSession(tm);
   if (!session) return { type: 'snapshot', session: null, hypotheses: [] };
   const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
   return { type: 'snapshot', session, hypotheses };
@@ -71,7 +78,7 @@ export async function startHttpServer(
 
     if (url.pathname === '/sse') {
       setCorsHeaders(res);
-      handleSSE(req, res, project, hub);
+      handleSSE(req, res, project, hub, url.searchParams.get('sessionId'));
       return;
     }
 
@@ -143,10 +150,14 @@ function handleSSE(
   res: ServerResponse,
   project: ProjectState,
   hub: SseHub,
+  requestedSessionId: string | null,
 ): void {
   writeSseHeaders(res);
+  // A reconnecting dashboard re-requests the session it is viewing; load it
+  // (lazy) so the snapshot describes that session rather than the default.
+  if (requestedSessionId) project.ensureSessionLoaded(requestedSessionId);
   // Send the initial snapshot, then register for live events.
-  res.write(`id: 0\ndata: ${JSON.stringify(snapshotEvent(project.tm))}\n\n`);
+  res.write(`id: 0\ndata: ${JSON.stringify(snapshotEvent(project.tm, requestedSessionId))}\n\n`);
   hub.addClient(res);
   req.on('close', () => hub.removeClient(res));
 }

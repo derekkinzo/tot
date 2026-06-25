@@ -149,6 +149,38 @@ describe('per-session server', () => {
     expect(full.session.id).toBe(sessionId);
   });
 
+  it('the SSE initial snapshot honors a requested sessionId instead of always the default', async () => {
+    // The dashboard streams one session at a time and reconnects on any network
+    // blip. If the stream always snapshots the default (most-recent-open)
+    // session, a user viewing an older session is silently reset to the default
+    // on reconnect. The /sse endpoint must snapshot the session the client asks
+    // for.
+    const s = await start();
+    const client = await connect(s);
+    clients.push(client);
+
+    // Two sessions; the second is the default (most recently created, open).
+    const first = parseResult(await client.callTool({ name: 'create_tree', arguments: { problem: 'First session' } }));
+    await client.callTool({ name: 'create_tree', arguments: { problem: 'Second session' } });
+
+    // Connect to the stream scoped to the FIRST (non-default) session.
+    const resp = await fetch(`http://localhost:${s.port}/sse?sessionId=${first.sessionId}`, {
+      headers: { Accept: 'text/event-stream' },
+    });
+    const reader = resp.body!.getReader();
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    await reader.cancel();
+
+    // The first SSE frame is the snapshot; it must describe the requested
+    // session, not the default second one.
+    const dataLine = text.split('\n').find((l) => l.startsWith('data:'))!;
+    const snapshot = JSON.parse(dataLine.slice('data:'.length).trim());
+    expect(snapshot.type).toBe('snapshot');
+    expect(snapshot.session.id).toBe(first.sessionId);
+    expect(snapshot.session.problem).toBe('First session');
+  });
+
   it('migrates legacy {projectDir}/.tot/sessions journals into central storage on startup (non-destructive)', async () => {
     // A pre-migration journal living in the old per-project location.
     const legacyDir = join(projectDir, '.tot', 'sessions');

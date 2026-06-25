@@ -13,6 +13,10 @@ export function useTreeStream() {
   const [persistenceHealthy, setPersistenceHealthy] = useState(true);
   const esRef = useRef<EventSource | null>(null);
   const connectionGenRef = useRef(0);
+  // The session the dashboard is currently viewing. The SSE stream re-requests
+  // it on every (re)connect so a transient disconnect restores this session
+  // rather than snapping back to the server's default.
+  const viewedSessionIdRef = useRef<string | null>(null);
 
   // Poll the server's persistence health so the dashboard can warn the user
   // when journal writes are failing (disk full / permissions) and their tree
@@ -51,7 +55,11 @@ export function useTreeStream() {
 
     const connect = () => {
       if (connectionGenRef.current !== gen) return;
-      const es = new EventSource('/sse');
+      // Re-request the viewed session so a reconnect restores it. EventSource
+      // fixes its URL at construction, so the current ref value is read here on
+      // every (re)connect.
+      const sid = viewedSessionIdRef.current;
+      const es = new EventSource(sid ? `/sse?sessionId=${encodeURIComponent(sid)}` : '/sse');
       esRef.current = es;
 
       es.onopen = () => {
@@ -94,9 +102,11 @@ export function useTreeStream() {
 
   const loadSession = useCallback(async (sessionId: string) => {
     try {
-      const resp = await fetch(`/api/state?sessionId=${sessionId}`);
+      const resp = await fetch(`/api/state?sessionId=${encodeURIComponent(sessionId)}`);
       const data = await resp.json();
       if (data.session) {
+        // Remember the viewed session so an SSE reconnect re-requests it.
+        viewedSessionIdRef.current = data.session.id;
         dispatch({ type: 'snapshot', session: data.session, hypotheses: data.hypotheses });
       }
     } catch {}
