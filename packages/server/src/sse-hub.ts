@@ -1,8 +1,13 @@
 import type { TreeEvent } from './types.js';
 
-/** Minimal SSE sink — anything that can receive a chunk (a Node ServerResponse). */
+/**
+ * Minimal SSE sink — anything that can receive a chunk (a Node ServerResponse).
+ * `write` returns the backpressure signal: false when the send buffer is full
+ * (the caller should stop writing until it drains). Node's ServerResponse.write
+ * already returns this boolean.
+ */
 export interface SseClient {
-  write(chunk: string): void;
+  write(chunk: string): boolean;
 }
 
 /** Emits 'event' with a TreeEvent payload (a TreeManager). */
@@ -17,7 +22,18 @@ interface EventSource {
  * unit-testable with a plain EventEmitter and a fake client.
  */
 export class SseHub {
+  /**
+   * Consecutive backpressured writes a client may accrue before it is dropped.
+   * A momentary full buffer is normal; a client that never drains across this
+   * many broadcasts is wedged (suspended tab, dead connection) and would
+   * otherwise buffer unbounded in-process.
+   */
+  static readonly MAX_BACKPRESSURED_WRITES = 50;
+
   private clients = new Set<SseClient>();
+  // Consecutive backpressured (write()===false) broadcasts per client; reset on
+  // any drained write. A client exceeding the cap is reaped.
+  private backpressure = new WeakMap<SseClient, number>();
   private counter = 0;
 
   constructor(
@@ -60,8 +76,21 @@ export class SseHub {
     this.counter += 1;
     const data = `id: ${this.counter}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const client of this.clients) {
-      try { client.write(data); }
-      catch { this.removeClient(client); }
+      try {
+        const drained = client.write(data);
+        if (drained) {
+          this.backpressure.delete(client);
+        } else {
+          // Buffer full: count consecutive backpressured writes and drop the
+          // client once it stays wedged, bounding in-process memory.
+          const n = (this.backpressure.get(client) ?? 0) + 1;
+          if (n > SseHub.MAX_BACKPRESSURED_WRITES) {
+            this.removeClient(client);
+          } else {
+            this.backpressure.set(client, n);
+          }
+        }
+      } catch { this.removeClient(client); }
     }
   }
 }

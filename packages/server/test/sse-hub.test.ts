@@ -7,14 +7,18 @@ import type { TreeEvent } from '../src/types.js';
 function fakeClient() {
   const writes: string[] = [];
   let failNext = false;
+  let backpressured = false;
   return {
     writes,
     failOnce() { failNext = true; },
-    write(s: string) {
+    /** Simulate a stalled consumer: write() returns false (kernel buffer full). */
+    setBackpressured(v: boolean) { backpressured = v; },
+    write(s: string): boolean {
       if (failNext) { failNext = false; throw new Error('write failed'); }
       writes.push(s);
+      return !backpressured;
     },
-  } satisfies SseClient & { writes: string[]; failOnce(): void };
+  } satisfies SseClient & { writes: string[]; failOnce(): void; setBackpressured(v: boolean): void };
 }
 
 const ev = (n: string): TreeEvent => ({ type: 'session-reopened', sessionId: n });
@@ -71,6 +75,48 @@ describe('SseHub', () => {
     expect(disconnects).toBe(1);
     tm.emit('event', ev('b'));
     expect(c.writes.join('')).not.toContain('"sessionId":"b"');
+  });
+
+  it('drops a persistently backpressured client to bound in-process buffering', () => {
+    // write() returning false means the kernel send buffer is full. A momentary
+    // false is normal, but a client that never drains (suspended laptop, dead
+    // connection) would buffer unbounded in the MCP process. After a bounded run
+    // of consecutive backpressured writes the hub must drop it.
+    let disconnects = 0;
+    const hub = new SseHub(() => {}, () => { disconnects++; });
+    const tm = new EventEmitter();
+    hub.subscribe(tm);
+    const c = fakeClient();
+    hub.addClient(c);
+    c.setBackpressured(true);
+
+    // Emit more than the backpressure tolerance; the client should be reaped.
+    for (let i = 0; i < SseHub.MAX_BACKPRESSURED_WRITES + 1; i++) tm.emit('event', ev(`e${i}`));
+    expect(disconnects).toBe(1);
+
+    // Once dropped, further broadcasts are not delivered to it.
+    const before = c.writes.length;
+    tm.emit('event', ev('after'));
+    expect(c.writes.length).toBe(before);
+  });
+
+  it('does not drop a client that recovers from momentary backpressure', () => {
+    let disconnects = 0;
+    const hub = new SseHub(() => {}, () => { disconnects++; });
+    const tm = new EventEmitter();
+    hub.subscribe(tm);
+    const c = fakeClient();
+    hub.addClient(c);
+
+    // A few backpressured writes, then it drains (write returns true) — the
+    // consecutive counter resets, so it is never dropped.
+    c.setBackpressured(true);
+    for (let i = 0; i < SseHub.MAX_BACKPRESSURED_WRITES - 1; i++) tm.emit('event', ev(`e${i}`));
+    c.setBackpressured(false);
+    tm.emit('event', ev('drained'));
+    c.setBackpressured(true);
+    for (let i = 0; i < SseHub.MAX_BACKPRESSURED_WRITES - 1; i++) tm.emit('event', ev(`f${i}`));
+    expect(disconnects).toBe(0);
   });
 
   it('keepalive reaps a client whose write fails', () => {
