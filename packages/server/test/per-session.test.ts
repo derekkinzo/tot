@@ -149,6 +149,18 @@ describe('per-session server', () => {
     expect(full.session.id).toBe(sessionId);
   });
 
+  it('an unmatched /api/* path returns 404 JSON, not the SPA HTML shell', async () => {
+    // Unknown API routes must fail as 404 rather than falling through to the
+    // single-page-app static fallback, which would return index.html with a 200
+    // and make a client JSON.parse throw — masking the bad route.
+    const s = await start();
+    const resp = await fetch(`http://localhost:${s.port}/api/does-not-exist`);
+    expect(resp.status).toBe(404);
+    expect(resp.headers.get('content-type')).toMatch(/application\/json/);
+    const body = await resp.json();
+    expect(body.error).toBeTruthy();
+  });
+
   it('the SSE initial snapshot honors a requested sessionId instead of always the default', async () => {
     // The dashboard streams one session at a time and reconnects on any network
     // blip. If the stream always snapshots the default (most-recent-open)

@@ -100,6 +100,16 @@ export async function startHttpServer(
       return;
     }
 
+    // Unknown API routes must 404 rather than fall through to the SPA static
+    // fallback (which would serve index.html with a 200 and make a client's
+    // JSON.parse throw, masking the bad route).
+    if (url.pathname.startsWith('/api/')) {
+      setCorsHeaders(res);
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not-found' }));
+      return;
+    }
+
     // Static file serving
     await serveStatic(req, res);
   });
