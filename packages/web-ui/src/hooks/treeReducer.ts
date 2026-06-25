@@ -48,11 +48,17 @@ export function reducer(state: TreeState, action: Action): TreeState {
     case 'session-created':
       return { ...state, session: action.session };
     case 'hypothesis-added': {
+      // The SSE stream is project-wide; ignore a node belonging to a session
+      // other than the one on display so it cannot inject an orphan into the
+      // viewed tree. When no session is displayed yet there is nothing to filter
+      // against, so the event applies (single-session bootstrap).
+      if (state.session && action.hypothesis.sessionId !== state.session.id) return state;
       const next = new Map(state.hypotheses);
       next.set(action.hypothesis.id, action.hypothesis);
       return { ...state, hypotheses: next, lastAddedId: action.hypothesis.id };
     }
     case 'hypothesis-updated': {
+      if (state.session && action.hypothesis.sessionId !== state.session.id) return state;
       const next = new Map(state.hypotheses);
       next.set(action.hypothesis.id, action.hypothesis);
       // Re-append on re-update so the most-recently-changed id is always last
