@@ -100,6 +100,12 @@ export class TreeManager extends EventEmitter {
     if (childContents.length < 2) {
       throw new TreeError('Decomposition requires at least 2 sub-hypotheses');
     }
+    // A blank-after-trim label is not a hypothesis and degenerates the
+    // validateDecomposition heuristics (includes('') matches every sibling;
+    // word-count 0 trips abstractionMismatch). Reject before storing.
+    if (childContents.some((c) => c.trim().length === 0)) {
+      throw new TreeError('Sub-hypothesis content cannot be empty or whitespace-only');
+    }
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
     }
@@ -158,6 +164,9 @@ export class TreeManager extends EventEmitter {
     const parent = this.getHypothesisOrThrow(parentId);
 
     this.assertSessionOpen(parent.sessionId, 'add a hypothesis');
+    if (content.trim().length === 0) {
+      throw new TreeError('Hypothesis content cannot be empty or whitespace-only');
+    }
     // Mirror decompose's terminal-parent guard. Without this, a new pending
     // child can appear under a terminal ancestor, leaving structural debt
     // that the closure predicate would silently overlook.

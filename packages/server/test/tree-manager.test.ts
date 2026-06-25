@@ -58,6 +58,15 @@ describe('TreeManager', () => {
       expect(() => tm.decompose(root.id, ['Only one'])).toThrow(TreeError);
     });
 
+    it('rejects a whitespace-only child label', () => {
+      // A blank-after-trim label is not a real hypothesis; it also degenerates
+      // the validateDecomposition heuristics (substring includes('') matches
+      // every sibling; word-count 0 makes abstractionMismatch fire spuriously).
+      // Reject it at the engine boundary rather than storing it.
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.decompose(root.id, ['Real cause', '   '])).toThrow(/empty|blank|whitespace/i);
+    });
+
     it('rejects decompose on eliminated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'refutes', 'Not this');
@@ -122,6 +131,11 @@ describe('TreeManager', () => {
       tm.addEvidence(root.id, 'refutes', 'nope');
       tm.eliminateHypothesis(root.id, 'dead');
       expect(() => tm.addHypothesis(root.id, 'Too late')).toThrow(TreeError);
+    });
+
+    it('rejects a whitespace-only content', () => {
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.addHypothesis(root.id, '   ')).toThrow(/empty|blank|whitespace/i);
     });
 
     it('rejects when parent is corroborated', () => {

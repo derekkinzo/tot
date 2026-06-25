@@ -47,12 +47,17 @@ export function isConfirmationBias(hypothesis: Hypothesis, siblings: Hypothesis[
 }
 
 /**
- * Source independence (Heuer): ≥3 evidence items, ≥2 of them sourced, and every
- * sourced item cites the same origin — independent corroboration would strengthen it.
+ * Source independence (Heuer): ≥3 evidence items accumulated, and the SUPPORTING
+ * evidence — ≥2 sourced items — all cites a single origin, so independent
+ * corroboration would strengthen it. Scoped to supporting evidence because the
+ * nudge is about corroboration diversity; a repeated refuting source does not
+ * "strengthen" the hypothesis and is irrelevant here.
  */
 export function lacksSourceDiversity(hypothesis: Hypothesis): boolean {
   if (hypothesis.evidence.length < 3) return false;
-  const sources = hypothesis.evidence.filter((e) => e.source).map((e) => e.source);
+  const sources = hypothesis.evidence
+    .filter((e) => e.type === 'supports' && e.source)
+    .map((e) => e.source);
   return sources.length >= 2 && new Set(sources).size === 1;
 }
 

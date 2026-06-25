@@ -92,6 +92,21 @@ describe('lacksSourceDiversity (Heuer independence)', () => {
   it('false when fewer than 2 items carry a source', () => {
     expect(lacksSourceDiversity(hyp([ev('supports', 'x', 'logs'), ev('supports'), ev('neutral')]))).toBe(false);
   });
+  it('ignores refuting-evidence sources — the nudge is about corroboration diversity', () => {
+    // Three refutes from one source are not a corroboration-independence problem
+    // (refutation does not "strengthen" a hypothesis); only the diversity of
+    // SUPPORTING sources is relevant. With no repeated supporting source, the
+    // advisory must not fire.
+    expect(lacksSourceDiversity(hyp([
+      ev('refutes', 'x', 'logs'), ev('refutes', 'y', 'logs'), ev('refutes', 'z', 'logs'),
+    ]))).toBe(false);
+  });
+  it('fires on >=2 supporting items sharing one source even amid diverse refuting sources', () => {
+    expect(lacksSourceDiversity(hyp([
+      ev('supports', 'x', 'logs'), ev('supports', 'y', 'logs'),
+      ev('refutes', 'z', 'metrics'),
+    ]))).toBe(true);
+  });
 });
 
 describe('suggestsElimination (Bacon/Mill)', () => {

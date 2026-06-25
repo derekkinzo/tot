@@ -94,17 +94,22 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   },
 };
 
+// Non-blank free text: rejects whitespace-only input (which z.string().min(1)
+// would accept) at the wire boundary, matching the engine's content guards.
+const nonBlank = (max: number) =>
+  z.string().min(1).max(max).refine((s) => s.trim().length > 0, 'must not be empty or whitespace-only');
+
 const schemas = {
   create_tree: z.object({
-    problem: z.string().min(1).max(10000),
+    problem: nonBlank(10000),
   }),
   decompose: z.object({
     parentId: z.string().min(1),
-    children: z.array(z.string().min(1)).min(2).max(20),
+    children: z.array(nonBlank(10000)).min(2).max(20),
   }),
   add_hypothesis: z.object({
     parentId: z.string().min(1),
-    content: z.string().min(1).max(10000),
+    content: nonBlank(10000),
   }),
   add_evidence: z.object({
     hypothesisId: z.string().min(1),
