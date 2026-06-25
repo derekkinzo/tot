@@ -1,4 +1,5 @@
 import type { Hypothesis, Session } from '../types';
+import { countSupporting, countRefuting } from '../types';
 import { STATUS_NODE_STYLES } from '../theme';
 import { conclusionStatus } from './conclusion';
 
@@ -41,13 +42,9 @@ function renderNode(
 
   const indent = '  '.repeat(depth);
   const icon = STATUS_NODE_STYLES[node.status]?.icon ?? '?';
-  let supports = 0;
-  let refutes = 0;
-  for (const e of node.evidence) {
-    if (e.type === 'supports') supports++;
-    else if (e.type === 'refutes') refutes++;
-  }
-  const ev = node.evidence.length > 0 ? ` (${supports} supporting, ${refutes} refuting)` : '';
+  const ev = node.evidence.length > 0
+    ? ` (${countSupporting(node)} supporting, ${countRefuting(node)} refuting)`
+    : '';
 
   lines.push(`${indent}- ${icon} **${node.content}**${ev} [${node.status}]`);
 
