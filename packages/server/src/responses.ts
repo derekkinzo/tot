@@ -48,6 +48,7 @@ import {
   suggestsElimination,
   lacksDiagnosticity,
 } from './advisories.js';
+import { pickActiveSession } from './persistence.js';
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
@@ -397,13 +398,18 @@ export function formatValidateDecomposition(parentId: string, check: StructuralC
 }
 
 export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null): string {
-  const status = tm.getStatus();
-
-  if (!status.session) {
+  // Summarize the same session the dashboard renders: the active one when an
+  // investigation is in progress, otherwise the most recent. This keeps the
+  // status read-out — and the dashboard URL it carries — available for a tree
+  // whose branches have all reached a terminal state, not just a live one.
+  const displaySession = pickActiveSession(tm.getAllSessions());
+  if (!displaySession) {
     return `No open session. Call create_tree to start.`;
   }
 
-  const { session, counts, stagnant, unexplored } = status;
+  const status = tm.getStatus(displaySession.id);
+  const { counts, stagnant, unexplored } = status;
+  const session = displaySession;
   const breakdown = computeProgressBreakdown(counts);
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +

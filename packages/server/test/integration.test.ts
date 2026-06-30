@@ -616,6 +616,37 @@ describe('MCP Integration', () => {
       }
     });
 
+    it('still surfaces the dashboard URL once every branch is terminal (dashboard renders any session)', async () => {
+      // The dashboard server renders the project's most-recent session whether
+      // or not an investigation is still active, so the URL must remain
+      // discoverable after a tree reaches a terminal state.
+      const tm2 = new TreeManager({ stagnationThreshold: 4 });
+      const server2 = new McpServer({ name: 'tot-mcp-test-resolved', version: '0.1.0' });
+      registerTools(server2, tm2, () => '/tmp/tot-test', { getDashboardUrl: () => 'http://localhost:23456' });
+      const client2 = new Client({ name: 'c-resolved', version: '1.0.0' }, { capabilities: {} });
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await Promise.all([client2.connect(ct), server2.connect(st)]);
+      try {
+        const { rootId } = parseResult(
+          await client2.callTool({ name: 'create_tree', arguments: { problem: 'Resolves' } }),
+        );
+        const { childIds } = parseResult(
+          await client2.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+        );
+        // Drive the session to a terminal state: A eliminated, B corroborated.
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+        await client2.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+        await client2.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+
+        const text = getText(await client2.callTool({ name: 'get_status', arguments: {} }));
+        // No open session remains, but the dashboard URL is still discoverable.
+        expect(text).toContain('Visualization: http://localhost:23456');
+      } finally {
+        await client2.close();
+      }
+    });
+
     it('separates resolved and active counts in the progress breakdown', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Topic' } }),

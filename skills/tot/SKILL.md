@@ -19,9 +19,11 @@ fixed address.
    Visualization: http://localhost:<port>
    ```
    - If the line is present, that `http://localhost:<port>` is the dashboard
-     URL for this session's tree. Use it verbatim in the next step.
-   - If `get_status` reports `No open session`, there is no tree yet — tell
-     the user to run `/tot-reason` to start one, then stop.
+     URL. Use it verbatim in the next step. The dashboard renders the
+     project's most recent tree and offers a Sessions selector for the rest,
+     so the URL is valid whether or not an investigation is still in progress.
+   - If `get_status` reports `No open session`, no tree exists for this
+     project yet — tell the user to run `/tot-reason` to start one, then stop.
    - If `get_status` returns no `Visualization:` line, the in-process HTTP
      server did not start. Tell the user the dashboard is unavailable and
      offer `/tot-inspect` for a text read-out.

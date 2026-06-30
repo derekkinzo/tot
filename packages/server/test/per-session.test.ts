@@ -165,6 +165,32 @@ describe('per-session server', () => {
     expect(full.session.id).toBe(sessionId);
   });
 
+  it('serves a fully-terminal tree over /api/state so the dashboard renders it after closure', async () => {
+    // The dashboard default-session pick falls back to the most recent tree, so
+    // a project whose only session has reached a terminal state must still
+    // return that session (not an empty state) for the browser to render.
+    const s = await start();
+    const client = await connect(s);
+    clients.push(client);
+
+    const { rootId, sessionId } = parseResult(
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'Closes fully' } }),
+    );
+    const { childIds } = parseResult(
+      await client.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+    );
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+
+    const state = await (await fetch(`http://localhost:${s.port}/api/state`)).json();
+    expect(state.session).not.toBeNull();
+    expect(state.session.id).toBe(sessionId);
+    expect(state.session.status).toBe('resolved');
+    expect(state.hypotheses.length).toBe(3);
+  });
+
   it('an unmatched /api/* path returns 404 JSON, not the SPA HTML shell', async () => {
     // Unknown API routes must fail as 404 rather than falling through to the
     // single-page-app static fallback, which would return index.html with a 200

@@ -543,16 +543,18 @@ export class TreeManager extends EventEmitter {
   }
 
   /**
-   * Returns a summary of the active session: counts, stagnation state, and unexplored branches.
-   * @returns Status object (session is null if no active session exists)
+   * Returns a summary of a session: counts, stagnation state, and unexplored
+   * branches.
+   * @param sessionId - Session to summarize; defaults to the active session.
+   * @returns Status object (session is null if the target session is absent).
    */
-  getStatus(): {
+  getStatus(sessionId?: string): {
     session: Session | null;
     counts: Record<HypothesisStatus, number>;
     stagnant: boolean;
     unexplored: Hypothesis[];
   } {
-    const state = this.getTree();
+    const state = this.getTree(sessionId);
     if (!state) {
       return { session: null, counts: { pending: 0, exploring: 0, eliminated: 0, corroborated: 0, 'out-of-scope': 0 }, stagnant: false, unexplored: [] };
     }
