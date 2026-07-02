@@ -118,4 +118,64 @@ describe('treeReducer', () => {
     const d = reducer(c, { type: 'disconnected' });
     expect(d.connected).toBe(false);
   });
+
+  // The SSE stream is project-wide and carries events for every session in the
+  // project; the dashboard displays one session at a time. Hypothesis events for
+  // a session other than the displayed one must be ignored, or they inject
+  // orphan nodes into the viewed tree.
+  describe('cross-session event isolation', () => {
+    it('hypothesis-added for a different session is ignored', () => {
+      const s: TreeState = { ...initialTreeState(), session: session({ id: 's1' }) };
+      const next = reducer(s, { type: 'hypothesis-added', hypothesis: hyp('x', { sessionId: 's2' }) });
+      expect(next).toBe(s); // identity unchanged
+      expect(next.hypotheses.has('x')).toBe(false);
+      expect(next.lastAddedId).toBeNull();
+    });
+
+    it('hypothesis-updated for a different session is ignored', () => {
+      const s: TreeState = {
+        ...initialTreeState(),
+        session: session({ id: 's1' }),
+        hypotheses: new Map([['a', hyp('a', { sessionId: 's1' })]]),
+      };
+      const next = reducer(s, { type: 'hypothesis-updated', hypothesis: hyp('a', { sessionId: 's2', status: 'eliminated' }) });
+      expect(next).toBe(s);
+      expect(next.hypotheses.get('a')?.status).toBe('pending');
+    });
+
+    it('hypothesis-added for the displayed session is applied', () => {
+      const s: TreeState = { ...initialTreeState(), session: session({ id: 's1' }) };
+      const next = reducer(s, { type: 'hypothesis-added', hypothesis: hyp('x', { sessionId: 's1' }) });
+      expect(next.hypotheses.has('x')).toBe(true);
+      expect(next.lastAddedId).toBe('x');
+    });
+
+    it('hypothesis-added is applied when no session is displayed yet (no reference to filter against)', () => {
+      // Before the first snapshot, session is null; a session-created/snapshot
+      // sets it. Until then there is nothing to filter against, so the event
+      // applies (the existing single-session bootstrap path).
+      const next = reducer(initialTreeState(), { type: 'hypothesis-added', hypothesis: hyp('x', { sessionId: 's9' }) });
+      expect(next.hypotheses.has('x')).toBe(true);
+    });
+
+    it('session-created for a different session does not switch the displayed session', () => {
+      // A newly created session announced over the project-wide stream must not
+      // yank the view off the session the user is looking at; otherwise the
+      // hypothesis-event guard (which keys off the displayed session id) would
+      // then admit the new session's nodes into the displayed tree.
+      const s: TreeState = {
+        ...initialTreeState(),
+        session: session({ id: 's1' }),
+        hypotheses: new Map([['a', hyp('a', { sessionId: 's1' })]]),
+      };
+      const next = reducer(s, { type: 'session-created', session: session({ id: 's2', problem: 'Other' }) });
+      expect(next).toBe(s); // identity unchanged
+      expect(next.session?.id).toBe('s1');
+    });
+
+    it('session-created is adopted when no session is displayed yet (bootstrap)', () => {
+      const next = reducer(initialTreeState(), { type: 'session-created', session: session({ id: 's1' }) });
+      expect(next.session?.id).toBe('s1');
+    });
+  });
 });

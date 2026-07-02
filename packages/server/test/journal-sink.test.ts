@@ -95,9 +95,9 @@ describe('JournalSink', () => {
     expect(calls).toEqual(['session-created']);
   });
 
-  it('drain on a never-touched session resolves immediately (no-op)', async () => {
+  it('drain on a never-touched session resolves immediately with no failure', async () => {
     const sink = new JournalSink(() => recordingWriter());
-    await expect(sink.drain('never')).resolves.toBeUndefined();
+    await expect(sink.drain('never')).resolves.toBe(false);
   });
 
   it('routes concurrent sessions to their own writers with no cross-leakage', async () => {
@@ -150,8 +150,56 @@ describe('JournalSink', () => {
     tm.emit('event', { type: 'session-created', session: session('s1') });   // ok
     tm.emit('event', { type: 'hypothesis-added', hypothesis: hyp('h1', 's1') }); // throws
     tm.emit('event', { type: 'hypothesis-updated', hypothesis: hyp('h1', 's1') }); // still attempted
-    // drain must resolve (not reject) despite the middle failure.
-    await expect(sink.drain('s1')).resolves.toBeUndefined();
+    // drain must resolve (not reject) despite the middle failure, and report the
+    // failure so the caller surfaces it; the later append still ran (chain not
+    // poisoned).
+    await expect(sink.drain('s1')).resolves.toBe(true);
     expect(ok).toEqual(['session-created', 'hypothesis-updated']);
+  });
+
+  it('drain reports a failed append for the current batch so a caller can surface it', async () => {
+    const writer: JournalWriter = {
+      append: async () => { throw new Error('disk full'); },
+    };
+    const sink = new JournalSink(() => writer);
+    const tm = new EventEmitter();
+    sink.subscribe(tm);
+
+    tm.emit('event', { type: 'session-created', session: session('s1') });
+    // drain resolves to true because an append in this batch rejected — a
+    // mutating handler surfaces isError rather than reporting a false success.
+    expect(await sink.drain('s1')).toBe(true);
+    // A session with no enqueued appends reports no failure.
+    expect(await sink.drain('other')).toBe(false);
+  });
+
+  it('drain reports no failure for a batch whose appends all succeed', async () => {
+    const w = recordingWriter();
+    const sink = new JournalSink(() => w);
+    const tm = new EventEmitter();
+    sink.subscribe(tm);
+
+    tm.emit('event', { type: 'session-created', session: session('s1') });
+    tm.emit('event', { type: 'hypothesis-added', hypothesis: hyp('h1', 's1') });
+    expect(await sink.drain('s1')).toBe(false);
+  });
+
+  it('a transient failure is reported once, and a later successful batch reports clean', async () => {
+    // The failure signal is scoped to the batch that hit it, not sticky for the
+    // session lifetime: after the write path recovers, subsequent mutations that
+    // reach disk must report success.
+    let calls = 0;
+    const writer: JournalWriter = {
+      append: async () => { calls += 1; if (calls === 1) throw new Error('transient'); },
+    };
+    const sink = new JournalSink(() => writer);
+    const tm = new EventEmitter();
+    sink.subscribe(tm);
+
+    tm.emit('event', { type: 'session-created', session: session('s1') }); // fails
+    expect(await sink.drain('s1')).toBe(true);
+
+    tm.emit('event', { type: 'hypothesis-added', hypothesis: hyp('h1', 's1') }); // succeeds
+    expect(await sink.drain('s1')).toBe(false);
   });
 });

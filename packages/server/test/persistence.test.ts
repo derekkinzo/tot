@@ -7,7 +7,8 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
-import { scanSessions, loadSession, pickActiveSession, type SessionIndex } from '../src/persistence.js';
+import { scanSessions, loadSession, pickActiveSession, Persistence, type SessionIndex } from '../src/persistence.js';
+import { JOURNAL_SCHEMA_VERSION } from '../src/replay.js';
 import type { Session, Hypothesis } from '../src/types.js';
 
 function parseResult(result: any): any {
@@ -54,6 +55,15 @@ describe('Persistence Roundtrip', () => {
     await Promise.all([client.connect(ct), server.connect(st)]);
     return { tm, server, client, cleanup: () => client.close() };
   }
+
+  it('stamps the schema version on every journal entry it writes', async () => {
+    const p = new Persistence(tempDir, 'sess-ver');
+    await p.append('session-created', { id: 'sess-ver' });
+    const written = readFileSync(join(tempDir, 'sess-ver.jsonl'), 'utf-8').trim();
+    const entry = JSON.parse(written);
+    expect(entry.v).toBe(JOURNAL_SCHEMA_VERSION);
+    expect(entry.type).toBe('session-created');
+  });
 
   it('tree state survives server restart', async () => {
     // Session 1: create tree and add data

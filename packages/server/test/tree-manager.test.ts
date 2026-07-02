@@ -58,6 +58,15 @@ describe('TreeManager', () => {
       expect(() => tm.decompose(root.id, ['Only one'])).toThrow(TreeError);
     });
 
+    it('rejects a whitespace-only child label', () => {
+      // A blank-after-trim label is not a real hypothesis; it also degenerates
+      // the validateDecomposition heuristics (substring includes('') matches
+      // every sibling; word-count 0 makes abstractionMismatch fire spuriously).
+      // Reject it at the engine boundary rather than storing it.
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.decompose(root.id, ['Real cause', '   '])).toThrow(/empty|blank|whitespace/i);
+    });
+
     it('rejects decompose on eliminated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'refutes', 'Not this');
@@ -124,6 +133,11 @@ describe('TreeManager', () => {
       expect(() => tm.addHypothesis(root.id, 'Too late')).toThrow(TreeError);
     });
 
+    it('rejects a whitespace-only content', () => {
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.addHypothesis(root.id, '   ')).toThrow(/empty|blank|whitespace/i);
+    });
+
     it('rejects when parent is corroborated', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'good');
@@ -154,6 +168,11 @@ describe('TreeManager', () => {
       expect(ev.content).toBe('Log shows error');
       expect(ev.source).toBe('app.log');
       expect(root.evidence).toHaveLength(1);
+    });
+
+    it('rejects whitespace-only evidence content', () => {
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.addEvidence(root.id, 'supports', '   ')).toThrow(/empty|blank|whitespace/i);
     });
 
     it('auto-transitions pending to exploring on first evidence', () => {
@@ -216,6 +235,19 @@ describe('TreeManager', () => {
       tm.addEvidence(root.id, 'refutes', 'Bad');
       tm.eliminateHypothesis(root.id, 'Done');
       expect(() => tm.eliminateHypothesis(root.id, 'Again')).toThrow(TreeError);
+    });
+
+    it('rejects a whitespace-only reason (every verdict must carry an audit justification)', () => {
+      const mk = () => tm.createSession('Problem').root;
+      const a = mk();
+      tm.addEvidence(a.id, 'refutes', 'r');
+      expect(() => tm.eliminateHypothesis(a.id, '   ')).toThrow(/empty|blank|whitespace/i);
+      const b = mk();
+      tm.addEvidence(b.id, 'supports', 's');
+      expect(() => tm.corroborateHypothesis(b.id, '   ')).toThrow(/empty|blank|whitespace/i);
+      const { root: parent } = tm.createSession('Parent');
+      const [child] = tm.decompose(parent.id, ['C1', 'C2']);
+      expect(() => tm.setOutOfScope(child.id, '  ')).toThrow(/empty|blank|whitespace/i);
     });
 
     it('rejects eliminating a confirmed hypothesis', () => {
@@ -288,14 +320,19 @@ describe('TreeManager', () => {
     });
 
     it('corroborates a parent once every child is resolved', () => {
-      const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, ['A', 'B']);
-      tm.addEvidence(children[0].id, 'refutes', 'no');
-      tm.eliminateHypothesis(children[0].id, 'reason');
-      tm.addEvidence(children[1].id, 'refutes', 'no');
-      tm.eliminateHypothesis(children[1].id, 'reason');
-      const result = tm.corroborateHypothesis(root.id, 'reason');
+      // Corroborate an intermediate parent P after both of P's children resolve,
+      // while a sibling top-level branch (Q) keeps the session open — so this
+      // exercises the child-terminality gate, not the closed-session path.
+      const { session, root } = tm.createSession('Problem');
+      const [p] = tm.decompose(root.id, ['P', 'Q']);
+      const [a, b] = tm.decompose(p.id, ['A', 'B']);
+      tm.addEvidence(a.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a.id, 'reason');
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'reason');
+      const result = tm.corroborateHypothesis(p.id, 'reason');
       expect(result.status).toBe('corroborated');
+      expect(session.status).toBe('open'); // Q still pending
     });
 
     it('refuses to corroborate a parent with a dangling (missing) child id', () => {
@@ -617,6 +654,75 @@ describe('TreeManager', () => {
       tm.eliminateHypothesis(a2.id, 'no');
       tm.corroborateHypothesis(a.id, 'A survives by elimination');
       expect(session.status).toBe('resolved');
+    });
+  });
+
+  describe('closed-session mutation guard', () => {
+    // Pruning (eliminate/out-of-scope) never cascades, so a closed session can
+    // retain pending/exploring descendants under a pruned branch. Mutating those
+    // leaked nodes must be rejected: a resolved/abandoned investigation is not a
+    // live workspace, and silently mutating it (especially corroborating a leaked
+    // node, which would never re-run closure) leaves the verdict inconsistent.
+    // The one sanctioned way to act on a closed session is a refute that reopens
+    // it — covered by the spine-closure reopen tests.
+
+    /** Builds a session resolved with a pending grandchild leaked under pruned A. */
+    function resolvedWithLeakedPending() {
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      const [a1] = tm.decompose(a.id, ['A1', 'A2']); // A1, A2 pending under A
+      // Prune A and B without resolving A1/A2 (elimination does not cascade).
+      tm.addEvidence(a.id, 'refutes', 'A wrong');
+      tm.eliminateHypothesis(a.id, 'A pruned');
+      tm.addEvidence(b.id, 'supports', 'good');
+      tm.corroborateHypothesis(b.id, 'B survives');
+      expect(session.status).toBe('resolved');
+      expect(a1.status).toBe('pending'); // leaked: still pending in a closed session
+      return { session, a1 };
+    }
+
+    it('rejects add_evidence on a leaked pending node in a resolved session', () => {
+      const { a1 } = resolvedWithLeakedPending();
+      expect(() => tm.addEvidence(a1.id, 'supports', 'late evidence')).toThrow(TreeError);
+      expect(() => tm.addEvidence(a1.id, 'supports', 'late evidence')).toThrow(/resolved|closed|completed/i);
+    });
+
+    it('rejects decompose on a leaked pending node in a resolved session', () => {
+      const { a1 } = resolvedWithLeakedPending();
+      expect(() => tm.decompose(a1.id, ['X', 'Y'])).toThrow(/resolved|closed|completed/i);
+    });
+
+    it('rejects add_hypothesis on a leaked pending node in a resolved session', () => {
+      const { a1 } = resolvedWithLeakedPending();
+      expect(() => tm.addHypothesis(a1.id, 'Z')).toThrow(/resolved|closed|completed/i);
+    });
+
+    it('rejects corroborate on a leaked node in a resolved session (prevents stale verdict)', () => {
+      const { session, a1 } = resolvedWithLeakedPending();
+      // A1 has no children, so it would otherwise be corroborable; doing so in a
+      // closed session is exactly the stale-verdict path — the close-check is
+      // gated on open, so tryCloseSession would never reconcile.
+      expect(() => tm.corroborateHypothesis(a1.id, 'late')).toThrow(/resolved|closed|completed/i);
+      expect(session.status).toBe('resolved'); // unchanged
+    });
+
+    it('still allows a refute that reopens the session (sanctioned path)', () => {
+      // Regression guard: the closed-session block must not break the legitimate
+      // reopen path. Refuting the corroborated branch reopens, then the now-open
+      // session accepts further mutation.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, ['A', 'B']);
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'no');
+      tm.addEvidence(a.id, 'supports', 'good');
+      tm.corroborateHypothesis(a.id, 'A');
+      expect(session.status).toBe('resolved');
+
+      // Refute on the corroborated leaf reopens (sanctioned), then a follow-up
+      // mutation on the reopened session is accepted.
+      tm.addEvidence(a.id, 'refutes', 'counter-instance');
+      expect(session.status).toBe('open');
+      expect(() => tm.addEvidence(a.id, 'neutral', 'more context')).not.toThrow();
     });
   });
 

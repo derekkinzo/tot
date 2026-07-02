@@ -41,6 +41,19 @@ describe('applyEntry (shared event interpreter)', () => {
     expect(s.hypotheses[0].status).toBe('corroborated');
   });
 
+  it('replays an entry that carries an explicit schema version', () => {
+    // Forward-compat: entries may carry a version field. The current schema
+    // replays as today; the field exists so a future format change has a branch
+    // point rather than an ambiguous bare type.
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: hyp('a'), v: 1 } as JournalEntry);
+    expect(s.hypotheses.map((h) => h.id)).toEqual(['a']);
+  });
+
+  it('replays a legacy entry with no version field (treated as v1)', () => {
+    const s = fold(entry('hypothesis-added', hyp('a')));
+    expect(s.hypotheses.map((h) => h.id)).toEqual(['a']);
+  });
+
   it('is order-tolerant: an update for a node with no prior add still lands it (total replay over a truncated log)', () => {
     // The writer never emits this order; the branch makes replay total over a
     // log whose hypothesis-added line was dropped/truncated.
@@ -56,6 +69,33 @@ describe('applyEntry (shared event interpreter)', () => {
       entry('evidence-added', { hypothesisId: 'a', evidence: ev }),
     );
     expect(s.hypotheses[0].evidence).toEqual([ev]);
+  });
+
+  it('does not lose an evidence-added that precedes its hypothesis (order-tolerant)', () => {
+    // The replay contract is order-tolerant for hypothesis events; evidence must
+    // be too. A legacy/hand-authored journal can order evidence-added before the
+    // hypothesis-added that creates its target. The evidence must land once the
+    // hypothesis appears, not be silently dropped.
+    const ev = { id: 'e1', type: 'refutes' as const, content: 'counter', timestamp: ts };
+    const s = fold(
+      entry('evidence-added', { hypothesisId: 'a', evidence: ev }),
+      entry('hypothesis-added', hyp('a')),
+    );
+    expect(s.hypotheses.map((h) => h.id)).toEqual(['a']);
+    expect(s.hypotheses[0].evidence).toEqual([ev]);
+  });
+
+  it('merges buffered out-of-order evidence ahead of evidence carried on the later snapshot', () => {
+    // If the hypothesis-added/updated snapshot itself already carries evidence,
+    // the buffered earlier evidence is appended without dropping the snapshot's.
+    const early = { id: 'e1', type: 'refutes' as const, content: 'early', timestamp: ts };
+    const carried = { id: 'e2', type: 'supports' as const, content: 'carried', timestamp: ts };
+    const s = fold(
+      entry('evidence-added', { hypothesisId: 'a', evidence: early }),
+      entry('hypothesis-added', hyp('a', { evidence: [carried] })),
+    );
+    const ids = s.hypotheses[0].evidence.map((e) => e.id).sort();
+    expect(ids).toEqual(['e1', 'e2']);
   });
 
   it('keeps hypothesisIndex consistent with the array across interleaved adds/updates', () => {
@@ -81,6 +121,34 @@ describe('applyEntry (shared event interpreter)', () => {
     const src = applyEntry.toString();
     expect(src).not.toMatch(/\.findIndex\(/);
     expect(src).not.toMatch(/hypotheses\.find\(/);
+  });
+
+  it('replays a worst-case full-tree journal to the correct final state at scale', () => {
+    // The tree is bounded (MAX_HYPOTHESES_DEFAULT = 500). A heavily-worked tree
+    // at the cap with 20 updates each is ~10.5k journal lines; replay must fold
+    // them to one node per id with the last-written content winning, no
+    // duplication. Correctness-at-scale, not wall-clock: the O(1) upsert
+    // invariant is asserted structurally by the sibling 'no linear array scan'
+    // test, so this one guards the folded result rather than timing it.
+    const entries: JournalEntry[] = [entry('session-created', session())];
+    const N = 500, UPDATES = 20;
+    for (let i = 0; i < N; i++) {
+      entries.push(entry('hypothesis-added', hyp(`h${i}`, { parentId: i === 0 ? null : 'h0' })));
+      for (let u = 0; u < UPDATES; u++) {
+        entries.push(entry('hypothesis-updated', hyp(`h${i}`, {
+          status: 'exploring',
+          evidence: Array.from({ length: u + 1 }, (_, k) => ({ id: `e${i}_${k}`, type: 'supports' as const, content: 'x', timestamp: ts })),
+        })));
+      }
+    }
+    const state = emptyReplayState();
+    for (const e of entries) applyEntry(state, e);
+    // Exactly one node per id (upsert, not append), index consistent, and the
+    // last update's evidence count (UPDATES items) won.
+    expect(state.hypotheses).toHaveLength(N);
+    expect(state.hypothesisIndex.size).toBe(N);
+    for (const [id, idx] of state.hypothesisIndex) expect(state.hypotheses[idx].id).toBe(id);
+    expect(state.hypotheses[state.hypothesisIndex.get('h0')!].evidence).toHaveLength(UPDATES);
   });
 
   it('session-completed sets terminal status + completedAt; session-reopened reverts', () => {

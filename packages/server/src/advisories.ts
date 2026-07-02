@@ -1,4 +1,5 @@
 import { isLive, isOpen } from './closure.js';
+import { countSupporting, countRefuting } from '@tot-mcp/shared';
 import type { Hypothesis } from './types.js';
 
 /**
@@ -9,11 +10,9 @@ import type { Hypothesis } from './types.js';
  * prose and the engine reads; this module owns the decisions.
  */
 
-/** Count of supporting / refuting evidence on a hypothesis. Exported so the
- *  formatter and the predicates share one definition (no drift between the
- *  gate that fires and the number printed). */
-export const countSupporting = (h: Hypothesis): number => h.evidence.filter((e) => e.type === 'supports').length;
-export const countRefuting = (h: Hypothesis): number => h.evidence.filter((e) => e.type === 'refutes').length;
+// countSupporting/countRefuting are part of the shared domain contract; re-export
+// so existing './advisories.js' importers (the formatter) are unaffected.
+export { countSupporting, countRefuting } from '@tot-mcp/shared';
 
 /** Inference-language detector: ≥2 hedging keywords reads as inference, not direct observation. */
 const INFERENCE_KEYWORDS = /\b(suggests?|impl(y|ies)|could|might|possibly|consistent with|indicates?|likely|appears?)\b/gi;
@@ -47,12 +46,17 @@ export function isConfirmationBias(hypothesis: Hypothesis, siblings: Hypothesis[
 }
 
 /**
- * Source independence (Heuer): ≥3 evidence items, ≥2 of them sourced, and every
- * sourced item cites the same origin — independent corroboration would strengthen it.
+ * Source independence (Heuer): ≥3 evidence items accumulated, and the SUPPORTING
+ * evidence — ≥2 sourced items — all cites a single origin, so independent
+ * corroboration would strengthen it. Scoped to supporting evidence because the
+ * nudge is about corroboration diversity; a repeated refuting source does not
+ * "strengthen" the hypothesis and is irrelevant here.
  */
 export function lacksSourceDiversity(hypothesis: Hypothesis): boolean {
   if (hypothesis.evidence.length < 3) return false;
-  const sources = hypothesis.evidence.filter((e) => e.source).map((e) => e.source);
+  const sources = hypothesis.evidence
+    .filter((e) => e.type === 'supports' && e.source)
+    .map((e) => e.source);
   return sources.length >= 2 && new Set(sources).size === 1;
 }
 

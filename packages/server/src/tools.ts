@@ -94,36 +94,41 @@ export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
   },
 };
 
+// Non-blank free text: rejects whitespace-only input (which z.string().min(1)
+// would accept) at the wire boundary, matching the engine's content guards.
+const nonBlank = (max: number) =>
+  z.string().min(1).max(max).refine((s) => s.trim().length > 0, 'must not be empty or whitespace-only');
+
 const schemas = {
   create_tree: z.object({
-    problem: z.string().min(1).max(10000),
+    problem: nonBlank(10000),
   }),
   decompose: z.object({
     parentId: z.string().min(1),
-    children: z.array(z.string().min(1)).min(2).max(20),
+    children: z.array(nonBlank(10000)).min(2).max(20),
   }),
   add_hypothesis: z.object({
     parentId: z.string().min(1),
-    content: z.string().min(1).max(10000),
+    content: nonBlank(10000),
   }),
   add_evidence: z.object({
     hypothesisId: z.string().min(1),
     type: z.enum(['supports', 'refutes', 'neutral']),
-    content: z.string().min(1).max(10000),
+    content: nonBlank(10000),
     source: z.string().max(10000).optional(),
   }),
   eliminate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
-    reason: z.string().min(1).max(10000),
+    reason: nonBlank(10000),
     refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional(),
   }),
   corroborate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
-    reason: z.string().min(1).max(10000),
+    reason: nonBlank(10000),
   }),
   set_out_of_scope: z.object({
     hypothesisId: z.string().min(1),
-    reason: z.string().min(1).max(10000),
+    reason: nonBlank(10000),
   }),
   get_tree: z.object({
     format: z.enum(['full', 'compact']).optional().default('compact'),
@@ -195,7 +200,18 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return async (args) => {
       try {
         const { text, sessionId } = fn(schema.parse(args));
-        if (sessionId) await sink.drain(sessionId);
+        if (sessionId) {
+          // The in-memory mutation succeeded, but if its journal append failed
+          // the state was not durably recorded — acknowledge the failure rather
+          // than reporting a success the next restart would silently drop.
+          const persistFailed = await sink.drain(sessionId);
+          if (persistFailed) {
+            return toolResult(
+              `Error: the change was applied in memory but could not be saved to disk; it will be lost on restart. Check the data directory is writable.`,
+              true,
+            );
+          }
+        }
         return toolResult(text);
       } catch (e) {
         if (e instanceof z.ZodError) {

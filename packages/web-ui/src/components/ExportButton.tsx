@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type { Hypothesis, Session } from '../types';
-import { STATUS_NODE_STYLES } from '../theme';
-import { conclusionStatus } from '../tree/conclusion';
+import { generateMarkdown } from '../tree/exportMarkdown';
 
 interface Props {
   session: Session | null;
@@ -66,53 +65,3 @@ const menuItemStyle: React.CSSProperties = {
   background: 'none', border: 'none', color: '#e1e4e8',
   fontSize: 13, cursor: 'pointer', textAlign: 'left',
 };
-
-function generateMarkdown(session: Session, hypotheses: Map<string, Hypothesis>): string {
-  const lines: string[] = [];
-  lines.push(`# ${session.problem}`);
-  lines.push('');
-  lines.push(`Status: ${session.status} | Created: ${new Date(session.createdAt).toLocaleString()}`);
-  lines.push('');
-  lines.push('## Hypothesis Tree');
-  lines.push('');
-
-  const root = hypotheses.get(session.rootNodeId);
-  if (root) {
-    renderNode(root, hypotheses, lines, 0);
-  }
-
-  return lines.join('\n');
-}
-
-function renderNode(node: Hypothesis, hypotheses: Map<string, Hypothesis>, lines: string[], depth: number): void {
-  const indent = '  '.repeat(depth);
-  const icon = STATUS_NODE_STYLES[node.status]?.icon ?? '?';
-  let supports = 0;
-  let refutes = 0;
-  for (const e of node.evidence) {
-    if (e.type === 'supports') supports++;
-    else if (e.type === 'refutes') refutes++;
-  }
-  const ev = node.evidence.length > 0 ? ` (${supports} supporting, ${refutes} refuting)` : '';
-
-  lines.push(`${indent}- ${icon} **${node.content}**${ev} [${node.status}]`);
-
-  const concl = conclusionStatus(node);
-  if (concl) {
-    const prefix = !concl.isHistorical
-      ? concl.verdict
-      : concl.supersededByDescendant
-        ? `historically ${concl.verdict} (reopened by refuted descendant)`
-        : `historically ${concl.verdict}`;
-    lines.push(`${indent}  > ${prefix}: ${node.conclusion!.reason}`);
-  }
-
-  for (const ev of node.evidence) {
-    lines.push(`${indent}  - _${ev.type}_: ${ev.content}${ev.source ? ` (${ev.source})` : ''}`);
-  }
-
-  for (const childId of node.children) {
-    const child = hypotheses.get(childId);
-    if (child) renderNode(child, hypotheses, lines, depth + 1);
-  }
-}

@@ -42,6 +42,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "@tot-mcp/shared": "*",
     "sirv": "^3.0.0",
     "uuid": "^11.1.0"
   },

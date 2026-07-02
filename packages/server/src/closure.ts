@@ -1,39 +1,9 @@
-import type { Hypothesis, HypothesisStatus } from './types.js';
+import type { Hypothesis } from './types.js';
+import { isPruned, isLive, isTerminal, isOpen } from '@tot-mcp/shared';
 
-/**
- * Eliminated and out-of-scope are pruning verdicts: descendants of a pruned
- * branch are moot under the closure rule.
- */
-export function isPruned(status: HypothesisStatus): boolean {
-  return status === 'eliminated' || status === 'out-of-scope';
-}
-
-/**
- * A hypothesis is "live" when it can still accept further work or be
- * reopened. Pruning verdicts are the only excluded states.
- */
-export function isLive(status: HypothesisStatus): boolean {
-  return !isPruned(status);
-}
-
-/**
- * Terminal statuses cannot accept new children. Includes corroborated,
- * which is settled (though revisable by refutation on the leaf itself,
- * not by sprouting a new pending child below it).
- */
-export function isTerminal(status: HypothesisStatus): boolean {
-  return status === 'eliminated' || status === 'corroborated' || status === 'out-of-scope';
-}
-
-/**
- * A hypothesis is "open" when it is an unsettled competitor still inviting
- * work — pending or exploring. Distinct from isLive, which also admits a
- * corroborated (settled) verdict. Use this when listing genuine rivals to
- * discriminate against or branches that still block resolution.
- */
-export function isOpen(status: HypothesisStatus): boolean {
-  return status === 'pending' || status === 'exploring';
-}
+// The status predicates are part of the shared domain contract. Re-exported so
+// the many './closure.js' importers in the engine are unaffected.
+export { isPruned, isLive, isTerminal, isOpen } from '@tot-mcp/shared';
 
 /**
  * Returns the open (pending/exploring) nodes that still block a session from

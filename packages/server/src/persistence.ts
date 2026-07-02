@@ -1,7 +1,7 @@
 import { appendFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyEntry, deriveScanStatus, emptyReplayState, type JournalEntry } from './replay.js';
+import { applyEntry, deriveScanStatus, emptyReplayState, JOURNAL_SCHEMA_VERSION, type JournalEntry } from './replay.js';
 import type { Hypothesis, Session, TreeEvent } from './types.js';
 
 // ─── Session Index (lightweight metadata for lazy loading) ───
@@ -28,14 +28,21 @@ export class Persistence {
 
   async append(type: string, payload: unknown): Promise<void> {
     const entry: JournalEntry = {
+      v: JOURNAL_SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       type,
       payload,
     };
-    await appendFile(this.filePath, JSON.stringify(entry) + '\n').catch((err) => {
+    try {
+      await appendFile(this.filePath, JSON.stringify(entry) + '\n');
+    } catch (err) {
       console.error(`[tot-mcp] Warning: failed to write JSONL: ${err}`);
       this.onError?.(err instanceof Error ? err : new Error(String(err)));
-    });
+      // Propagate so the sink can flag the session unhealthy and the tool
+      // handler acknowledges with isError rather than reporting a false success
+      // for a mutation that never reached disk.
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   }
 }
 

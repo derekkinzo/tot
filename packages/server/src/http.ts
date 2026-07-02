@@ -32,11 +32,18 @@ export interface HttpServerHandle {
   close: () => Promise<void>;
 }
 
-/** Builds the snapshot event for a project's default session (null if no session). */
-function snapshotEvent(tm: TreeManager): TreeEvent {
-  const session = pickDefaultSession(tm);
+/**
+ * Builds the snapshot event for a session: the requested one when `sessionId`
+ * resolves to a loaded session, otherwise the project default (null if no
+ * session at all). Honoring the request keeps a reconnecting dashboard on the
+ * session the user is viewing instead of snapping it back to the default.
+ */
+function snapshotEvent(tm: TreeManager, sessionId?: string | null): TreeEvent {
+  const session = (sessionId
+    ? tm.getAllSessions().find((s) => s.id === sessionId)
+    : undefined) ?? pickDefaultSession(tm);
   if (!session) return { type: 'snapshot', session: null, hypotheses: [] };
-  const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
+  const hypotheses = tm.getHypothesesBySession(session.id);
   return { type: 'snapshot', session, hypotheses };
 }
 
@@ -71,7 +78,7 @@ export async function startHttpServer(
 
     if (url.pathname === '/sse') {
       setCorsHeaders(res);
-      handleSSE(req, res, project, hub);
+      handleSSE(req, res, project, hub, url.searchParams.get('sessionId'));
       return;
     }
 
@@ -90,6 +97,16 @@ export async function startHttpServer(
     if (url.pathname === '/api/info') {
       setCorsHeaders(res);
       handleInfoAPI(res, project);
+      return;
+    }
+
+    // Unknown API routes must 404 rather than fall through to the SPA static
+    // fallback (which would serve index.html with a 200 and make a client's
+    // JSON.parse throw, masking the bad route).
+    if (url.pathname.startsWith('/api/')) {
+      setCorsHeaders(res);
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not-found' }));
       return;
     }
 
@@ -143,10 +160,14 @@ function handleSSE(
   res: ServerResponse,
   project: ProjectState,
   hub: SseHub,
+  requestedSessionId: string | null,
 ): void {
   writeSseHeaders(res);
+  // A reconnecting dashboard re-requests the session it is viewing; load it
+  // (lazy) so the snapshot describes that session rather than the default.
+  if (requestedSessionId) project.ensureSessionLoaded(requestedSessionId);
   // Send the initial snapshot, then register for live events.
-  res.write(`id: 0\ndata: ${JSON.stringify(snapshotEvent(project.tm))}\n\n`);
+  res.write(`id: 0\ndata: ${JSON.stringify(snapshotEvent(project.tm, requestedSessionId))}\n\n`);
   hub.addClient(res);
   req.on('close', () => hub.removeClient(res));
 }
@@ -169,7 +190,7 @@ async function handleStateAPI(res: ServerResponse, url: URL, project: ProjectSta
         : pickDefaultSession(tm);
 
       if (!session) return { session: null, hypotheses: [] };
-      const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
+      const hypotheses = tm.getHypothesesBySession(session.id);
       return { session, hypotheses };
     });
 
@@ -196,7 +217,7 @@ function handleSessionsAPI(res: ServerResponse, project: ProjectState): void {
 
     // Add loaded sessions with accurate node counts
     for (const s of loadedSessions) {
-      const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === s.id);
+      const hypotheses = tm.getHypothesesBySession(s.id);
       summaries.push({
         id: s.id,
         problem: s.problem,
@@ -229,7 +250,7 @@ function handleSessionsAPI(res: ServerResponse, project: ProjectState): void {
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
   const summaries = sessions.map((s) => {
-    const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === s.id);
+    const hypotheses = tm.getHypothesesBySession(s.id);
     return {
       id: s.id,
       problem: s.problem,

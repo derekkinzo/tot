@@ -4,6 +4,9 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
+import { mkdtempSync, mkdirSync, chmodSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 function parseResult(result: any): any {
   const text = result.content?.find((c: any) => c.type === 'text')?.text;
@@ -613,6 +616,75 @@ describe('MCP Integration', () => {
       }
     });
 
+    it('still surfaces the dashboard URL once every branch is terminal (dashboard renders any session)', async () => {
+      // The dashboard server renders the project's most-recent session whether
+      // or not an investigation is still active, so the URL must remain
+      // discoverable after a tree reaches a terminal state.
+      const tm2 = new TreeManager({ stagnationThreshold: 4 });
+      const server2 = new McpServer({ name: 'tot-mcp-test-resolved', version: '0.1.0' });
+      registerTools(server2, tm2, () => '/tmp/tot-test', { getDashboardUrl: () => 'http://localhost:23456' });
+      const client2 = new Client({ name: 'c-resolved', version: '1.0.0' }, { capabilities: {} });
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await Promise.all([client2.connect(ct), server2.connect(st)]);
+      try {
+        const { rootId } = parseResult(
+          await client2.callTool({ name: 'create_tree', arguments: { problem: 'Resolves' } }),
+        );
+        const { childIds } = parseResult(
+          await client2.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+        );
+        // Drive the session to a terminal state: A eliminated, B corroborated.
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+        await client2.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+        await client2.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+
+        const text = getText(await client2.callTool({ name: 'get_status', arguments: {} }));
+        // No open session remains, but the dashboard URL is still discoverable.
+        expect(text).toContain('Visualization: http://localhost:23456');
+      } finally {
+        await client2.close();
+      }
+    });
+
+    it('does not advertise active work for a terminal session with pending descendants under a pruned branch', async () => {
+      // Pruning does not cascade, so a resolved session can retain pending
+      // descendants under an eliminated/out-of-scope ancestor. The status
+      // read-out for a terminal session must not present those moot nodes as
+      // live work (no Active/Unexplored clauses), which would misrepresent a
+      // completed investigation as still in progress.
+      const tm2 = new TreeManager({ stagnationThreshold: 4 });
+      const server2 = new McpServer({ name: 'tot-mcp-test-terminal', version: '0.1.0' });
+      registerTools(server2, tm2, () => '/tmp/tot-test');
+      const client2 = new Client({ name: 'c-terminal', version: '1.0.0' }, { capabilities: {} });
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await Promise.all([client2.connect(ct), server2.connect(st)]);
+      try {
+        const { rootId } = parseResult(
+          await client2.callTool({ name: 'create_tree', arguments: { problem: 'Leaked pending' } }),
+        );
+        const { childIds } = parseResult(
+          await client2.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+        );
+        // Give A its own pending children, then prune A without resolving them.
+        await client2.callTool({ name: 'decompose', arguments: { parentId: childIds[0], children: ['A1', 'A2'] } });
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+        await client2.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+        // Corroborate B → session resolves while A1/A2 remain pending under pruned A.
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+        await client2.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+
+        const text = getText(await client2.callTool({ name: 'get_status', arguments: {} }));
+        expect(text).toContain('(resolved)');
+        // A completed investigation must not report live work.
+        expect(text).not.toContain('Active:');
+        expect(text).not.toContain('Unexplored:');
+        expect(text).not.toContain('STAGNATION');
+      } finally {
+        await client2.close();
+      }
+    });
+
     it('separates resolved and active counts in the progress breakdown', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Topic' } }),
@@ -916,5 +988,53 @@ describe('MCP Integration', () => {
       });
       expect(getText(elimResult)).toContain('Progress:');
     });
+  });
+});
+
+// ─── Persistence failure surfacing ───
+
+describe('MCP Integration — persistence failure surfacing', () => {
+  let client: Client;
+  let server: McpServer;
+  let tm: TreeManager;
+  let roDir: string;
+
+  beforeEach(async () => {
+    // The sessions dir exists but is read-only, so the Persistence constructor's
+    // recursive mkdir of an existing dir succeeds while appendFile (the journal
+    // write) fails with EACCES — the exact split where the in-memory mutation
+    // succeeds but the durable write does not, which must NOT be acknowledged as
+    // success.
+    roDir = mkdtempSync(join(tmpdir(), 'tot-ro-'));
+    const sessionsDir = join(roDir, 'sessions');
+    mkdirSync(sessionsDir);
+    chmodSync(sessionsDir, 0o500);
+
+    tm = new TreeManager({ stagnationThreshold: 4 });
+    server = new McpServer({ name: 'tot-mcp-test', version: '0.1.0' });
+    registerTools(server, tm, () => sessionsDir);
+
+    client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      client.connect(clientTransport),
+      server.connect(serverTransport),
+    ]);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    try { chmodSync(roDir, 0o700); rmSync(roDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
+  it('a mutating tool returns isError when its journal write fails (no silent data loss)', async () => {
+    const result = await client.callTool({
+      name: 'create_tree',
+      arguments: { problem: 'this will fail to persist' },
+    });
+    // The mutation cannot be durably recorded, so the agent must be told it
+    // failed rather than receiving a success for state that never hit disk.
+    expect(result.isError).toBe(true);
+    expect(getText(result)).toMatch(/persist|save|disk|write/i);
   });
 });

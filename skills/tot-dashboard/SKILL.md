@@ -18,9 +18,11 @@ to start.
    ```
    Visualization: http://localhost:<port>
    ```
-   - Present → that is the dashboard URL for this session's tree.
-   - `No open session` → there is no tree yet; tell the user to run
-     `/tot-reason` to start one, then stop.
+   - Present → that is the dashboard URL. Open it. The dashboard renders the
+     project's most recent tree and offers a Sessions selector for the rest,
+     so the URL is valid whether or not an investigation is still in progress.
+   - `No open session` → no tree exists for this project yet; tell the user to
+     run `/tot-reason` to start one, then stop.
    - No `Visualization:` line → the in-process HTTP server did not start;
      tell the user the dashboard is unavailable and offer `/tot-inspect`.
 

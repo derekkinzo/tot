@@ -98,6 +98,22 @@ describe('per-session server', () => {
     }
   });
 
+  it('close() tears down the MCP server so further tool calls fail', async () => {
+    // Graceful shutdown must close the MCP protocol layer, not just the HTTP
+    // server — otherwise the transport lingers. After close(), the connected
+    // client can no longer invoke tools.
+    const s = await createSessionServer({ projectDir: projectDir });
+    open.push(s);
+    const client = await connect(s);
+    // Sanity: the tool works before close.
+    await client.callTool({ name: 'create_tree', arguments: { problem: 'pre-close' } });
+    await s.close();
+    await expect(
+      client.callTool({ name: 'get_status', arguments: {} }),
+    ).rejects.toThrow();
+    try { await client.close(); } catch { /* already torn down */ }
+  });
+
   it('two servers for the same project bind different ephemeral ports', async () => {
     const a = await start();
     const b = await start();
@@ -147,6 +163,109 @@ describe('per-session server', () => {
 
     const full = JSON.parse(getText(await c2.callTool({ name: 'get_tree', arguments: { format: 'full' } })));
     expect(full.session.id).toBe(sessionId);
+  });
+
+  it('a restarted server reloads a fully-terminal tree and still surfaces its dashboard URL', async () => {
+    // First process: build a tree and drive every branch to a terminal state.
+    const s1 = await start();
+    const c1 = await connect(s1);
+    const { rootId } = parseResult(
+      await c1.callTool({ name: 'create_tree', arguments: { problem: 'Terminal then reload' } }),
+    );
+    const { childIds } = parseResult(
+      await c1.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+    );
+    await c1.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+    await c1.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+    await c1.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+    await c1.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+    await c1.close();
+    await s1.close();
+
+    // Second process: no session is open, but the reloaded tree is the project's
+    // most recent, so the dashboard URL must still be discoverable and the
+    // dashboard state endpoint must serve that tree.
+    const s2 = await start();
+    const c2 = await connect(s2);
+    clients.push(c2);
+    const status = getText(await c2.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).toContain('Terminal then reload');
+    expect(status).toContain(`Visualization: ${s2.dashboardUrl}`);
+
+    const state = await (await fetch(`http://localhost:${s2.port}/api/state`)).json();
+    expect(state.session).not.toBeNull();
+    expect(state.session.status).toBe('resolved');
+    expect(state.hypotheses.length).toBe(3);
+  });
+
+  it('serves a fully-terminal tree over /api/state so the dashboard renders it after closure', async () => {
+    // The dashboard default-session pick falls back to the most recent tree, so
+    // a project whose only session has reached a terminal state must still
+    // return that session (not an empty state) for the browser to render.
+    const s = await start();
+    const client = await connect(s);
+    clients.push(client);
+
+    const { rootId, sessionId } = parseResult(
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'Closes fully' } }),
+    );
+    const { childIds } = parseResult(
+      await client.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+    );
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+    await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+    await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+
+    const state = await (await fetch(`http://localhost:${s.port}/api/state`)).json();
+    expect(state.session).not.toBeNull();
+    expect(state.session.id).toBe(sessionId);
+    expect(state.session.status).toBe('resolved');
+    expect(state.hypotheses.length).toBe(3);
+  });
+
+  it('an unmatched /api/* path returns 404 JSON, not the SPA HTML shell', async () => {
+    // Unknown API routes must fail as 404 rather than falling through to the
+    // single-page-app static fallback, which would return index.html with a 200
+    // and make a client JSON.parse throw — masking the bad route.
+    const s = await start();
+    const resp = await fetch(`http://localhost:${s.port}/api/does-not-exist`);
+    expect(resp.status).toBe(404);
+    expect(resp.headers.get('content-type')).toMatch(/application\/json/);
+    const body = await resp.json();
+    expect(body.error).toBeTruthy();
+  });
+
+  it('the SSE initial snapshot honors a requested sessionId instead of always the default', async () => {
+    // The dashboard streams one session at a time and reconnects on any network
+    // blip. If the stream always snapshots the default (most-recent-open)
+    // session, a user viewing an older session is silently reset to the default
+    // on reconnect. The /sse endpoint must snapshot the session the client asks
+    // for.
+    const s = await start();
+    const client = await connect(s);
+    clients.push(client);
+
+    // Two sessions; the second is the default (most recently created, open).
+    const first = parseResult(await client.callTool({ name: 'create_tree', arguments: { problem: 'First session' } }));
+    await client.callTool({ name: 'create_tree', arguments: { problem: 'Second session' } });
+
+    // Connect to the stream scoped to the FIRST (non-default) session.
+    const resp = await fetch(`http://localhost:${s.port}/sse?sessionId=${first.sessionId}`, {
+      headers: { Accept: 'text/event-stream' },
+    });
+    const reader = resp.body!.getReader();
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    await reader.cancel();
+
+    // The first SSE frame is the snapshot; it must describe the requested
+    // session, not the default second one.
+    const dataLine = text.split('\n').find((l) => l.startsWith('data:'))!;
+    const snapshot = JSON.parse(dataLine.slice('data:'.length).trim());
+    expect(snapshot.type).toBe('snapshot');
+    expect(snapshot.session.id).toBe(first.sessionId);
+    expect(snapshot.session.problem).toBe('First session');
   });
 
   it('migrates legacy {projectDir}/.tot/sessions journals into central storage on startup (non-destructive)', async () => {

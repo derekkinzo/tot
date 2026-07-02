@@ -1,11 +1,21 @@
 import { subtreeContainsCorroborated } from './closure.js';
 import type { Evidence, Hypothesis, Session } from './types.js';
 
-/** A journal entry as stored on disk: a timestamped, typed payload. */
+/**
+ * Current journal schema version, stamped on every entry written. Bump when the
+ * on-disk entry/payload shape changes incompatibly; {@link applyEntry} can then
+ * branch on `entry.v` to upcast older entries. Entries with no `v` predate
+ * versioning and are treated as v1.
+ */
+export const JOURNAL_SCHEMA_VERSION = 1;
+
+/** A journal entry as stored on disk: a timestamped, typed, versioned payload. */
 export interface JournalEntry {
   timestamp: string;
   type: string;
   payload: unknown;
+  /** Schema version; absent in pre-versioning journals (treated as v1). */
+  v?: number;
 }
 
 /** In-memory state rebuilt by folding journal entries. */
@@ -16,10 +26,16 @@ export interface ReplayState {
    *  O(1) instead of a linear scan per event (replay is O(n) over the journal,
    *  not O(updates × nodes)). */
   hypothesisIndex: Map<string, number>;
+  /** Evidence whose hypothesis has not been seen yet, keyed by hypothesisId.
+   *  A legacy/hand-authored journal can order an evidence-added before the
+   *  hypothesis-added that creates its target; the evidence is held here and
+   *  flushed onto the node when it first appears, so order-tolerance extends to
+   *  evidence and nothing is silently dropped. */
+  pendingEvidence: Map<string, Evidence[]>;
 }
 
 export function emptyReplayState(): ReplayState {
-  return { sessions: [], hypotheses: [], hypothesisIndex: new Map() };
+  return { sessions: [], hypotheses: [], hypothesisIndex: new Map(), pendingEvidence: new Map() };
 }
 
 /**
@@ -35,15 +51,22 @@ export function emptyReplayState(): ReplayState {
  * truncated/legacy log; the writer never produces that order).
  */
 export function applyEntry(state: ReplayState, entry: JournalEntry): void {
-  const { sessions, hypotheses, hypothesisIndex } = state;
+  const { sessions, hypotheses, hypothesisIndex, pendingEvidence } = state;
   // Upsert a hypothesis by id in O(1): replace in place if known, else append
   // and record its index. Shared by add (writer never re-adds an id, but upsert
   // is safe) and update (order-tolerant: an update with no prior add lands it).
+  // On first appearance, any evidence buffered out-of-order ahead of the node is
+  // flushed onto it (without dropping evidence the snapshot itself carries).
   const upsertHypothesis = (h: Hypothesis): void => {
     const idx = hypothesisIndex.get(h.id);
     if (idx !== undefined) {
       hypotheses[idx] = h;
     } else {
+      const buffered = pendingEvidence.get(h.id);
+      if (buffered) {
+        h.evidence = [...h.evidence, ...buffered];
+        pendingEvidence.delete(h.id);
+      }
       hypothesisIndex.set(h.id, hypotheses.length);
       hypotheses.push(h);
     }
@@ -66,7 +89,15 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
       // correctly.
       const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
       const idx = hypothesisIndex.get(hypothesisId);
-      if (idx !== undefined) hypotheses[idx].evidence.push(evidence);
+      if (idx !== undefined) {
+        hypotheses[idx].evidence.push(evidence);
+      } else {
+        // Hypothesis not seen yet (out-of-order legacy journal): buffer until it
+        // appears rather than dropping the evidence.
+        const buf = pendingEvidence.get(hypothesisId);
+        if (buf) buf.push(evidence);
+        else pendingEvidence.set(hypothesisId, [evidence]);
+      }
       break;
     }
     case 'session-completed': {
