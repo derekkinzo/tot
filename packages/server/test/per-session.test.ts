@@ -165,6 +165,39 @@ describe('per-session server', () => {
     expect(full.session.id).toBe(sessionId);
   });
 
+  it('a restarted server reloads a fully-terminal tree and still surfaces its dashboard URL', async () => {
+    // First process: build a tree and drive every branch to a terminal state.
+    const s1 = await start();
+    const c1 = await connect(s1);
+    const { rootId } = parseResult(
+      await c1.callTool({ name: 'create_tree', arguments: { problem: 'Terminal then reload' } }),
+    );
+    const { childIds } = parseResult(
+      await c1.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+    );
+    await c1.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+    await c1.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+    await c1.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+    await c1.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+    await c1.close();
+    await s1.close();
+
+    // Second process: no session is open, but the reloaded tree is the project's
+    // most recent, so the dashboard URL must still be discoverable and the
+    // dashboard state endpoint must serve that tree.
+    const s2 = await start();
+    const c2 = await connect(s2);
+    clients.push(c2);
+    const status = getText(await c2.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).toContain('Terminal then reload');
+    expect(status).toContain(`Visualization: ${s2.dashboardUrl}`);
+
+    const state = await (await fetch(`http://localhost:${s2.port}/api/state`)).json();
+    expect(state.session).not.toBeNull();
+    expect(state.session.status).toBe('resolved');
+    expect(state.hypotheses.length).toBe(3);
+  });
+
   it('serves a fully-terminal tree over /api/state so the dashboard renders it after closure', async () => {
     // The dashboard default-session pick falls back to the most recent tree, so
     // a project whose only session has reached a terminal state must still
