@@ -647,6 +647,44 @@ describe('MCP Integration', () => {
       }
     });
 
+    it('does not advertise active work for a terminal session with pending descendants under a pruned branch', async () => {
+      // Pruning does not cascade, so a resolved session can retain pending
+      // descendants under an eliminated/out-of-scope ancestor. The status
+      // read-out for a terminal session must not present those moot nodes as
+      // live work (no Active/Unexplored clauses), which would misrepresent a
+      // completed investigation as still in progress.
+      const tm2 = new TreeManager({ stagnationThreshold: 4 });
+      const server2 = new McpServer({ name: 'tot-mcp-test-terminal', version: '0.1.0' });
+      registerTools(server2, tm2, () => '/tmp/tot-test');
+      const client2 = new Client({ name: 'c-terminal', version: '1.0.0' }, { capabilities: {} });
+      const [ct, st] = InMemoryTransport.createLinkedPair();
+      await Promise.all([client2.connect(ct), server2.connect(st)]);
+      try {
+        const { rootId } = parseResult(
+          await client2.callTool({ name: 'create_tree', arguments: { problem: 'Leaked pending' } }),
+        );
+        const { childIds } = parseResult(
+          await client2.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+        );
+        // Give A its own pending children, then prune A without resolving them.
+        await client2.callTool({ name: 'decompose', arguments: { parentId: childIds[0], children: ['A1', 'A2'] } });
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
+        await client2.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
+        // Corroborate B → session resolves while A1/A2 remain pending under pruned A.
+        await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'supports', content: 'yes' } });
+        await client2.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'survives' } });
+
+        const text = getText(await client2.callTool({ name: 'get_status', arguments: {} }));
+        expect(text).toContain('(resolved)');
+        // A completed investigation must not report live work.
+        expect(text).not.toContain('Active:');
+        expect(text).not.toContain('Unexplored:');
+        expect(text).not.toContain('STAGNATION');
+      } finally {
+        await client2.close();
+      }
+    });
+
     it('separates resolved and active counts in the progress breakdown', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Topic' } }),

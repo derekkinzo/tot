@@ -229,6 +229,9 @@ export class TreeManager extends EventEmitter {
   ): { evidence: Evidence; demotedAncestors: Hypothesis[] } {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
+    if (content.trim().length === 0) {
+      throw new TreeError('Evidence content cannot be empty or whitespace-only');
+    }
     if (isPruned(hypothesis.status)) {
       throw new TreeError(`Cannot add evidence to a ${hypothesis.status} hypothesis`);
     }
@@ -324,6 +327,7 @@ export class TreeManager extends EventEmitter {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
     this.assertSessionOpen(hypothesis.sessionId, 'eliminate a hypothesis');
+    this.assertReason(reason);
     if (isTerminal(hypothesis.status)) {
       const message = hypothesis.status === 'eliminated'
         ? 'Hypothesis is already eliminated'
@@ -386,6 +390,7 @@ export class TreeManager extends EventEmitter {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
     this.assertSessionOpen(hypothesis.sessionId, 'corroborate');
+    this.assertReason(reason);
     if (isTerminal(hypothesis.status)) {
       const message = hypothesis.status === 'corroborated'
         ? 'Hypothesis is already corroborated'
@@ -440,6 +445,7 @@ export class TreeManager extends EventEmitter {
   setOutOfScope(hypothesisId: string, reason: string): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
     this.assertSessionOpen(hypothesis.sessionId, 'set a hypothesis out-of-scope');
+    this.assertReason(reason);
     if (isTerminal(hypothesis.status)) {
       throw new TreeError(`Cannot set out-of-scope a ${hypothesis.status} hypothesis`);
     }
@@ -532,11 +538,11 @@ export class TreeManager extends EventEmitter {
     const session = sessionId ? this.sessions.get(sessionId) : this.getActiveSession();
     if (!session) return null;
 
+    // Project via the per-session index (O(session size)) rather than scanning
+    // every hypothesis across all loaded sessions.
     const sessionHypotheses = new Map<string, Hypothesis>();
-    for (const [id, h] of this.hypotheses) {
-      if (h.sessionId === session.id) {
-        sessionHypotheses.set(id, h);
-      }
+    for (const h of this.getHypothesesBySession(session.id)) {
+      sessionHypotheses.set(h.id, h);
     }
 
     return { session, hypotheses: sessionHypotheses };
@@ -767,6 +773,14 @@ export class TreeManager extends EventEmitter {
       throw new TreeError(
         `Cannot ${verb} in a ${session.status} session; add refuting evidence to a corroborated branch to reopen it first`,
       );
+    }
+  }
+
+  /** Rejects a blank verdict justification so every terminal-status transition
+   *  carries an auditable reason. */
+  private assertReason(reason: string): void {
+    if (reason.trim().length === 0) {
+      throw new TreeError('A reason cannot be empty or whitespace-only');
     }
   }
 

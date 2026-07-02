@@ -28,10 +28,12 @@ interface EventSource {
  */
 export class JournalSink {
   private locks = new Map<string, Lock>();
-  // Sessions whose append rejected at least once. A failed write does not poison
-  // the per-session chain (subsequent events are still attempted), but the
-  // session is flagged so a mutating handler can acknowledge with isError after
-  // draining instead of reporting a success for state that never reached disk.
+  // Sessions with a pending, not-yet-surfaced append rejection. A failed write
+  // does not poison the per-session chain (later events still attempt to write),
+  // but it is flagged so the next {@link drain} for that session reports the
+  // failure and clears it. The flag is scoped to the batch a caller drains, not
+  // sticky for the session lifetime: once a caller has been told a write failed,
+  // a subsequent batch whose appends all succeed reports clean.
   private failed = new Set<string>();
 
   constructor(private getWriter: (sessionId: string) => JournalWriter) {}
@@ -64,19 +66,22 @@ export class JournalSink {
   }
 
   /**
-   * Whether any append for this session has rejected. A mutating tool handler
-   * checks this after {@link drain} to decide whether to acknowledge success or
-   * report a persistence failure.
+   * Resolves once every append enqueued for this session so far has settled, and
+   * reports whether any of them rejected. A mutating tool handler awaits this
+   * after its mutation and acknowledges with isError when it returns true, rather
+   * than reporting a success for state that never reached disk. The failure flag
+   * is consumed here, so a later batch whose appends all succeed reports false.
    */
-  hadFailure(sessionId: string): boolean {
-    return this.failed.has(sessionId);
-  }
-
-  /** Resolves once every append enqueued for this session so far has settled. */
-  drain(sessionId: string): Promise<void> {
+  drain(sessionId: string): Promise<boolean> {
     const lock = this.locks.get(sessionId);
-    if (!lock) return Promise.resolve();
-    return lock(async () => {});
+    if (!lock) return Promise.resolve(false);
+    // The drain section chains after all enqueued appends (and their failure
+    // recording) have settled, so reading + clearing the flag here observes the
+    // full batch.
+    return lock(async () => {
+      const failed = this.failed.delete(sessionId);
+      return failed;
+    });
   }
 
   /** Resolves once every session's enqueued appends have settled. */

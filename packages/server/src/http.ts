@@ -43,7 +43,7 @@ function snapshotEvent(tm: TreeManager, sessionId?: string | null): TreeEvent {
     ? tm.getAllSessions().find((s) => s.id === sessionId)
     : undefined) ?? pickDefaultSession(tm);
   if (!session) return { type: 'snapshot', session: null, hypotheses: [] };
-  const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
+  const hypotheses = tm.getHypothesesBySession(session.id);
   return { type: 'snapshot', session, hypotheses };
 }
 
@@ -190,7 +190,7 @@ async function handleStateAPI(res: ServerResponse, url: URL, project: ProjectSta
         : pickDefaultSession(tm);
 
       if (!session) return { session: null, hypotheses: [] };
-      const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === session.id);
+      const hypotheses = tm.getHypothesesBySession(session.id);
       return { session, hypotheses };
     });
 
@@ -217,7 +217,7 @@ function handleSessionsAPI(res: ServerResponse, project: ProjectState): void {
 
     // Add loaded sessions with accurate node counts
     for (const s of loadedSessions) {
-      const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === s.id);
+      const hypotheses = tm.getHypothesesBySession(s.id);
       summaries.push({
         id: s.id,
         problem: s.problem,
@@ -250,7 +250,7 @@ function handleSessionsAPI(res: ServerResponse, project: ProjectState): void {
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
   const summaries = sessions.map((s) => {
-    const hypotheses = tm.getAllHypotheses().filter((h) => h.sessionId === s.id);
+    const hypotheses = tm.getHypothesesBySession(s.id);
     return {
       id: s.id,
       problem: s.problem,

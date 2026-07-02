@@ -170,6 +170,11 @@ describe('TreeManager', () => {
       expect(root.evidence).toHaveLength(1);
     });
 
+    it('rejects whitespace-only evidence content', () => {
+      const { root } = tm.createSession('Problem');
+      expect(() => tm.addEvidence(root.id, 'supports', '   ')).toThrow(/empty|blank|whitespace/i);
+    });
+
     it('auto-transitions pending to exploring on first evidence', () => {
       const { root } = tm.createSession('Problem');
       expect(root.status).toBe('pending');
@@ -230,6 +235,19 @@ describe('TreeManager', () => {
       tm.addEvidence(root.id, 'refutes', 'Bad');
       tm.eliminateHypothesis(root.id, 'Done');
       expect(() => tm.eliminateHypothesis(root.id, 'Again')).toThrow(TreeError);
+    });
+
+    it('rejects a whitespace-only reason (every verdict must carry an audit justification)', () => {
+      const mk = () => tm.createSession('Problem').root;
+      const a = mk();
+      tm.addEvidence(a.id, 'refutes', 'r');
+      expect(() => tm.eliminateHypothesis(a.id, '   ')).toThrow(/empty|blank|whitespace/i);
+      const b = mk();
+      tm.addEvidence(b.id, 'supports', 's');
+      expect(() => tm.corroborateHypothesis(b.id, '   ')).toThrow(/empty|blank|whitespace/i);
+      const { root: parent } = tm.createSession('Parent');
+      const [child] = tm.decompose(parent.id, ['C1', 'C2']);
+      expect(() => tm.setOutOfScope(child.id, '  ')).toThrow(/empty|blank|whitespace/i);
     });
 
     it('rejects eliminating a confirmed hypothesis', () => {
@@ -684,7 +702,6 @@ describe('TreeManager', () => {
       // A1 has no children, so it would otherwise be corroborable; doing so in a
       // closed session is exactly the stale-verdict path — the close-check is
       // gated on open, so tryCloseSession would never reconcile.
-      tm.addEvidence; // (no-op ref to keep intent close to the assertion)
       expect(() => tm.corroborateHypothesis(a1.id, 'late')).toThrow(/resolved|closed|completed/i);
       expect(session.status).toBe('resolved'); // unchanged
     });

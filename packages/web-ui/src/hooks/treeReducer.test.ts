@@ -157,5 +157,25 @@ describe('treeReducer', () => {
       const next = reducer(initialTreeState(), { type: 'hypothesis-added', hypothesis: hyp('x', { sessionId: 's9' }) });
       expect(next.hypotheses.has('x')).toBe(true);
     });
+
+    it('session-created for a different session does not switch the displayed session', () => {
+      // A newly created session announced over the project-wide stream must not
+      // yank the view off the session the user is looking at; otherwise the
+      // hypothesis-event guard (which keys off the displayed session id) would
+      // then admit the new session's nodes into the displayed tree.
+      const s: TreeState = {
+        ...initialTreeState(),
+        session: session({ id: 's1' }),
+        hypotheses: new Map([['a', hyp('a', { sessionId: 's1' })]]),
+      };
+      const next = reducer(s, { type: 'session-created', session: session({ id: 's2', problem: 'Other' }) });
+      expect(next).toBe(s); // identity unchanged
+      expect(next.session?.id).toBe('s1');
+    });
+
+    it('session-created is adopted when no session is displayed yet (bootstrap)', () => {
+      const next = reducer(initialTreeState(), { type: 'session-created', session: session({ id: 's1' }) });
+      expect(next.session?.id).toBe('s1');
+    });
   });
 });

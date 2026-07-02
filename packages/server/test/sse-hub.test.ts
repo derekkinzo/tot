@@ -136,4 +136,39 @@ describe('SseHub', () => {
     expect(c2.writes.join('')).toContain(': keepalive');
   });
 
+  it('a keepalive that drains resets the backpressure counter (low-traffic recovery)', () => {
+    // On a quiet stream the only writes between broadcasts are keepalives; a
+    // keepalive that drains must clear accrued backpressure so a client that has
+    // recovered is not reaped by the next momentarily-backpressured broadcast.
+    let disconnects = 0;
+    const hub = new SseHub(() => {}, () => { disconnects++; });
+    const tm = new EventEmitter();
+    hub.subscribe(tm);
+    const c = fakeClient();
+    hub.addClient(c);
+
+    // Accrue backpressure just below the cap on broadcasts.
+    c.setBackpressured(true);
+    for (let i = 0; i < SseHub.MAX_BACKPRESSURED_WRITES - 1; i++) tm.emit('event', ev(`e${i}`));
+    // The socket drains; a keepalive now succeeds and must reset the counter.
+    c.setBackpressured(false);
+    hub.keepalive();
+    // Backpressure returns; a full fresh run below the cap must not drop it.
+    c.setBackpressured(true);
+    for (let i = 0; i < SseHub.MAX_BACKPRESSURED_WRITES - 1; i++) tm.emit('event', ev(`f${i}`));
+    expect(disconnects).toBe(0);
+  });
+
+  it('keepalive drops a persistently backpressured client (bounds buffering on quiet streams)', () => {
+    let disconnects = 0;
+    const hub = new SseHub(() => {}, () => { disconnects++; });
+    const tm = new EventEmitter();
+    hub.subscribe(tm);
+    const c = fakeClient();
+    hub.addClient(c);
+    c.setBackpressured(true);
+    for (let i = 0; i < SseHub.MAX_BACKPRESSURED_WRITES + 1; i++) hub.keepalive();
+    expect(disconnects).toBe(1);
+  });
+
 });

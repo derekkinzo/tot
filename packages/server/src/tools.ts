@@ -114,21 +114,21 @@ const schemas = {
   add_evidence: z.object({
     hypothesisId: z.string().min(1),
     type: z.enum(['supports', 'refutes', 'neutral']),
-    content: z.string().min(1).max(10000),
+    content: nonBlank(10000),
     source: z.string().max(10000).optional(),
   }),
   eliminate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
-    reason: z.string().min(1).max(10000),
+    reason: nonBlank(10000),
     refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional(),
   }),
   corroborate_hypothesis: z.object({
     hypothesisId: z.string().min(1),
-    reason: z.string().min(1).max(10000),
+    reason: nonBlank(10000),
   }),
   set_out_of_scope: z.object({
     hypothesisId: z.string().min(1),
-    reason: z.string().min(1).max(10000),
+    reason: nonBlank(10000),
   }),
   get_tree: z.object({
     format: z.enum(['full', 'compact']).optional().default('compact'),
@@ -201,11 +201,11 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
       try {
         const { text, sessionId } = fn(schema.parse(args));
         if (sessionId) {
-          await sink.drain(sessionId);
           // The in-memory mutation succeeded, but if its journal append failed
           // the state was not durably recorded — acknowledge the failure rather
           // than reporting a success the next restart would silently drop.
-          if (sink.hadFailure(sessionId)) {
+          const persistFailed = await sink.drain(sessionId);
+          if (persistFailed) {
             return toolResult(
               `Error: the change was applied in memory but could not be saved to disk; it will be lost on restart. Check the data directory is writable.`,
               true,

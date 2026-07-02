@@ -402,31 +402,36 @@ export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null
   // investigation is in progress, otherwise the most recent. This keeps the
   // status read-out — and the dashboard URL it carries — available for a tree
   // whose branches have all reached a terminal state, not just a live one.
-  const displaySession = pickActiveSession(tm.getAllSessions());
-  if (!displaySession) {
+  const allSessions = tm.getAllSessions();
+  const session = pickActiveSession(allSessions);
+  if (!session) {
     return `No open session. Call create_tree to start.`;
   }
 
-  const status = tm.getStatus(displaySession.id);
-  const { counts, stagnant, unexplored } = status;
-  const session = displaySession;
+  const { counts, stagnant, unexplored } = tm.getStatus(session.id);
   const breakdown = computeProgressBreakdown(counts);
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +
     `Problem: "${truncate(session.problem, 70)}"\n` +
     `Progress: ${breakdown.terminal}/${breakdown.total} resolved (${breakdown.resolvedParts.join(', ')})\n`;
-  if (breakdown.activeParts.length > 0) result += `Active: ${breakdown.activeParts.join(', ')}\n`;
 
-  if (unexplored.length > 0) {
-    result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
-  }
-  if (stagnant) {
-    result += `\n⚠ STAGNATION: Multiple mutations without progress.\n`;
-    result += `  Devil's advocate: Assume a hypothesis you have challenged least is correct. What evidence would you expect to find?\n`;
-    result += `  This reframing often reveals overlooked tests.\n`;
+  // Live-work clauses (active counts, unexplored branches, stagnation) apply
+  // only while the session is open. A terminal session can still carry pending
+  // descendants under a pruned branch, but closure has mooted them, so
+  // reporting them as work would misrepresent a completed investigation.
+  if (session.status === 'open') {
+    if (breakdown.activeParts.length > 0) result += `Active: ${breakdown.activeParts.join(', ')}\n`;
+    if (unexplored.length > 0) {
+      result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
+    }
+    if (stagnant) {
+      result += `\n⚠ STAGNATION: Multiple mutations without progress.\n`;
+      result += `  Devil's advocate: Assume a hypothesis you have challenged least is correct. What evidence would you expect to find?\n`;
+      result += `  This reframing often reveals overlooked tests.\n`;
+    }
   }
 
-  const openSessions = tm.getAllSessions().filter((s) => s.status === 'open');
+  const openSessions = allSessions.filter((s) => s.status === 'open');
   if (openSessions.length > 1) {
     const others = openSessions.filter((s) => s.id !== session.id);
     result += `\nNote: ${openSessions.length} open sessions. View another by passing its full id to get_tree(sessionId): ` +

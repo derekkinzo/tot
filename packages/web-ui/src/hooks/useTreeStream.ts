@@ -87,7 +87,14 @@ export function useTreeStream() {
       es.onmessage = (event) => {
         if (connectionGenRef.current !== gen) return;
         const action = wireEventToAction(event.data);
-        if (action) dispatch(action);
+        if (!action) return;
+        // Track whichever session the stream is actually showing — the initial
+        // snapshot as well as an explicit switch — so a reconnect re-requests it
+        // rather than falling back to the server default.
+        if (action.type === 'snapshot' && action.session) {
+          viewedSessionIdRef.current = action.session.id;
+        }
+        dispatch(action);
       };
     };
 

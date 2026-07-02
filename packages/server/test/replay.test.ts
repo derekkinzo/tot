@@ -123,12 +123,13 @@ describe('applyEntry (shared event interpreter)', () => {
     expect(src).not.toMatch(/hypotheses\.find\(/);
   });
 
-  it('replays a worst-case full-tree journal in linear time (no snapshotting needed)', () => {
+  it('replays a worst-case full-tree journal to the correct final state at scale', () => {
     // The tree is bounded (MAX_HYPOTHESES_DEFAULT = 500). A heavily-worked tree
-    // at the cap with 20 updates each is ~10.5k journal lines; full replay must
-    // stay cheap because it runs once per session load. This pins the linear
-    // cost so an accidental O(n^2) regression (e.g. a per-event array scan) is
-    // caught — and documents why no snapshot layer is warranted.
+    // at the cap with 20 updates each is ~10.5k journal lines; replay must fold
+    // them to one node per id with the last-written content winning, no
+    // duplication. Correctness-at-scale, not wall-clock: the O(1) upsert
+    // invariant is asserted structurally by the sibling 'no linear array scan'
+    // test, so this one guards the folded result rather than timing it.
     const entries: JournalEntry[] = [entry('session-created', session())];
     const N = 500, UPDATES = 20;
     for (let i = 0; i < N; i++) {
@@ -141,13 +142,13 @@ describe('applyEntry (shared event interpreter)', () => {
       }
     }
     const state = emptyReplayState();
-    const t0 = performance.now();
     for (const e of entries) applyEntry(state, e);
-    const elapsed = performance.now() - t0;
+    // Exactly one node per id (upsert, not append), index consistent, and the
+    // last update's evidence count (UPDATES items) won.
     expect(state.hypotheses).toHaveLength(N);
-    // Generous ceiling (measured ~11ms); a quadratic regression would blow past
-    // this by orders of magnitude. Not a microbenchmark — a smoke ceiling.
-    expect(elapsed).toBeLessThan(1000);
+    expect(state.hypothesisIndex.size).toBe(N);
+    for (const [id, idx] of state.hypothesisIndex) expect(state.hypotheses[idx].id).toBe(id);
+    expect(state.hypotheses[state.hypothesisIndex.get('h0')!].evidence).toHaveLength(UPDATES);
   });
 
   it('session-completed sets terminal status + completedAt; session-reopened reverts', () => {
