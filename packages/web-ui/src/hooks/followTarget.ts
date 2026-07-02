@@ -3,17 +3,16 @@
  * so the transition (including the session-change reset) is unit-testable.
  */
 export interface FollowTargetInputs {
-  /** The session currently displayed. */
+  /** The displayed session. */
   sessionId: string | null;
-  /** The session displayed on the previous derivation. */
+  /** The session displayed on the prior derivation. */
   prevSessionId: string | null;
   lastAddedId: string | null;
   recentlyChanged: Set<string>;
 }
 
 /**
- * Returns the next follow target given the previous one and the current
- * activity signals.
+ * Returns the next follow target given the prior one and the activity signals.
  *
  * - A just-added node wins; otherwise the most-recently-changed node.
  * - With no fresh signal the prior target is retained, so enabling follow during

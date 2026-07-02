@@ -4,7 +4,7 @@ import { nextFollowTarget } from './followTarget';
 type FollowState = 'following' | 'paused';
 
 interface UseFollowModeOptions {
-  /** The session currently displayed; a change resets the follow target. */
+  /** The displayed session; a change resets the follow target. */
   sessionId: string | null;
   lastAddedId: string | null;
   recentlyChanged: Set<string>;

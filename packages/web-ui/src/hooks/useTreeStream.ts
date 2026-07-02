@@ -13,9 +13,9 @@ export function useTreeStream() {
   const [persistenceHealthy, setPersistenceHealthy] = useState(true);
   const esRef = useRef<EventSource | null>(null);
   const connectionGenRef = useRef(0);
-  // The session the dashboard is currently viewing. The SSE stream re-requests
-  // it on every (re)connect so a transient disconnect restores this session
-  // rather than snapping back to the server's default.
+  // The session the dashboard is displaying. The SSE stream re-requests it on
+  // every (re)connect so a transient disconnect restores this session rather
+  // than snapping back to the server's default.
   const viewedSessionIdRef = useRef<string | null>(null);
 
   // Poll the server's persistence health so the dashboard can warn the user
