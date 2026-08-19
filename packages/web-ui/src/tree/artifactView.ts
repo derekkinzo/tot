@@ -50,6 +50,28 @@ export function initialWindow(ref: Pick<ArtifactRef, 'excerpt' | 'lineCount'>): 
   return { from, to: last !== undefined ? Math.min(last, wanted) : wanted };
 }
 
+/** One page of an artifact's lines, as the line-window endpoint returns it. */
+export interface ArtifactPage {
+  lines: string[];
+  from: number;
+  to: number;
+  totalLines: number;
+  /** True when the requested range was cut to the server's window cap. */
+  truncated: boolean;
+}
+
+/**
+ * Whether this artifact is shown as numbered lines rather than offered as a
+ * download.
+ *
+ * Reads the line count the capture recorded, which is present exactly when the
+ * bytes were treated as text there — restating that judgement here would let the
+ * two drift, and a viewer would then page a file the store never counted.
+ */
+export function rendersAsLines(ref: Pick<ArtifactRef, 'lineCount'>): boolean {
+  return ref.lineCount !== undefined;
+}
+
 export interface IntegrityNotice {
   tone: 'error';
   message: string;

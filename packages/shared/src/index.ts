@@ -54,10 +54,11 @@ export interface Decomposition {
  *   (Mackie's INUS conditions).
  * - `all-of`: parts that must all hold for the parent to hold.
  */
-export type DecompositionGate = 'one-of' | 'any-of' | 'all-of';
+export const GATES = ['one-of', 'any-of', 'all-of'] as const;
 
-/** Every gate, so callers enumerate rather than restate the union. */
-export const GATES: readonly DecompositionGate[] = ['one-of', 'any-of', 'all-of'];
+/** Derived from {@link GATES} so a schema, a renderer, and this type cannot
+ *  describe different sets of gates. */
+export type DecompositionGate = typeof GATES[number];
 
 // 'out-of-scope': terminal but no refutation claimed — the agent set this
 // branch aside as not worth investigating, distinct from elimination which

@@ -51,7 +51,7 @@ import {
 } from './advisories.js';
 import { nodeLabel, supportingWeight, refutingWeight, gateLabel, gateMeaning, gateFindings } from '@tot-mcp/shared';
 import { pickActiveSession } from './persistence.js';
-import type { Decomposition, Hypothesis, StructuralCheck } from './types.js';
+import type { Decomposition, DecompositionGate, Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
 export function formatCreateTree(sessionId: string, rootId: string, problem: string): string {
@@ -74,6 +74,22 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
     `0 hypotheses | Session: ${sessionId.slice(0, 8)}`;
 }
 
+/** What a gate commits to, as one line. */
+function gateLine(gate: DecompositionGate): string {
+  return `${gateLabel(gate)}: ${gateMeaning(gate)}\n`;
+}
+
+/**
+ * A recorded split: the dimension its children divide, then what the declared
+ * relation commits to — or how to declare one, since a missing relation is the
+ * reason a verdict on a child says nothing about its parent.
+ */
+function formatSplit(decomposition: Decomposition): string {
+  return `Axis: ${decomposition.axis}\n` + (decomposition.gate
+    ? gateLine(decomposition.gate)
+    : `Relation not declared. State gate=one-of when the children are rivals, any-of when several may hold together, or all-of when every part is required.\n`);
+}
+
 export function formatDecompose(children: Hypothesis[], check: StructuralCheck, tm: TreeManager): string {
   const parent = tm.getHypothesis(children[0]?.parentId ?? '');
   const ids = children.map((c) => c.id);
@@ -92,12 +108,7 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   // with each other later.
   if (parent?.decomposition) {
     result += `── Split ──\n`;
-    result += `Axis: ${parent.decomposition.axis}\n`;
-    if (parent.decomposition.gate) {
-      result += `${gateLabel(parent.decomposition.gate)}: ${gateMeaning(parent.decomposition.gate)}\n`;
-    } else {
-      result += `Relation not declared. State gate=one-of when the children are rivals, any-of when several may hold together, or all-of when every part is required.\n`;
-    }
+    result += formatSplit(parent.decomposition);
     result += `\n`;
   }
 
@@ -176,7 +187,7 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
   const parentSplit = hypothesis.parentId ? tm.getHypothesis(hypothesis.parentId)?.decomposition : undefined;
   if (parentSplit) {
     result += `Axis: ${parentSplit.axis} — does this divide that same dimension?\n`;
-    if (parentSplit.gate) result += `${gateLabel(parentSplit.gate)}: ${gateMeaning(parentSplit.gate)}\n`;
+    if (parentSplit.gate) result += gateLine(parentSplit.gate);
   }
   result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
   result += `  Overlap: does this overlap acknowledge a domain co-occurrence (e.g., an INUS cluster), or is it accidental redundancy?\n`;
@@ -306,7 +317,11 @@ function formatGateConflicts(hypothesis: Hypothesis, tm: TreeManager): string {
   let out = `\n── Split: "${nodeLabel(parent)}" (${gateLabel(parent.decomposition.gate)}, ${parent.decomposition.axis}) ──\n`;
   for (const finding of findings) {
     out += `⚠ ${finding.message}\n`;
-    out += `  Affected: ${finding.nodeIds.map((id) => nodeLabel(tm.getHypothesis(id) ?? { title: id } as Hypothesis)).join(', ')}\n`;
+    const affected = finding.nodeIds.map((id) => {
+      const node = tm.getHypothesis(id);
+      return node ? nodeLabel(node) : id;
+    });
+    out += `  Affected: ${affected.join(', ')}\n`;
   }
   return out;
 }
@@ -437,10 +452,7 @@ export function formatValidateDecomposition(
   // against; without it they have no stated dimension to be judged on.
   if (decomposition) {
     result += `── Split ──\n`;
-    result += `Axis: ${decomposition.axis}\n`;
-    result += decomposition.gate
-      ? `${gateLabel(decomposition.gate)}: ${gateMeaning(decomposition.gate)}\n\n`
-      : `Relation not declared — state one-of, any-of, or all-of on the next decomposition of this node.\n\n`;
+    result += formatSplit(decomposition) + `\n`;
   }
 
   result += `── Structural Checks ──\n` +

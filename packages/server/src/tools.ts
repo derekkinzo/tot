@@ -5,7 +5,7 @@ import { Persistence } from './persistence.js';
 import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
-import { gateLabel, nodeLabel, titleProblem, TITLE_MAX_LENGTH, type HypothesisDraft } from '@tot-mcp/shared';
+import { GATES, gateLabel, gateMeaning, nodeLabel, titleProblem, TITLE_MAX_LENGTH, type HypothesisDraft } from '@tot-mcp/shared';
 import { ArtifactError, artifactsDirFor, captureArtifact, discardArtifact } from './artifacts.js';
 
 // ─── Types ───
@@ -68,8 +68,12 @@ const TOOL_DEFS = {
         `Sub-hypotheses, 2-20. Each is a short label of at most ${TITLE_MAX_LENGTH} characters, or an object { title, statement } when the claim needs a longer form.`),
       axis: nonBlank(TITLE_MAX_LENGTH).describe(
         'The single dimension these children divide, such as "by subsystem", "by lifecycle stage", or "by data source". Siblings can only be judged for overlap and coverage against a stated axis; if two children divide different dimensions, split along one axis and decompose again below it.'),
-      gate: z.enum(['one-of', 'any-of', 'all-of']).optional().describe(
-        'How the children relate to the parent claim. "one-of": rivals, at most one holds (mutually exclusive). "any-of": alternatives that may hold together, as contributing causes do. "all-of": parts that must all hold, so defeating any part defeats the parent. Omit only when the relation is genuinely undecided.'),
+      // Options and their meanings come from the shared vocabulary, so what an
+      // agent is told a gate means is what every reader of one is told.
+      gate: z.enum(GATES).optional().describe(
+        'How the children relate to the parent claim. '
+        + GATES.map((g) => `"${g}" — ${gateMeaning(g)}`).join(' ')
+        + ' Omit only when the relation is genuinely undecided.'),
     }),
   },
   add_hypothesis: {
@@ -233,6 +237,16 @@ export function getToolHandlers(
     return async (args) => {
       let prepared: P | undefined;
       let didPrepare = false;
+      /** Undoes a completed preparation. Both failure paths run this, so a
+       *  refused call leaves nothing behind whichever way it was refused. */
+      const undoPreparation = async (): Promise<void> => {
+        if (!didPrepare || typeof body === 'function') return;
+        try {
+          await body.compensate?.(prepared as P);
+        } catch (err) {
+          console.error('[tot-mcp] Warning: could not undo a prepared capture:', err);
+        }
+      };
       try {
         const input = schema.parse(args);
         let result: { text: string; sessionId?: string };
@@ -250,7 +264,7 @@ export function getToolHandlers(
           // than reporting a success the next restart would silently drop.
           const persistFailed = await sink.drain(sessionId);
           if (persistFailed) {
-            if (didPrepare && typeof body !== 'function') await body.compensate?.(prepared as P);
+            await undoPreparation();
             return toolResult(
               `Error: the change was applied in memory but could not be saved to disk; it will be lost on restart. Check the data directory is writable.`,
               true,
@@ -259,9 +273,7 @@ export function getToolHandlers(
         }
         return toolResult(text);
       } catch (e) {
-        if (didPrepare && typeof body !== 'function') {
-          await body.compensate?.(prepared as P).catch?.(() => {});
-        }
+        await undoPreparation();
         if (e instanceof z.ZodError) {
           return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
         }

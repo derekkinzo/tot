@@ -51,8 +51,8 @@ describe('verbatim evidence capture, end to end', () => {
     return p;
   }
 
-  /** Every file currently holding bytes in this project's artifact store. An
-   *  emptied session directory holds none, so only files are counted. */
+  /** Every file holding bytes in this project's artifact store. An emptied
+   *  session directory holds none, so only files are counted. */
   function storedIds(): string[] {
     const dir = getCentralArtifactsDir(projectDir);
     if (!existsSync(dir)) return [];

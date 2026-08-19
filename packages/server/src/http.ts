@@ -7,12 +7,7 @@ import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
 import type { ProjectState } from './project-state.js';
 import { pickActiveSession } from './persistence.js';
-import {
-  checkIntegrity,
-  readLineWindow,
-  resolveArtifactPath,
-  ARTIFACT_MAX_WINDOW_LINES,
-} from './artifacts.js';
+import { checkIntegrity, readLineWindow, resolveArtifactPath } from './artifacts.js';
 import { findArtifactRef, parseArtifactRoute, type ArtifactRoute } from './artifact-routes.js';
 import { SseHub } from './sse-hub.js';
 
@@ -325,14 +320,14 @@ async function handleArtifactAPI(
       return;
     }
 
-    const path = resolveArtifactPath(project.artifactsDir, ref);
-
     if (route.kind === 'meta') {
       const integrity = await checkIntegrity(project.artifactsDir, ref);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ...ref, integrity, maxWindowLines: ARTIFACT_MAX_WINDOW_LINES }));
+      res.end(JSON.stringify({ ...ref, integrity }));
       return;
     }
+
+    const path = resolveArtifactPath(project.artifactsDir, ref);
 
     if (route.kind === 'lines') {
       const window = await readLineWindow({
@@ -346,11 +341,14 @@ async function handleArtifactAPI(
     }
 
     // Raw bytes. The recorded filename is offered for the download name only;
-    // it never took part in resolving the path.
+    // it never took part in resolving the path. Bytes a viewer cannot render
+    // are offered as a download rather than dropped into a tab.
     const bytes = await readFile(path);
+    const shown = ref.lineCount !== undefined;
     res.writeHead(200, {
       'Content-Type': ref.mediaType,
-      'Content-Disposition': `inline; filename*=UTF-8\'\'${encodeURIComponent(ref.filename)}`,
+      'Content-Disposition':
+        `${shown ? 'inline' : 'attachment'}; filename*=UTF-8\'\'${encodeURIComponent(ref.filename)}`,
       'Cache-Control': 'no-store',
     });
     res.end(bytes);

@@ -6,6 +6,8 @@ import {
   formatBytes,
   initialWindow,
   integrityNotice,
+  rendersAsLines,
+  type ArtifactPage,
   type LineRange,
 } from '../tree/artifactView';
 
@@ -15,14 +17,6 @@ interface Props {
   /** The claim the capture was filed against, kept in view while reading it. */
   claim: string;
   onClose: () => void;
-}
-
-interface Window {
-  lines: string[];
-  from: number;
-  to: number;
-  totalLines: number;
-  truncated: boolean;
 }
 
 /**
@@ -36,10 +30,11 @@ interface Window {
 export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
   const urls = artifactUrls(artifact);
   const [range, setRange] = useState<LineRange>(() => initialWindow(artifact));
-  const [window, setWindow] = useState<Window | null>(null);
+  const [page, setPage] = useState<ArtifactPage | null>(null);
   const [integrity, setIntegrity] = useState<'verified' | 'mismatch' | 'missing' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const excerptRef = useRef<HTMLDivElement | null>(null);
+  const isText = rendersAsLines(artifact);
 
   // The digest verdict is recomputed server-side on every read, so it is fetched
   // rather than taken from the record.
@@ -55,14 +50,17 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
   }, [urls.meta]);
 
   useEffect(() => {
+    // Bytes that are not shown as lines have no window to fetch, and a line
+    // count taken over them would describe nothing a reader can see.
+    if (!isText) return;
     let live = true;
     setError(null);
     fetch(urls.lines(range.from, range.to))
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((w: Window) => { if (live) setWindow(w); })
+      .then((p: ArtifactPage) => { if (live) setPage(p); })
       .catch(() => { if (live) setError('Could not read the stored bytes.'); });
     return () => { live = false; };
-  }, [urls, range.from, range.to]);
+  }, [urls, range.from, range.to, isText]);
 
   // Escape belongs to the topmost layer, which is this one.
   useEffect(() => {
@@ -80,9 +78,9 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
   // about line 800 should not have to hunt for it.
   useEffect(() => {
     excerptRef.current?.scrollIntoView({ block: 'center' });
-  }, [window]);
+  }, [page]);
 
-  const page = useCallback((direction: -1 | 1) => {
+  const shiftWindow = useCallback((direction: -1 | 1) => {
     setRange((r) => {
       const span = Math.max(1, r.to - r.from + 1);
       const shift = direction * span;
@@ -92,10 +90,9 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
   }, []);
 
   const notice = integrity ? integrityNotice(integrity) : null;
-  const total = window?.totalLines ?? artifact.lineCount;
+  const total = page?.totalLines ?? artifact.lineCount;
   const atStart = range.from <= 1;
-  const atEnd = total !== undefined && (window?.to ?? range.to) >= total;
-  const isText = artifact.mediaType.startsWith('text/') || artifact.mediaType === 'application/json';
+  const atEnd = total !== undefined && (page?.to ?? range.to) >= total;
 
   return (
     <div
@@ -166,11 +163,11 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
               {formatBytes(artifact.bytes)} of {artifact.mediaType}. Use “open raw” to download it.
             </div>
           )}
-          {!error && isText && window && (
+          {!error && isText && page && (
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12.5 }}>
               <tbody>
-                {window.lines.map((line, i) => {
-                  const lineNo = window.from + i;
+                {page.lines.map((line, i) => {
+                  const lineNo = page.from + i;
                   const cited = artifact.excerpt !== undefined
                     && lineNo >= artifact.excerpt.startLine && lineNo <= artifact.excerpt.endLine;
                   const firstCited = cited && lineNo === artifact.excerpt!.startLine;
@@ -192,30 +189,30 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
           )}
         </div>
 
-        <footer style={{
+        {isText && <footer style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '10px 16px', borderTop: '1px solid #21262d', background: '#161b22',
           fontSize: 12, color: '#8b949e',
         }}>
           <button
-            onClick={() => page(-1)} disabled={atStart}
+            onClick={() => shiftWindow(-1)} disabled={atStart}
             style={pagerStyle(atStart)}
           >← earlier</button>
           <button
-            onClick={() => page(1)} disabled={atEnd}
+            onClick={() => shiftWindow(1)} disabled={atEnd}
             style={pagerStyle(atEnd)}
           >later →</button>
           <span>
-            {window
-              ? `lines ${window.from}–${window.to} of ${window.totalLines}`
+            {page
+              ? `lines ${page.from}–${page.to} of ${page.totalLines}`
               : `lines ${range.from}–${range.to}`}
           </span>
-          {window?.truncated && (
+          {page?.truncated && (
             <span title="One request is capped; page to read further" style={{ color: '#d29922' }}>
               window capped
             </span>
           )}
-        </footer>
+        </footer>}
       </div>
     </div>
   );

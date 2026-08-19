@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  rendersAsLines,
   artifactUrls,
   artifactSummary,
   initialWindow,
@@ -103,5 +104,21 @@ describe('formatBytes', () => {
     expect(formatBytes(1024)).toBe('1 KB');
     expect(formatBytes(1536)).toBe('1.5 KB');
     expect(formatBytes(1024 * 1024 * 3)).toBe('3 MB');
+  });
+});
+
+describe('rendersAsLines', () => {
+  // The store counts lines exactly for the bytes it treated as text, so the
+  // viewer reads that judgement instead of making its own.
+  it('is true for an artifact the capture counted lines for', () => {
+    expect(rendersAsLines(ref({ lineCount: 500 }))).toBe(true);
+  });
+
+  it('is true for a counted but empty artifact, which renders as no lines', () => {
+    expect(rendersAsLines(ref({ lineCount: 0 }))).toBe(true);
+  });
+
+  it('is false for bytes that were never counted, which are offered as a download', () => {
+    expect(rendersAsLines(ref({ lineCount: undefined }))).toBe(false);
   });
 });
