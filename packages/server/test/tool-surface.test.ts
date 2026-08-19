@@ -51,7 +51,7 @@ describe('tool surface', () => {
     // engine requires to be non-blank must therefore reject blank input here too.
     const freeText: Array<[string, string]> = [
       ['create_tree', 'problem'],
-      ['add_hypothesis', 'content'],
+      ['add_hypothesis', 'title'],
       ['add_evidence', 'content'],
       ['eliminate_hypothesis', 'reason'],
       ['corroborate_hypothesis', 'reason'],

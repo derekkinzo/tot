@@ -35,7 +35,11 @@ Call `create_tree` with a clear, specific problem statement. Include the observa
 
 ### Decompose into competing hypotheses
 
-Call `decompose` with 2-5 sibling hypotheses that are comparable along a single framing axis:
+Call `decompose` with 2-5 sibling hypotheses that are comparable along a single framing axis.
+
+Name each one with a short label — a noun phrase such as "Writer pool exhaustion", not a sentence. That label is what the tree renders, so it is capped short; pass `{ title, statement }` when the full claim needs more room than the label allows.
+
+Framing axes to choose from:
 
 - **By mechanism**: distinct causal pathways that could produce the same effect
 - **By location or layer**: where in the system the cause sits

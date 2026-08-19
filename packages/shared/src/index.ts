@@ -196,6 +196,26 @@ export function splitProse(prose: string): { title: string; statement?: string }
   return trimmed === title ? { title } : { title, statement: trimmed };
 }
 
+/** The authored text for a new hypothesis: a label, optionally with the
+ *  long-form claim it summarizes. */
+export interface HypothesisDraft {
+  title: string;
+  statement?: string;
+}
+
+/**
+ * Why a title is unusable as a label, or null when it is fine. A label reads as
+ * a noun phrase, so a trailing sentence period is rejected along with blank text
+ * and text past the length bound.
+ */
+export function titleProblem(title: string): string | null {
+  const trimmed = title.trim();
+  if (trimmed === '') return 'must not be empty or whitespace-only';
+  if (trimmed.length > TITLE_MAX_LENGTH) return `must be at most ${TITLE_MAX_LENGTH} characters`;
+  if (trimmed.endsWith('.')) return 'must read as a short label, so it must not end with a period';
+  return null;
+}
+
 // ─── Payload normalization ───
 
 /**

@@ -34,6 +34,8 @@ Call \`create_tree\` with the problem statement.
 ### Step 2: Decompose into competing hypotheses
 Call \`decompose\` to split the problem into 2-5 sibling hypotheses that are comparable along a single framing axis.
 
+Name each hypothesis with a short label — a noun phrase such as "Writer pool exhaustion", not a sentence. The label is what the tree renders, so it is capped short; put the full claim in \`statement\` when it needs more than the label conveys.
+
 Common framing axes (pick one that suits the domain):
 - **By mechanism**: distinct causal pathways that could produce the same effect
 - **By location or layer**: where in the system the cause sits

@@ -11,7 +11,7 @@ import type {
   TreeState,
 } from './types.js';
 import { STAGNATION_THRESHOLD_DEFAULT, MAX_DEPTH_DEFAULT, MAX_HYPOTHESES_DEFAULT } from './defaults.js';
-import { nodeLabel, splitProse } from '@tot-mcp/shared';
+import { nodeLabel, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
 
 export class TreeManager extends EventEmitter {
   private sessions = new Map<string, Session>();
@@ -37,13 +37,15 @@ export class TreeManager extends EventEmitter {
   /**
    * Creates a new reasoning session with a root hypothesis node.
    * @param problem - The problem statement to investigate
+   * @param rootTitle - Label for the root node; derived from `problem` when omitted
    * @returns The new session and its root hypothesis node
-   * @throws TreeError if problem is empty/whitespace
+   * @throws TreeError if problem is empty/whitespace, or the title is not label-shaped
    */
-  createSession(problem: string): { session: Session; root: Hypothesis } {
+  createSession(problem: string, rootTitle?: string): { session: Session; root: Hypothesis } {
     if (!problem.trim()) {
       throw new TreeError('Problem statement cannot be empty');
     }
+    if (rootTitle !== undefined) this.assertTitle(rootTitle);
 
     const sessionId = uuid();
     const rootId = uuid();
@@ -62,7 +64,9 @@ export class TreeManager extends EventEmitter {
       parentId: null,
       sessionId,
       depth: 0,
-      ...splitProse(problem),
+      ...(rootTitle === undefined
+        ? splitProse(problem)
+        : { title: rootTitle.trim(), statement: problem }),
       status: 'pending',
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' },
@@ -87,26 +91,21 @@ export class TreeManager extends EventEmitter {
    * claim — strict mutual exclusivity is not required (Heuer 2005).
    * Auto-transitions the parent from 'pending' to 'exploring'.
    * @param parentId - ID of the hypothesis to decompose
-   * @param childContents - Array of sub-hypothesis descriptions (2+)
+   * @param children_ - Labels (optionally with statements) for the sub-hypotheses (2+)
    * @returns The created child hypothesis nodes
    * @throws TreeError if parent is in a terminal status, fewer than 2 children, depth exceeded, or count exceeded
    */
-  decompose(parentId: string, childContents: string[]): Hypothesis[] {
+  decompose(parentId: string, children_: HypothesisDraft[]): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
 
     this.assertSessionOpen(parent.sessionId, 'decompose');
     if (isTerminal(parent.status)) {
       throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
     }
-    if (childContents.length < 2) {
+    if (children_.length < 2) {
       throw new TreeError('Decomposition requires at least 2 sub-hypotheses');
     }
-    // A blank-after-trim label is not a hypothesis and degenerates the
-    // validateDecomposition heuristics (includes('') matches every sibling;
-    // word-count 0 trips abstractionMismatch). Reject before storing.
-    if (childContents.some((c) => c.trim().length === 0)) {
-      throw new TreeError('Sub-hypothesis content cannot be empty or whitespace-only');
-    }
+    for (const draft of children_) this.assertTitle(draft.title);
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
     }
@@ -114,17 +113,18 @@ export class TreeManager extends EventEmitter {
     // so a large historical session co-loaded in this manager cannot block a
     // small new one.
     const sessionSize = this.sessionHypotheses.get(parent.sessionId)?.size ?? 0;
-    if (sessionSize + childContents.length > this.maxHypotheses) {
+    if (sessionSize + children_.length > this.maxHypotheses) {
       throw new TreeError(`Maximum hypothesis count (${this.maxHypotheses}) exceeded`);
     }
 
     const now = new Date().toISOString();
-    const children: Hypothesis[] = childContents.map((content) => ({
+    const children: Hypothesis[] = children_.map((draft) => ({
       id: uuid(),
       parentId: parent.id,
       sessionId: parent.sessionId,
       depth: parent.depth + 1,
-      ...splitProse(content),
+      title: draft.title.trim(),
+      ...(draft.statement === undefined ? {} : { statement: draft.statement }),
       status: 'pending' as const,
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' as const },
@@ -157,17 +157,15 @@ export class TreeManager extends EventEmitter {
    * Adds a single hypothesis as a child of an existing node.
    * Use when a sibling-level decomposition is missing a possibility.
    * @param parentId - ID of the parent hypothesis
-   * @param content - Description of the new hypothesis
+   * @param draft - Label for the hypothesis, optionally with its long form
    * @returns The newly created hypothesis
    * @throws TreeError if parent is in a terminal status, depth exceeded, or count exceeded
    */
-  addHypothesis(parentId: string, content: string): Hypothesis {
+  addHypothesis(parentId: string, draft: HypothesisDraft): Hypothesis {
     const parent = this.getHypothesisOrThrow(parentId);
 
     this.assertSessionOpen(parent.sessionId, 'add a hypothesis');
-    if (content.trim().length === 0) {
-      throw new TreeError('Hypothesis content cannot be empty or whitespace-only');
-    }
+    this.assertTitle(draft.title);
     // Mirror decompose's terminal-parent guard. Without this, a new pending
     // child can appear under a terminal ancestor, leaving structural debt
     // that the closure predicate would silently overlook.
@@ -189,7 +187,8 @@ export class TreeManager extends EventEmitter {
       parentId: parent.id,
       sessionId: parent.sessionId,
       depth: parent.depth + 1,
-      ...splitProse(content),
+      title: draft.title.trim(),
+      ...(draft.statement === undefined ? {} : { statement: draft.statement }),
       status: 'pending',
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' },
@@ -775,6 +774,13 @@ export class TreeManager extends EventEmitter {
         `Cannot ${verb} in a ${session.status} session; add refuting evidence to a corroborated branch to reopen it first`,
       );
     }
+  }
+
+  /** Rejects a label that cannot serve as a node label, naming what is wrong so
+   *  the caller can correct it. */
+  private assertTitle(title: string): void {
+    const problem = titleProblem(title);
+    if (problem) throw new TreeError(`Hypothesis title ${problem}`);
   }
 
   /** Rejects a blank verdict justification so every terminal-status transition

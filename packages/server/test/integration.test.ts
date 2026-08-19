@@ -210,7 +210,7 @@ describe('MCP Integration', () => {
       });
       const result = await client.callTool({
         name: 'add_hypothesis',
-        arguments: { parentId: rootId, content: 'C — missed this one' },
+        arguments: { parentId: rootId, title: 'C — missed this one' },
       });
       expect(result.isError).toBeFalsy();
       expect(parseResult(result).hypothesisId).toBeDefined();
@@ -230,9 +230,107 @@ describe('MCP Integration', () => {
       });
       const result = await client.callTool({
         name: 'add_hypothesis',
-        arguments: { parentId: rootId, content: 'Too late' },
+        arguments: { parentId: rootId, title: 'Too late' },
       });
       expect(result.isError).toBe(true);
+    });
+  });
+
+  // ─── label authoring ───
+
+  describe('title authoring', () => {
+    async function root() {
+      return parseResult(await client.callTool({
+        name: 'create_tree', arguments: { problem: 'Why is the widget slow' },
+      })).rootId;
+    }
+
+    it('accepts a title at the length bound and rejects one over it', async () => {
+      const parentId = await root();
+      const ok = await client.callTool({
+        name: 'add_hypothesis', arguments: { parentId, title: 'x'.repeat(80) },
+      });
+      expect(ok.isError).toBeFalsy();
+      const tooLong = await client.callTool({
+        name: 'add_hypothesis', arguments: { parentId, title: 'x'.repeat(81) },
+      });
+      expect(tooLong.isError).toBe(true);
+    });
+
+    it('rejects a title that reads as a sentence rather than a label', async () => {
+      const parentId = await root();
+      const result = await client.callTool({
+        name: 'add_hypothesis', arguments: { parentId, title: 'The pool exhausts.' },
+      });
+      expect(result.isError).toBe(true);
+      expect(getText(result)).toMatch(/period|label/i);
+    });
+
+    it('rejects a blank title', async () => {
+      const parentId = await root();
+      const result = await client.callTool({
+        name: 'add_hypothesis', arguments: { parentId, title: '   ' },
+      });
+      expect(result.isError).toBe(true);
+    });
+
+    it('stores an optional statement alongside the title', async () => {
+      const parentId = await root();
+      const added = await client.callTool({
+        name: 'add_hypothesis',
+        arguments: { parentId, title: 'Writer pool exhaustion', statement: 'The pool exhausts under retry storms.' },
+      });
+      expect(added.isError).toBeFalsy();
+      const full = JSON.parse(getText(await client.callTool({ name: 'get_tree', arguments: { format: 'full' } })));
+      const node = Object.values(full.hypotheses as Record<string, any>)
+        .find((h: any) => h.title === 'Writer pool exhaustion') as any;
+      expect(node.statement).toBe('The pool exhausts under retry storms.');
+    });
+
+    it('decompose accepts bare-string titles and the object form together', async () => {
+      const parentId = await root();
+      const result = await client.callTool({
+        name: 'decompose',
+        arguments: {
+          parentId,
+          children: ['Network latency', { title: 'CPU contention', statement: 'The host is saturated.' }],
+        },
+      });
+      expect(result.isError).toBeFalsy();
+      const full = JSON.parse(getText(await client.callTool({ name: 'get_tree', arguments: { format: 'full' } })));
+      const byTitle = Object.fromEntries(
+        Object.values(full.hypotheses as Record<string, any>).map((h: any) => [h.title, h]),
+      );
+      expect(byTitle['Network latency']).toBeDefined();
+      expect(byTitle['CPU contention'].statement).toBe('The host is saturated.');
+    });
+
+    it('decompose rejects an over-long child title', async () => {
+      const parentId = await root();
+      const result = await client.callTool({
+        name: 'decompose', arguments: { parentId, children: ['ok', 'x'.repeat(81)] },
+      });
+      expect(result.isError).toBe(true);
+    });
+
+    it('create_tree accepts a root title without altering the problem statement', async () => {
+      const created = await client.callTool({
+        name: 'create_tree',
+        arguments: { problem: 'Why is the widget slow under sustained retry load', rootTitle: 'Widget slowness' },
+      });
+      expect(created.isError).toBeFalsy();
+      const full = JSON.parse(getText(await client.callTool({ name: 'get_tree', arguments: { format: 'full' } })));
+      expect(full.session.problem).toBe('Why is the widget slow under sustained retry load');
+      expect(full.hypotheses[full.session.rootNodeId].title).toBe('Widget slowness');
+    });
+
+    it('advertises the title length bound in the discovered schema', async () => {
+      // The bound is the whole mechanism by which an agent learns to author a
+      // label; a constraint the client cannot see is a constraint it will breach.
+      const { tools } = await client.listTools();
+      const addHypothesis = tools.find((t) => t.name === 'add_hypothesis')!;
+      const title = (addHypothesis.inputSchema as any).properties.title;
+      expect(title.maxLength).toBe(80);
     });
   });
 
@@ -818,7 +916,7 @@ describe('MCP Integration', () => {
         name: 'decompose',
         arguments: { parentId: rootId, children: [
           'Layer issue',
-          'Persistent connection drift in long-lived TCP socket pool under concurrent reuse pressure',
+          'Persistent connection drift in long-lived socket pool under reuse pressure',
         ] },
       });
       const result = await client.callTool({
@@ -942,7 +1040,7 @@ describe('MCP Integration', () => {
       // Agent realizes it missed something
       const addResult = await client.callTool({
         name: 'add_hypothesis',
-        arguments: { parentId: rootId, content: 'Flaky test infrastructure' },
+        arguments: { parentId: rootId, title: 'Flaky test infrastructure' },
       });
       expect(addResult.isError).toBeFalsy();
 
@@ -974,7 +1072,7 @@ describe('MCP Integration', () => {
 
       const addResult = await client.callTool({
         name: 'add_hypothesis',
-        arguments: { parentId: rootId, content: 'D' },
+        arguments: { parentId: rootId, title: 'D' },
       });
       expect(getText(addResult)).toContain('Progress:');
 

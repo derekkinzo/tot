@@ -5,7 +5,7 @@ import { Persistence } from './persistence.js';
 import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
-import { nodeLabel, splitProse } from '@tot-mcp/shared';
+import { nodeLabel, titleProblem, TITLE_MAX_LENGTH, type HypothesisDraft } from '@tot-mcp/shared';
 
 // ─── Types ───
 
@@ -28,6 +28,23 @@ const nonBlank = (max: number) =>
 const identifier = () => z.string().min(1);
 
 /**
+ * A hypothesis label. `max` is expressed as a zod constraint (not a refinement)
+ * so the bound serializes into the advertised JSON Schema — an agent can only
+ * respect a limit it can discover.
+ */
+const titleField = () =>
+  z.string().min(1).max(TITLE_MAX_LENGTH).superRefine((value, ctx) => {
+    const problem = titleProblem(value);
+    if (problem) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `title ${problem}` });
+  });
+
+/** A child in a decomposition: a bare label, or a label with its long form. */
+const childDraft = () => z.union([
+  titleField(),
+  z.object({ title: titleField(), statement: nonBlank(10000).optional() }),
+]);
+
+/**
  * Canonical tool definitions: one Zod object per tool. Its `.shape` is what MCP
  * advertises through listTools and the object itself is what validates args
  * before dispatch, so the published contract and the enforced contract are the
@@ -38,20 +55,25 @@ const TOOL_DEFS = {
     description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — root cause analysis, differential diagnosis, hypothesis-driven inquiry, or multi-factor decisions across any domain.',
     input: z.object({
       problem: nonBlank(10000).describe('The problem statement to investigate'),
+      rootTitle: titleField().optional().describe(
+        `Short label for the root node, at most ${TITLE_MAX_LENGTH} characters. Defaults to a label derived from the problem statement.`),
     }),
   },
   decompose: {
     description: 'Decompose a hypothesis into sibling sub-hypotheses comparable along a single framing axis. 2-5 keeps the tree legible; up to 20 are accepted when the domain genuinely warrants more. Aim for non-overlapping siblings unless the domain co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
     input: z.object({
       parentId: identifier().describe('ID of the hypothesis to decompose'),
-      children: z.array(nonBlank(10000)).min(2).max(20).describe('Array of sub-hypothesis content strings'),
+      children: z.array(childDraft()).min(2).max(20).describe(
+        `Sub-hypotheses, 2-20. Each is a short label of at most ${TITLE_MAX_LENGTH} characters, or an object { title, statement } when the claim needs a longer form.`),
     }),
   },
   add_hypothesis: {
     description: 'Add a single sibling hypothesis to the tree. Use when an existing decomposition is missing a possibility.',
     input: z.object({
       parentId: identifier().describe('ID of the parent hypothesis'),
-      content: nonBlank(10000).describe('Description of the new hypothesis'),
+      title: titleField().describe(
+        `Short label for the hypothesis, at most ${TITLE_MAX_LENGTH} characters, phrased as a noun phrase rather than a sentence.`),
+      statement: nonBlank(10000).optional().describe('The full claim, when it needs more than the label conveys.'),
     }),
   },
   add_evidence: {
@@ -193,19 +215,20 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
 
   const handlers = new Map<string, ToolHandler>();
 
-  handlers.set('create_tree', dispatch(TOOL_DEFS.create_tree.input, ({ problem }) => {
-    const { session, root } = tm.createSession(problem);
+  handlers.set('create_tree', dispatch(TOOL_DEFS.create_tree.input, ({ problem, rootTitle }) => {
+    const { session, root } = tm.createSession(problem, rootTitle);
     return { text: fmt.formatCreateTree(session.id, root.id, problem), sessionId: session.id };
   }));
 
   handlers.set('decompose', dispatch(TOOL_DEFS.decompose.input, ({ parentId, children }) => {
-    const created = tm.decompose(parentId, children);
+    const drafts: HypothesisDraft[] = children.map((c) => (typeof c === 'string' ? { title: c } : c));
+    const created = tm.decompose(parentId, drafts);
     const check = tm.validateDecomposition(parentId);
     return { text: fmt.formatDecompose(created, check, tm), sessionId: created[0].sessionId };
   }));
 
-  handlers.set('add_hypothesis', dispatch(TOOL_DEFS.add_hypothesis.input, ({ parentId, content }) => {
-    const hypothesis = tm.addHypothesis(parentId, content);
+  handlers.set('add_hypothesis', dispatch(TOOL_DEFS.add_hypothesis.input, ({ parentId, title, statement }) => {
+    const hypothesis = tm.addHypothesis(parentId, { title, statement });
     return { text: fmt.formatAddHypothesis(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
