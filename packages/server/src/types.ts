@@ -2,6 +2,10 @@
 // the dashboard cannot drift. Re-exported here so existing './types.js'
 // importers are unaffected.
 export type {
+  ArtifactRef,
+  ArtifactDigest,
+  EvidenceKind,
+  HypothesisDraft,
   Hypothesis,
   HypothesisStatus,
   Evidence,

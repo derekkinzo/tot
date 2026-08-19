@@ -54,6 +54,8 @@ For each hypothesis, call \`add_evidence\` with observations that either:
 - **refute** the hypothesis (falsifies or weakens it)
 - **neutral** (relevant but not discriminating)
 
+When the observation came from a file or a command — a log, a test run, a diff — write the output to a file and pass \`artifactPath\` (with \`command\`, \`exitCode\`, and the \`excerptStartLine\`/\`excerptEndLine\` the claim rests on). The bytes are stored and can be re-read; a retyped log cannot be checked against anything. Keep \`content\` for what the output shows, not a copy of it.
+
 After each piece of evidence, ask: does this also bear on sibling hypotheses?
 
 ### Step 4: Eliminate refuted branches

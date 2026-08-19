@@ -1,14 +1,18 @@
-import { nodeLabel, type Evidence, type Hypothesis } from '../types';
+import { nodeLabel, type ArtifactRef, type Evidence, type Hypothesis } from '../types';
 import { orderEvidenceRows } from '../tree/evidenceView';
+import { artifactSummary } from '../tree/artifactView';
 import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
 import { conclusionStatus } from '../tree/conclusion';
 
 interface Props {
   hypothesis: Hypothesis;
   onClose: () => void;
+  /** Opens the captured bytes a record cites. Raised to the layer that owns
+   *  overlays, so the viewer can take the keyboard from the canvas. */
+  onOpenArtifact?: (artifact: ArtifactRef, claim: string) => void;
 }
 
-export default function DetailPanel({ hypothesis, onClose }: Props) {
+export default function DetailPanel({ hypothesis, onClose, onOpenArtifact }: Props) {
   const statusColor = STATUS_COLORS[hypothesis.status] ?? STATUS_COLORS.pending;
   const statusLabel = STATUS_LABELS[hypothesis.status] ?? STATUS_LABELS.pending;
   // A partial/legacy stream record may be missing optional arrays or a valid
@@ -125,7 +129,7 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[...rows.refuters, ...rows.neutral, ...rows.supports].map((ev) => (
-              <EvidenceRow key={ev.id} ev={ev} />
+              <EvidenceRow key={ev.id} ev={ev} onOpenArtifact={onOpenArtifact} />
             ))}
           </div>
           {rows.tray.length > 0 && (
@@ -134,7 +138,7 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
                 Considered, not discriminating ({rows.tray.length})
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, opacity: 0.65 }}>
-                {rows.tray.map((ev) => <EvidenceRow key={ev.id} ev={ev} />)}
+                {rows.tray.map((ev) => <EvidenceRow key={ev.id} ev={ev} onOpenArtifact={onOpenArtifact} />)}
               </div>
             </div>
           )}
@@ -177,7 +181,10 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
  * because whether a claim rests on bytes or on a retelling is the first thing an
  * auditor needs to know.
  */
-function EvidenceRow({ ev }: { ev: Evidence }) {
+function EvidenceRow({ ev, onOpenArtifact }: {
+  ev: Evidence;
+  onOpenArtifact?: (artifact: ArtifactRef, claim: string) => void;
+}) {
   const accent = EVIDENCE_TYPE_COLORS[ev.type] ?? '#8b949e';
   return (
     <div style={{
@@ -205,6 +212,29 @@ function EvidenceRow({ ev }: { ev: Evidence }) {
         )}
       </div>
       <div style={{ fontSize: 15, lineHeight: 1.5, color: '#e1e4e8' }}>{ev.content}</div>
+      {ev.artifact && (
+        <button
+          onClick={() => onOpenArtifact?.(ev.artifact!, ev.content)}
+          disabled={!onOpenArtifact}
+          title="Read the captured bytes this record cites"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, width: '100%',
+            background: '#0d1117', border: '1px solid #30363d', borderRadius: 6,
+            padding: '6px 8px', cursor: onOpenArtifact ? 'pointer' : 'default',
+            color: '#8b949e', fontSize: 12, fontFamily: 'monospace', textAlign: 'left',
+          }}
+        >
+          <span aria-hidden>▤</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {artifactSummary(ev.artifact)}
+          </span>
+          {ev.artifact.excerpt && (
+            <span style={{ color: '#d29922', flexShrink: 0 }}>
+              L{ev.artifact.excerpt.startLine}–{ev.artifact.excerpt.endLine}
+            </span>
+          )}
+        </button>
+      )}
       {ev.source && (
         <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>Source: {ev.source}</div>
       )}

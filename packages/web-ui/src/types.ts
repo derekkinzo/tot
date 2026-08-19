@@ -5,6 +5,8 @@
 export type {
   HypothesisStatus,
   EvidenceKind,
+  ArtifactRef,
+  ArtifactDigest,
   Evidence,
   Conclusion,
   HypothesisMetadata,

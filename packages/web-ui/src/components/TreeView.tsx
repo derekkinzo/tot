@@ -21,6 +21,7 @@ import { nodeLabel, type Hypothesis, type Session } from '../types';
 import { STATUS_COLORS } from '../theme';
 import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
 import { nextNavTarget } from '../hooks/navTarget';
+import { canvasOwnsKey, type KeyTarget } from '../hooks/keyboardOwnership';
 
 const FIT_MAX_ZOOM = 1.5;
 const FIT_PADDING_FOCUSED = 0.3;
@@ -47,6 +48,9 @@ interface Props {
   followMode: 'following' | 'paused';
   onToggleFollow: () => void;
   onLoadSession: (id: string) => void;
+  /** Layers stacked above the canvas that read keys; while any is open the
+   *  canvas shortcuts stand down. */
+  overlayCount: number;
 }
 
 interface ContextMenuState {
@@ -55,7 +59,7 @@ interface ContextMenuState {
   y: number;
 }
 
-function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession }: Props) {
+function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, overlayCount }: Props) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const { fitView } = useReactFlow();
@@ -161,6 +165,9 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // A layer above the canvas owns the keyboard while it is open, including
+      // Escape: closing it must not also clear the selection behind it.
+      if (!canvasOwnsKey({ overlays: overlayCount, target: e.target as KeyTarget | null })) return;
       if (e.key === 'Escape') {
         onSelect(null);
         setContextMenu(null);
@@ -174,7 +181,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, hypotheses, onSelect]);
+  }, [selectedId, hypotheses, onSelect, overlayCount]);
 
   const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
     setContextMenu(null);

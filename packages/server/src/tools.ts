@@ -6,6 +6,7 @@ import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
 import { nodeLabel, titleProblem, TITLE_MAX_LENGTH, type HypothesisDraft } from '@tot-mcp/shared';
+import { ArtifactError, artifactsDirFor, captureArtifact, discardArtifact } from './artifacts.js';
 
 // ─── Types ───
 
@@ -84,6 +85,12 @@ const TOOL_DEFS = {
       content: nonBlank(10000).describe('Description of the evidence'),
       source: z.string().max(10000).optional().describe('Where this evidence came from (logs, tests, docs, etc.)'),
       decisive: z.boolean().optional().describe('Set when the verdict turns on this record, so it is read first.'),
+      artifactPath: z.string().min(1).max(4096).optional().describe(
+        'Path to a file holding the verbatim evidence — a log, a command capture, a diff. The file is snapshotted so the record cites the bytes themselves rather than a retelling of them. Prefer this over pasting output into `content`.'),
+      excerptStartLine: z.number().int().min(1).optional().describe('First line of the artifact this record is about (1-based).'),
+      excerptEndLine: z.number().int().min(1).optional().describe('Last line of the artifact this record is about (inclusive).'),
+      command: z.string().max(2000).optional().describe('The invocation that produced the artifact.'),
+      exitCode: z.number().int().optional().describe('Exit status of that invocation.'),
     }),
   },
   eliminate_hypothesis: {
@@ -165,7 +172,14 @@ export interface ToolHandlers {
  * @param tm - The TreeManager instance that owns all hypothesis state
  * @param getDataDir - Thunk returning the data directory path (deferred for testability)
  */
-export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPersistenceError?: (err: Error) => void, getDashboardUrl?: () => string | null): ToolHandlers {
+export function getToolHandlers(
+  tm: TreeManager,
+  getDataDir: () => string,
+  onPersistenceError?: (err: Error) => void,
+  getDashboardUrl?: () => string | null,
+  getArtifactsDirOpt?: () => string,
+): ToolHandlers {
+  const getArtifactsDir = getArtifactsDirOpt ?? (() => artifactsDirFor(getDataDir()));
   const persistenceMap = new Map<string, Persistence>();
 
   function getPersistence(sessionId: string): Persistence {
@@ -195,19 +209,44 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
    * only the varying body and returns the response text plus, for mutators, the
    * sessionId whose journal must be flushed.
    */
-  function dispatch<S extends z.ZodTypeAny>(
+  function dispatch<S extends z.ZodTypeAny, P = void>(
     schema: S,
-    fn: (input: z.infer<S>) => { text: string; sessionId?: string },
+    body:
+      | ((input: z.infer<S>) => { text: string; sessionId?: string })
+      | {
+          /** The only asynchronous seam: work that must finish before the
+           *  mutation, such as capturing bytes from disk. */
+          prepare: (input: z.infer<S>) => Promise<P>;
+          /** The mutation itself. Synchronous by type, so no await can slip
+           *  between the engine emitting its events and the journal drain that
+           *  acknowledges them. */
+          run: (input: z.infer<S>, prepared: P) => { text: string; sessionId?: string };
+          /** Undoes `prepare` when the mutation is refused, so preparation
+           *  leaves nothing behind. */
+          compensate?: (prepared: P) => Promise<void>;
+        },
   ): ToolHandler {
     return async (args) => {
+      let prepared: P | undefined;
+      let didPrepare = false;
       try {
-        const { text, sessionId } = fn(schema.parse(args));
+        const input = schema.parse(args);
+        let result: { text: string; sessionId?: string };
+        if (typeof body === 'function') {
+          result = body(input);
+        } else {
+          prepared = await body.prepare(input);
+          didPrepare = true;
+          result = body.run(input, prepared);
+        }
+        const { text, sessionId } = result;
         if (sessionId) {
           // The in-memory mutation succeeded, but if its journal append failed
           // the state was not durably recorded — acknowledge the failure rather
           // than reporting a success the next restart would silently drop.
           const persistFailed = await sink.drain(sessionId);
           if (persistFailed) {
+            if (didPrepare && typeof body !== 'function') await body.compensate?.(prepared as P);
             return toolResult(
               `Error: the change was applied in memory but could not be saved to disk; it will be lost on restart. Check the data directory is writable.`,
               true,
@@ -216,8 +255,14 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
         }
         return toolResult(text);
       } catch (e) {
+        if (didPrepare && typeof body !== 'function') {
+          await body.compensate?.(prepared as P).catch?.(() => {});
+        }
         if (e instanceof z.ZodError) {
           return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
+        }
+        if (e instanceof ArtifactError) {
+          return toolResult(`Error: ${(e as ArtifactError).message}`, true);
         }
         return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
       }
@@ -243,12 +288,37 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return { text: fmt.formatAddHypothesis(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
-  handlers.set('add_evidence', dispatch(TOOL_DEFS.add_evidence.input, ({ hypothesisId, type, content, source, decisive }) => {
-    tm.addEvidence(hypothesisId, type, content, source, decisive);
-    // Re-read: addEvidence returns the cascade detail, but the formatter needs
-    // the post-mutation hypothesis snapshot.
-    const hypothesis = tm.getHypothesis(hypothesisId)!;
-    return { text: fmt.formatAddEvidence(hypothesisId, hypothesis, tm), sessionId: hypothesis.sessionId };
+  handlers.set('add_evidence', dispatch(TOOL_DEFS.add_evidence.input, {
+    // Capturing bytes is file I/O, so it runs here — before the mutation, and
+    // outside it, so the engine's emit and the journal drain stay adjacent.
+    prepare: async (input) => {
+      if (input.artifactPath === undefined) return undefined;
+      const hypothesis = tm.getHypothesis(input.hypothesisId);
+      if (!hypothesis) throw new TreeError(`Hypothesis not found: ${input.hypothesisId}`);
+      const excerpt = input.excerptStartLine !== undefined && input.excerptEndLine !== undefined
+        ? { startLine: input.excerptStartLine, endLine: input.excerptEndLine }
+        : undefined;
+      return captureArtifact({
+        artifactsDir: getArtifactsDir(),
+        sessionId: hypothesis.sessionId,
+        sourcePath: input.artifactPath,
+        command: input.command,
+        exitCode: input.exitCode,
+        excerpt,
+      });
+    },
+    run: ({ hypothesisId, type, content, source, decisive }, artifact) => {
+      tm.addEvidence(hypothesisId, type, content, source, decisive, artifact);
+      // Re-read: addEvidence returns the cascade detail, but the formatter needs
+      // the post-mutation hypothesis snapshot.
+      const hypothesis = tm.getHypothesis(hypothesisId)!;
+      return { text: fmt.formatAddEvidence(hypothesisId, hypothesis, tm), sessionId: hypothesis.sessionId };
+    },
+    // A capture whose mutation was refused would otherwise leave bytes that
+    // nothing references.
+    compensate: async (artifact) => {
+      if (artifact) await discardArtifact(getArtifactsDir(), artifact);
+    },
   }));
 
   handlers.set('eliminate_hypothesis', dispatch(TOOL_DEFS.eliminate_hypothesis.input, ({ hypothesisId, reason, refutingEvidenceIds }) => {
@@ -330,9 +400,9 @@ export function registerTools(
   server: McpServer,
   tm: TreeManager,
   getDataDir: () => string,
-  opts: { getDashboardUrl?: () => string | null; onPersistenceError?: (err: Error) => void } = {},
+  opts: { getDashboardUrl?: () => string | null; onPersistenceError?: (err: Error) => void; getArtifactsDir?: () => string } = {},
 ): { drainAll: () => Promise<void> } {
-  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl);
+  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl, opts.getArtifactsDir);
 
   for (const [name, schema] of Object.entries(TOOL_SCHEMAS)) {
     const handler = handlers.get(name)!;

@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { v4 as uuid } from 'uuid';
 import { isPruned, isTerminal, subtreeContainsCorroborated, topLevelBranchesDisposed } from './closure.js';
 import type {
+  ArtifactRef,
   Evidence,
   Hypothesis,
   HypothesisStatus,
@@ -217,6 +218,7 @@ export class TreeManager extends EventEmitter {
    * @param content - Description of the evidence
    * @param source - Optional provenance
    * @param decisive - Marks a record the verdict turns on
+   * @param artifact - Reference to already-captured bytes; makes the record verbatim
    * @returns The created evidence record plus the cascade-demoted ancestors
    *   so callers can journal each ancestor's hypothesis-updated entry.
    * @throws TreeError if hypothesis is eliminated/out-of-scope, or if
@@ -228,6 +230,7 @@ export class TreeManager extends EventEmitter {
     content: string,
     source?: string,
     decisive?: boolean,
+    artifact?: ArtifactRef,
   ): { evidence: Evidence; demotedAncestors: Hypothesis[] } {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
@@ -256,9 +259,12 @@ export class TreeManager extends EventEmitter {
     const evidence: Evidence = {
       id: uuid(),
       type,
-      kind: 'transcription',
+      // Verbatim exactly when captured bytes back the record. Derived, never
+      // asked for, so the two cannot disagree.
+      kind: artifact ? 'artifact' : 'transcription',
       content,
       source,
+      ...(artifact === undefined ? {} : { artifact }),
       ...(decisive === undefined ? {} : { decisive }),
       timestamp: now,
     };

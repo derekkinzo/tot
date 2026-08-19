@@ -64,6 +64,8 @@ For EACH hypothesis, seek REFUTING evidence (falsification-first per Popper):
 1. Define what observation would REFUTE this hypothesis.
 2. Execute the most discriminating test first (one whose outcome is predicted by one sibling but not the others — cf. Platt's strong inference, 1964).
 3. Call `add_evidence` with type `supports`, `refutes`, or `neutral`.
+   - When the observation came from a file or a command, save the output and pass `artifactPath` (plus `command`, `exitCode`, and the `excerptStartLine`/`excerptEndLine` the claim rests on). The bytes are stored verbatim and can be re-read; `content` then states what they show rather than repeating them.
+   - Mark `decisive: true` on a record the verdict turns on, so it is read first.
 4. Fan out subagents to investigate from independent data sources, then dispatch the `evidence-reviewer` subagent to audit directness, source diversity, and diagnosticity before relying on the result.
 
 Key principles:

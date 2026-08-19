@@ -3,11 +3,18 @@ import { useTreeStream } from './hooks/useTreeStream';
 import { useFollowMode } from './hooks/useFollowMode';
 import TreeView from './components/TreeView';
 import DetailPanel from './components/DetailPanel';
+import ArtifactViewer from './components/ArtifactViewer';
+import { canvasOwnsKey, type KeyTarget } from './hooks/keyboardOwnership';
+import type { ArtifactRef } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId, persistenceHealthy } = useTreeStream();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The captured evidence being read, if any. Held here rather than in the
+  // panel because it is a layer above the canvas: while it is open the canvas
+  // shortcuts stand down.
+  const [openArtifact, setOpenArtifact] = useState<{ artifact: ArtifactRef; claim: string } | null>(null);
 
   const { followMode, followTarget, toggleFollow } = useFollowMode({
     sessionId: session?.id ?? null,
@@ -16,6 +23,8 @@ export default function App() {
   });
 
   const selected = selectedId ? hypotheses.get(selectedId) ?? null : null;
+  // Layers stacked above the canvas that read keys.
+  const overlayCount = openArtifact ? 1 : 0;
 
   // While following, pin selection to the active node. This also fires when
   // follow is toggled on, so enabling follow focuses the active hypothesis.
@@ -33,7 +42,7 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (!canvasOwnsKey({ overlays: overlayCount, target: e.target as KeyTarget | null })) return;
       if (e.key === 'f' || e.key === 'F') {
         if (!e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
@@ -43,7 +52,7 @@ export default function App() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [toggleFollow]);
+  }, [toggleFollow, overlayCount]);
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%' }}>
@@ -72,6 +81,7 @@ export default function App() {
               followMode={followMode}
               onToggleFollow={toggleFollow}
               onLoadSession={loadSession}
+              overlayCount={overlayCount}
             />
           </ErrorBoundary>
         ) : (
@@ -101,7 +111,21 @@ export default function App() {
             </div>
           }
         >
-          <DetailPanel hypothesis={selected} onClose={() => handleSelect(null)} />
+          <DetailPanel
+            hypothesis={selected}
+            onClose={() => handleSelect(null)}
+            onOpenArtifact={(artifact, claim) => setOpenArtifact({ artifact, claim })}
+          />
+        </ErrorBoundary>
+      )}
+
+      {openArtifact && (
+        <ErrorBoundary>
+          <ArtifactViewer
+            artifact={openArtifact.artifact}
+            claim={openArtifact.claim}
+            onClose={() => setOpenArtifact(null)}
+          />
         </ErrorBoundary>
       )}
     </div>

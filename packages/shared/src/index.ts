@@ -55,10 +55,50 @@ export interface Evidence {
   /** Records that only support or refute jointly. A group carries the weight of
    *  one independent observation however many records it holds. */
   linkedGroupId?: string;
+  /** Present exactly when `kind` is 'artifact'. */
+  artifact?: ArtifactRef;
   timestamp: string;
 }
 
 export type EvidenceKind = 'artifact' | 'transcription';
+
+/**
+ * A reference to captured bytes held outside the journal.
+ *
+ * Deliberately absent: the on-disk path, because a browser resolves bytes only
+ * through the artifact endpoints; the excerpt's text, because the journal
+ * snapshots the whole node on every change and duplicating captured text there
+ * would grow the log by the field agents fill most; and any integrity verdict,
+ * because that is recomputed when bytes are read — a stored 'verified' would
+ * have replay assert integrity for bytes that may since have changed.
+ */
+export interface ArtifactRef {
+  id: string;
+  /** The session whose directory holds the bytes. Makes a reference resolvable
+   *  without consulting engine state. */
+  sessionId: string;
+  /** Display name only. Never a path component: it is caller-supplied. */
+  filename: string;
+  /** Selects a viewer renderer. */
+  mediaType: string;
+  bytes: number;
+  lineCount?: number;
+  digest: ArtifactDigest;
+  capturedAt: string;
+  /** The invocation that produced the bytes, when one was named. */
+  command?: string;
+  exitCode?: number;
+  /** The quoted region of the artifact, by line. The text itself is read from
+   *  the artifact rather than copied here. */
+  excerpt?: { startLine: number; endLine: number };
+}
+
+/** Only collision-resistant algorithms: a digest is what makes a later
+ *  integrity check meaningful. */
+export interface ArtifactDigest {
+  alg: 'sha-256' | 'sha-512';
+  value: string;
+}
 
 export interface Conclusion {
   verdict: 'eliminated' | 'corroborated' | 'out-of-scope';

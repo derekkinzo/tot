@@ -47,6 +47,7 @@ import {
   lacksSourceDiversity,
   suggestsElimination,
   lacksDiagnosticity,
+  readsAsRetypedOutput,
 } from './advisories.js';
 import { nodeLabel, supportingWeight, refutingWeight } from '@tot-mcp/shared';
 import { pickActiveSession } from './persistence.js';
@@ -207,6 +208,11 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   if (isConfirmationBias(hypothesis, siblings)) {
     result += `\n⚠ Confirmation bias: ${supporting} supporting, 0 refuting. What would REFUTE this?\n`;
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
+  }
+
+  // A retyped log cannot be re-read; the file it came from can be.
+  if (readsAsRetypedOutput(hypothesis)) {
+    result += `\nThis record carries output that was retyped into it. If it came from a file or a command, pass artifactPath so the bytes themselves are stored and can be read back verbatim.\n`;
   }
 
   // Source independence (Heuer 1999)

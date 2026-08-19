@@ -60,6 +60,20 @@ export function lacksSourceDiversity(hypothesis: Hypothesis): boolean {
   return sources.length >= 2 && new Set(sources).size === 1;
 }
 
+/**
+ * The latest record is a retelling of output that exists somewhere as bytes: a
+ * transcription whose content spans several lines, which a human summary of an
+ * observation does not. Structural rather than a guess at what output looks like.
+ *
+ * Worth surfacing because a retyped log cannot be re-read or checked, while the
+ * file it came from can be captured and cited instead.
+ */
+export function readsAsRetypedOutput(hypothesis: Hypothesis): boolean {
+  const last = hypothesis.evidence[hypothesis.evidence.length - 1];
+  if (!last || last.kind === 'artifact') return false;
+  return last.content.trim().includes('\n');
+}
+
 /** Elimination nudge (Bacon/Mill eliminative induction): ≥2 refuting, zero supporting. */
 export function suggestsElimination(hypothesis: Hypothesis): boolean {
   return countRefuting(hypothesis) >= 2 && countSupporting(hypothesis) === 0;
