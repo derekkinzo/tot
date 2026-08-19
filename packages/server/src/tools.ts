@@ -96,7 +96,7 @@ const TOOL_DEFS = {
       artifactPath: z.string().min(1).max(4096).optional().describe(
         'Path to a file holding the verbatim evidence — a log, a command capture, a diff. The file is snapshotted so the record cites the bytes themselves rather than a retelling of them. Prefer this over pasting output into `content`.'),
       excerptStartLine: z.number().int().min(1).optional().describe('First line of the artifact this record is about (1-based).'),
-      excerptEndLine: z.number().int().min(1).optional().describe('Last line of the artifact this record is about (inclusive).'),
+      excerptEndLine: z.number().int().min(1).optional().describe('Last line of the artifact this record is about (inclusive). Defaults to excerptStartLine, citing a single line.'),
       command: z.string().max(2000).optional().describe('The invocation that produced the artifact.'),
       exitCode: z.number().int().optional().describe('Exit status of that invocation.'),
     }),
@@ -311,9 +311,19 @@ export function getToolHandlers(
       if (input.artifactPath === undefined) return undefined;
       const hypothesis = tm.getHypothesis(input.hypothesisId);
       if (!hypothesis) throw new TreeError(`Hypothesis not found: ${input.hypothesisId}`);
-      const excerpt = input.excerptStartLine !== undefined && input.excerptEndLine !== undefined
-        ? { startLine: input.excerptStartLine, endLine: input.excerptEndLine }
-        : undefined;
+      // A start alone cites one line; an end alone cites nothing, and a
+      // descending range describes no lines at all. Checked here because the
+      // advertised schema must stay a plain object shape.
+      const { excerptStartLine: startLine, excerptEndLine: endLine } = input;
+      if (startLine === undefined && endLine !== undefined) {
+        throw new ArtifactError('excerptEndLine needs an excerptStartLine to count from');
+      }
+      if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
+        throw new ArtifactError(`excerptEndLine ${endLine} is before excerptStartLine ${startLine}`);
+      }
+      const excerpt = startLine === undefined
+        ? undefined
+        : { startLine, endLine: endLine ?? startLine };
       return captureArtifact({
         artifactsDir: getArtifactsDir(),
         sessionId: hypothesis.sessionId,

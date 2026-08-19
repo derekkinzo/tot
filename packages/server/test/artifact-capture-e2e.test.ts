@@ -168,6 +168,50 @@ describe('verbatim evidence capture, end to end', () => {
     expect(await raw.text()).toBe(LOG_BODY);
   });
 
+  it('reads a single cited line from a start alone, rather than dropping the citation', async () => {
+    const { s, client } = await start();
+    const rootId = await rootOf(client);
+    await client.callTool({
+      name: 'add_evidence',
+      arguments: {
+        hypothesisId: rootId, type: 'refutes', content: 'line 4 is the one',
+        artifactPath: log('a.log', LOG_BODY), excerptStartLine: 4,
+      },
+    });
+    const { hypotheses } = await state(s);
+    expect(hypotheses.find((h: any) => h.id === rootId).evidence[0].artifact.excerpt)
+      .toEqual({ startLine: 4, endLine: 4 });
+  });
+
+  it('refuses an end line with no start, which cites nothing', async () => {
+    const { s, client } = await start();
+    const rootId = await rootOf(client);
+    const res: any = await client.callTool({
+      name: 'add_evidence',
+      arguments: {
+        hypothesisId: rootId, type: 'refutes', content: 'x',
+        artifactPath: log('a.log', LOG_BODY), excerptEndLine: 9,
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(storedIds()).toEqual([]);
+    expect(s.port).toBeGreaterThan(0);
+  });
+
+  it('refuses a descending line range instead of storing one nothing can render', async () => {
+    const { client } = await start();
+    const rootId = await rootOf(client);
+    const res: any = await client.callTool({
+      name: 'add_evidence',
+      arguments: {
+        hypothesisId: rootId, type: 'refutes', content: 'x',
+        artifactPath: log('a.log', LOG_BODY), excerptStartLine: 9, excerptEndLine: 4,
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(storedIds()).toEqual([]);
+  });
+
   it('refuses an id that is not cited by any record, so stored bytes cannot be probed', async () => {
     const { s, client } = await start();
     const rootId = await rootOf(client);

@@ -99,8 +99,11 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
   if (sourcePath !== undefined) {
     let size: number;
     try {
-      size = statSync(sourcePath).size;
-    } catch {
+      const stat = statSync(sourcePath);
+      if (!stat.isFile()) throw new ArtifactError(`${sourcePath} is not a file`);
+      size = stat.size;
+    } catch (err) {
+      if (err instanceof ArtifactError) throw err;
       throw new ArtifactError(`Cannot read ${sourcePath}: no such file`);
     }
     if (size > ARTIFACT_MAX_BYTES) {

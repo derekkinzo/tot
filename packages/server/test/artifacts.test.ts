@@ -90,6 +90,13 @@ describe('artifact capture', () => {
     expect(existsSync(join(artifactsDir, sessionId))).toBe(false);
   });
 
+  it('refuses a directory, naming it as not a file rather than failing mid-copy', async () => {
+    const dir = join(sourceDir, 'nested');
+    mkdirSync(dir);
+    await expect(captureArtifact({ artifactsDir, sessionId, sourcePath: dir }))
+      .rejects.toThrow(/not a file/i);
+  });
+
   it('refuses a source that does not exist', async () => {
     await expect(captureArtifact({ artifactsDir, sessionId, sourcePath: join(sourceDir, 'ghost.log') }))
       .rejects.toThrow(ArtifactError);
