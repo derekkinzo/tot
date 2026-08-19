@@ -18,127 +18,95 @@ export interface ToolSchema {
 
 // ─── Tool Schemas ───
 
-/**
- * Canonical tool definitions: descriptions and Zod input schemas used both for
- * MCP tool discovery (listTools) and to validate args before dispatch. A single
- * source of truth so discovery and validation cannot drift apart.
- */
-export const TOOL_SCHEMAS: Record<string, ToolSchema> = {
-  create_tree: {
-    description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — root cause analysis, differential diagnosis, hypothesis-driven inquiry, or multi-factor decisions across any domain.',
-    schema: {
-      problem: z.string().min(1).max(10000).describe('The problem statement to investigate'),
-    },
-  },
-  decompose: {
-    description: 'Decompose a hypothesis into sibling sub-hypotheses comparable along a single framing axis. 2-5 keeps the tree legible; up to 20 are accepted when the domain genuinely warrants more. Aim for non-overlapping siblings unless the domain co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
-    schema: {
-      parentId: z.string().min(1).describe('ID of the hypothesis to decompose'),
-      children: z.array(z.string().min(1)).min(2).max(20).describe('Array of sub-hypothesis content strings'),
-    },
-  },
-  add_hypothesis: {
-    description: 'Add a single sibling hypothesis to the tree. Use when an existing decomposition is missing a possibility.',
-    schema: {
-      parentId: z.string().min(1).describe('ID of the parent hypothesis'),
-      content: z.string().min(1).max(10000).describe('Description of the new hypothesis'),
-    },
-  },
-  add_evidence: {
-    description: 'Attach evidence to a hypothesis. After adding, consider whether this evidence also affects sibling hypotheses.',
-    schema: {
-      hypothesisId: z.string().min(1).describe('ID of the hypothesis'),
-      type: z.enum(['supports', 'refutes', 'neutral']).describe('How this evidence relates to the hypothesis'),
-      content: z.string().min(1).max(10000).describe('Description of the evidence'),
-      source: z.string().max(10000).optional().describe('Where this evidence came from (logs, tests, docs, etc.)'),
-    },
-  },
-  eliminate_hypothesis: {
-    description: 'Mark a hypothesis as eliminated, grounded in refuting evidence. Per Popper, elimination is the operational form of falsification — a counter-instance must exist on the hypothesis. Call add_evidence(type=refutes) first, or use set_out_of_scope to mark a branch as uninvestigated without claiming refutation.',
-    schema: {
-      hypothesisId: z.string().min(1).describe('ID of the hypothesis to eliminate'),
-      reason: z.string().min(1).max(10000).describe('Why this hypothesis is being eliminated'),
-      refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional().describe('Optional explicit ids of refutes-typed evidence records that ground this verdict. When omitted, all refutes-typed records on the hypothesis are bound.'),
-    },
-  },
-  corroborate_hypothesis: {
-    description: 'Mark a hypothesis as corroborated — it has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification: the verdict can be reopened by later refuting evidence. Resolves the session only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope).',
-    schema: {
-      hypothesisId: z.string().min(1).describe('ID of the hypothesis to corroborate'),
-      reason: z.string().min(1).max(10000).describe('Why this hypothesis has survived refutation'),
-    },
-  },
-  set_out_of_scope: {
-    description: 'Mark a hypothesis as out-of-scope: terminal but no refutation claimed. Use to set aside a branch the agent does not want to investigate. Distinct from elimination, which asserts a refuting record. Closure treats both as pruning — descendants of an out-of-scope node are not required to be terminal.',
-    schema: {
-      hypothesisId: z.string().min(1).describe('ID of the hypothesis to set out-of-scope'),
-      reason: z.string().min(1).max(10000).describe('Why this branch is being set aside without investigation'),
-    },
-  },
-  get_tree: {
-    description: 'View a hypothesis tree structure. Defaults to the active session; pass sessionId to view another open session.',
-    schema: {
-      format: z.enum(['full', 'compact']).optional().default('compact').describe('Output format'),
-      sessionId: z.string().min(1).optional().describe('Session to view (defaults to the active session)'),
-    },
-  },
-  get_status: {
-    description: 'Get a summary of the current investigation: progress, unexplored branches, and stagnation check.',
-    schema: {},
-  },
-  validate_decomposition: {
-    description: 'Check structural properties of a decomposition (child count, overlaps, catch-all). For semantic MECE validation, reason about whether hypotheses truly don\'t overlap and cover all possibilities.',
-    schema: {
-      parentId: z.string().min(1).describe('ID of the parent hypothesis whose children to validate'),
-    },
-  },
-};
-
-// Non-blank free text: rejects whitespace-only input (which z.string().min(1)
-// would accept) at the wire boundary, matching the engine's content guards.
+/** Non-blank free text: rejects whitespace-only input (which z.string().min(1)
+ *  would accept) at the wire boundary, matching the engine's content guards. */
 const nonBlank = (max: number) =>
   z.string().min(1).max(max).refine((s) => s.trim().length > 0, 'must not be empty or whitespace-only');
 
-const schemas = {
-  create_tree: z.object({
-    problem: nonBlank(10000),
-  }),
-  decompose: z.object({
-    parentId: z.string().min(1),
-    children: z.array(nonBlank(10000)).min(2).max(20),
-  }),
-  add_hypothesis: z.object({
-    parentId: z.string().min(1),
-    content: nonBlank(10000),
-  }),
-  add_evidence: z.object({
-    hypothesisId: z.string().min(1),
-    type: z.enum(['supports', 'refutes', 'neutral']),
-    content: nonBlank(10000),
-    source: z.string().max(10000).optional(),
-  }),
-  eliminate_hypothesis: z.object({
-    hypothesisId: z.string().min(1),
-    reason: nonBlank(10000),
-    refutingEvidenceIds: z.array(z.string().min(1)).min(1).optional(),
-  }),
-  corroborate_hypothesis: z.object({
-    hypothesisId: z.string().min(1),
-    reason: nonBlank(10000),
-  }),
-  set_out_of_scope: z.object({
-    hypothesisId: z.string().min(1),
-    reason: nonBlank(10000),
-  }),
-  get_tree: z.object({
-    format: z.enum(['full', 'compact']).optional().default('compact'),
-    sessionId: z.string().min(1).optional(),
-  }),
-  get_status: z.object({}),
-  validate_decomposition: z.object({
-    parentId: z.string().min(1),
-  }),
-};
+/** An opaque identifier supplied by a previous tool response. */
+const identifier = () => z.string().min(1);
+
+/**
+ * Canonical tool definitions: one Zod object per tool. Its `.shape` is what MCP
+ * advertises through listTools and the object itself is what validates args
+ * before dispatch, so the published contract and the enforced contract are the
+ * same schema rather than two that can describe different constraints.
+ */
+const TOOL_DEFS = {
+  create_tree: {
+    description: 'Start a new Tree of Thought reasoning session. Use when facing a complex problem that requires systematic investigation — root cause analysis, differential diagnosis, hypothesis-driven inquiry, or multi-factor decisions across any domain.',
+    input: z.object({
+      problem: nonBlank(10000).describe('The problem statement to investigate'),
+    }),
+  },
+  decompose: {
+    description: 'Decompose a hypothesis into sibling sub-hypotheses comparable along a single framing axis. 2-5 keeps the tree legible; up to 20 are accepted when the domain genuinely warrants more. Aim for non-overlapping siblings unless the domain co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
+    input: z.object({
+      parentId: identifier().describe('ID of the hypothesis to decompose'),
+      children: z.array(nonBlank(10000)).min(2).max(20).describe('Array of sub-hypothesis content strings'),
+    }),
+  },
+  add_hypothesis: {
+    description: 'Add a single sibling hypothesis to the tree. Use when an existing decomposition is missing a possibility.',
+    input: z.object({
+      parentId: identifier().describe('ID of the parent hypothesis'),
+      content: nonBlank(10000).describe('Description of the new hypothesis'),
+    }),
+  },
+  add_evidence: {
+    description: 'Attach evidence to a hypothesis. After adding, consider whether this evidence also affects sibling hypotheses.',
+    input: z.object({
+      hypothesisId: identifier().describe('ID of the hypothesis'),
+      type: z.enum(['supports', 'refutes', 'neutral']).describe('How this evidence relates to the hypothesis'),
+      content: nonBlank(10000).describe('Description of the evidence'),
+      source: z.string().max(10000).optional().describe('Where this evidence came from (logs, tests, docs, etc.)'),
+    }),
+  },
+  eliminate_hypothesis: {
+    description: 'Mark a hypothesis as eliminated, grounded in refuting evidence. Per Popper, elimination is the operational form of falsification — a counter-instance must exist on the hypothesis. Call add_evidence(type=refutes) first, or use set_out_of_scope to mark a branch as uninvestigated without claiming refutation.',
+    input: z.object({
+      hypothesisId: identifier().describe('ID of the hypothesis to eliminate'),
+      reason: nonBlank(10000).describe('Why this hypothesis is being eliminated'),
+      refutingEvidenceIds: z.array(identifier()).min(1).optional().describe('Optional explicit ids of refutes-typed evidence records that ground this verdict. When omitted, all refutes-typed records on the hypothesis are bound.'),
+    }),
+  },
+  corroborate_hypothesis: {
+    description: 'Mark a hypothesis as corroborated — it has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification: the verdict can be reopened by later refuting evidence. Resolves the session only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope).',
+    input: z.object({
+      hypothesisId: identifier().describe('ID of the hypothesis to corroborate'),
+      reason: nonBlank(10000).describe('Why this hypothesis has survived refutation'),
+    }),
+  },
+  set_out_of_scope: {
+    description: 'Mark a hypothesis as out-of-scope: terminal but no refutation claimed. Use to set aside a branch the agent does not want to investigate. Distinct from elimination, which asserts a refuting record. Closure treats both as pruning — descendants of an out-of-scope node are not required to be terminal.',
+    input: z.object({
+      hypothesisId: identifier().describe('ID of the hypothesis to set out-of-scope'),
+      reason: nonBlank(10000).describe('Why this branch is being set aside without investigation'),
+    }),
+  },
+  get_tree: {
+    description: 'View a hypothesis tree structure. Defaults to the active session; pass sessionId to view another open session.',
+    input: z.object({
+      format: z.enum(['full', 'compact']).optional().default('compact').describe('Output format'),
+      sessionId: identifier().optional().describe('Session to view (defaults to the active session)'),
+    }),
+  },
+  get_status: {
+    description: 'Get a summary of the current investigation: progress, unexplored branches, and stagnation check.',
+    input: z.object({}),
+  },
+  validate_decomposition: {
+    description: 'Check structural properties of a decomposition (child count, overlaps, catch-all). For semantic MECE validation, reason about whether hypotheses truly don\'t overlap and cover all possibilities.',
+    input: z.object({
+      parentId: identifier().describe('ID of the parent hypothesis whose children to validate'),
+    }),
+  },
+} satisfies Record<string, { description: string; input: z.ZodObject<z.ZodRawShape> }>;
+
+/** Discovery projection of {@link TOOL_DEFS}: the same schemas, shape-wise. */
+export const TOOL_SCHEMAS: Record<string, ToolSchema> = Object.fromEntries(
+  Object.entries(TOOL_DEFS).map(([name, def]) => [name, { description: def.description, schema: def.input.shape }]),
+);
 
 // ─── Tool Handlers ───
 
@@ -224,23 +192,23 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
 
   const handlers = new Map<string, ToolHandler>();
 
-  handlers.set('create_tree', dispatch(schemas.create_tree, ({ problem }) => {
+  handlers.set('create_tree', dispatch(TOOL_DEFS.create_tree.input, ({ problem }) => {
     const { session, root } = tm.createSession(problem);
     return { text: fmt.formatCreateTree(session.id, root.id, problem), sessionId: session.id };
   }));
 
-  handlers.set('decompose', dispatch(schemas.decompose, ({ parentId, children }) => {
+  handlers.set('decompose', dispatch(TOOL_DEFS.decompose.input, ({ parentId, children }) => {
     const created = tm.decompose(parentId, children);
     const check = tm.validateDecomposition(parentId);
     return { text: fmt.formatDecompose(created, check, tm), sessionId: created[0].sessionId };
   }));
 
-  handlers.set('add_hypothesis', dispatch(schemas.add_hypothesis, ({ parentId, content }) => {
+  handlers.set('add_hypothesis', dispatch(TOOL_DEFS.add_hypothesis.input, ({ parentId, content }) => {
     const hypothesis = tm.addHypothesis(parentId, content);
     return { text: fmt.formatAddHypothesis(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
-  handlers.set('add_evidence', dispatch(schemas.add_evidence, ({ hypothesisId, type, content, source }) => {
+  handlers.set('add_evidence', dispatch(TOOL_DEFS.add_evidence.input, ({ hypothesisId, type, content, source }) => {
     tm.addEvidence(hypothesisId, type, content, source);
     // Re-read: addEvidence returns the cascade detail, but the formatter needs
     // the post-mutation hypothesis snapshot.
@@ -248,23 +216,23 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return { text: fmt.formatAddEvidence(hypothesisId, hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
-  handlers.set('eliminate_hypothesis', dispatch(schemas.eliminate_hypothesis, ({ hypothesisId, reason, refutingEvidenceIds }) => {
+  handlers.set('eliminate_hypothesis', dispatch(TOOL_DEFS.eliminate_hypothesis.input, ({ hypothesisId, reason, refutingEvidenceIds }) => {
     const hypothesis = tm.eliminateHypothesis(hypothesisId, reason, refutingEvidenceIds);
     return { text: fmt.formatEliminate(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
-  handlers.set('corroborate_hypothesis', dispatch(schemas.corroborate_hypothesis, ({ hypothesisId, reason }) => {
+  handlers.set('corroborate_hypothesis', dispatch(TOOL_DEFS.corroborate_hypothesis.input, ({ hypothesisId, reason }) => {
     const hypothesis = tm.corroborateHypothesis(hypothesisId, reason);
     return { text: fmt.formatCorroborate(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
-  handlers.set('set_out_of_scope', dispatch(schemas.set_out_of_scope, ({ hypothesisId, reason }) => {
+  handlers.set('set_out_of_scope', dispatch(TOOL_DEFS.set_out_of_scope.input, ({ hypothesisId, reason }) => {
     const hypothesis = tm.setOutOfScope(hypothesisId, reason);
     return { text: fmt.formatSetOutOfScope(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
   // Read-only: no sessionId → dispatch skips the drain.
-  handlers.set('validate_decomposition', dispatch(schemas.validate_decomposition, ({ parentId }) => {
+  handlers.set('validate_decomposition', dispatch(TOOL_DEFS.validate_decomposition.input, ({ parentId }) => {
     const check = tm.validateDecomposition(parentId);
     return { text: fmt.formatValidateDecomposition(parentId, check) };
   }));
@@ -274,7 +242,7 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   // directly.
   handlers.set('get_tree', async (args) => {
     try {
-      const { format, sessionId } = schemas.get_tree.parse(args);
+      const { format, sessionId } = TOOL_DEFS.get_tree.input.parse(args);
       if (sessionId && !tm.hasSession(sessionId)) {
         return toolResult(`No such session: ${sessionId}`, true);
       }
