@@ -9,7 +9,7 @@ const session = (id: string): Session => ({
   id, problem: 'p', rootNodeId: `${id}-root`, status: 'open', createdAt: '2024-01-01T00:00:00.000Z',
 });
 const hyp = (id: string, sessionId: string): Hypothesis => ({
-  id, parentId: null, sessionId, depth: 0, content: 'c', status: 'exploring',
+  id, parentId: null, sessionId, depth: 0, title: 'c', status: 'exploring',
   evidence: [], metadata: { createdAt: '', updatedAt: '', source: 'agent' } as any, children: [],
 });
 
@@ -40,10 +40,34 @@ describe('journalEventToEntry (write↔read contract mapper)', () => {
     });
   });
 
-  it('routes hypothesis events to hypothesis.sessionId, payload = the hypothesis', () => {
+  it('routes hypothesis events to hypothesis.sessionId', () => {
     const h = hyp('h1', 's9');
-    expect(journalEventToEntry({ type: 'hypothesis-added', hypothesis: h })).toEqual({ sessionId: 's9', type: 'hypothesis-added', payload: h });
-    expect(journalEventToEntry({ type: 'hypothesis-updated', hypothesis: h })).toEqual({ sessionId: 's9', type: 'hypothesis-updated', payload: h });
+    expect(journalEventToEntry({ type: 'hypothesis-added', hypothesis: h })?.sessionId).toBe('s9');
+    expect(journalEventToEntry({ type: 'hypothesis-updated', hypothesis: h })?.type).toBe('hypothesis-updated');
+  });
+
+  it('writes a prose field onto the persisted payload for readers that predate the label split', () => {
+    // Central storage outlives any single build: a previously released reader
+    // will open these files and expects one prose field. Writing it here — and
+    // only here — keeps that reader working without holding a second copy of the
+    // prose in memory, where it could drift from the title and statement.
+    const withStatement = { ...hyp('h1', 's9'), title: 'Pool exhaustion', statement: 'The pool exhausts under load.' };
+    const added = journalEventToEntry({ type: 'hypothesis-added', hypothesis: withStatement });
+    expect((added!.payload as Record<string, unknown>).content).toBe('The pool exhausts under load.');
+
+    // With no statement authored, the label itself is the prose.
+    const titleOnly = { ...hyp('h2', 's9'), title: 'Pool exhaustion' };
+    const updated = journalEventToEntry({ type: 'hypothesis-updated', hypothesis: titleOnly });
+    expect((updated!.payload as Record<string, unknown>).content).toBe('Pool exhaustion');
+  });
+
+  it('keeps the persisted payload otherwise identical to the in-memory node', () => {
+    const h = { ...hyp('h1', 's9'), title: 'T', statement: 'S' };
+    const payload = journalEventToEntry({ type: 'hypothesis-added', hypothesis: h })!.payload as Record<string, unknown>;
+    // The projection adds one field and changes nothing else.
+    const { content, ...rest } = payload;
+    expect(content).toBe('S');
+    expect(rest).toEqual({ ...h });
   });
 
   it('flattens session-completed/​reopened wire shape to the persisted payload shape', () => {

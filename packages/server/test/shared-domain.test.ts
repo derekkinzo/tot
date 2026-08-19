@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isPruned, isLive, isTerminal, isOpen,
   countSupporting, countRefuting,
-  deriveTitle, TITLE_MAX_LENGTH,
+  deriveTitle, TITLE_MAX_LENGTH, nodeLabel, splitProse,
   type Hypothesis, type HypothesisStatus,
 } from '@tot-mcp/shared';
 
@@ -10,7 +10,7 @@ const ALL: HypothesisStatus[] = ['pending', 'exploring', 'eliminated', 'corrobor
 
 function hyp(types: Array<'supports' | 'refutes' | 'neutral'>): Hypothesis {
   return {
-    id: 'h', parentId: null, sessionId: 's', depth: 0, content: 'h', status: 'exploring',
+    id: 'h', parentId: null, sessionId: 's', depth: 0, title: 'h', status: 'exploring',
     evidence: types.map((type, i) => ({ id: `e${i}`, type, content: 'x', timestamp: '' })),
     metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
   };
@@ -48,6 +48,43 @@ describe('@tot-mcp/shared evidence counts', () => {
   });
 });
 
+describe('nodeLabel', () => {
+  it('renders the authored title', () => {
+    expect(nodeLabel({ title: 'Writer pool exhaustion' })).toBe('Writer pool exhaustion');
+  });
+
+  it('falls back to a label derived from the statement when the title is blank', () => {
+    // A corrupt or partially-written payload should still render identifiably.
+    expect(nodeLabel({ title: '', statement: 'The pool exhausts. Details follow.' }))
+      .toBe('The pool exhausts');
+  });
+
+  it('falls back to a placeholder when there is no text at all', () => {
+    expect(nodeLabel({ title: '' })).toBe('(untitled)');
+    expect(nodeLabel({ title: '', statement: '   ' })).toBe('(untitled)');
+  });
+});
+
+describe('splitProse', () => {
+  it('returns only a title when the prose is already label-length', () => {
+    expect(splitProse('Writer pool exhaustion')).toEqual({ title: 'Writer pool exhaustion' });
+  });
+
+  it('keeps the full prose as the statement when the label is shorter', () => {
+    const prose = 'The pool exhausts. Every retry allocates a fresh writer and never returns it.';
+    expect(splitProse(prose)).toEqual({ title: 'The pool exhausts', statement: prose });
+  });
+
+  it('trims but does not otherwise alter a retained statement', () => {
+    expect(splitProse('  Writer pool exhaustion  ')).toEqual({ title: 'Writer pool exhaustion' });
+  });
+
+  it('produces a title within the length bound for any prose', () => {
+    const { title } = splitProse('word '.repeat(200));
+    expect(title.length).toBeLessThanOrEqual(TITLE_MAX_LENGTH);
+  });
+});
+
 describe('deriveTitle', () => {
   // A short label is authored going forward, but a hypothesis recorded as one
   // long prose field still has to render on a canvas. deriveTitle projects such
@@ -67,6 +104,27 @@ describe('deriveTitle', () => {
   it('keeps only the first sentence of multi-sentence prose', () => {
     expect(deriveTitle('The pool exhausts. This happens because every retry allocates a fresh writer.'))
       .toBe('The pool exhausts');
+  });
+
+  it('cuts at the first clause boundary, so a trailing elaboration is dropped', () => {
+    expect(deriveTitle('Writer pool exhausts under retry storms; callers block in getConnection.'))
+      .toBe('Writer pool exhausts under retry storms');
+    expect(deriveTitle('Pool exhausts — every retry allocates a fresh writer'))
+      .toBe('Pool exhausts');
+    expect(deriveTitle('Pool exhausts - every retry allocates a fresh writer'))
+      .toBe('Pool exhausts');
+  });
+
+  it('does not treat a comma as a clause boundary, so enumerations survive', () => {
+    // Splitting on commas would reduce a list of alternatives to its first item,
+    // which is exactly the meaning a label needs to keep.
+    expect(deriveTitle('Network, disk, or CPU contention'))
+      .toBe('Network, disk, or CPU contention');
+  });
+
+  it('does not split a hyphenated word or a decimal', () => {
+    expect(deriveTitle('Write-ahead log grows without bound')).toBe('Write-ahead log grows without bound');
+    expect(deriveTitle('Latency exceeds 1.5 seconds under load')).toBe('Latency exceeds 1.5 seconds under load');
   });
 
   it('truncates an over-long single sentence at a word boundary with an ellipsis', () => {

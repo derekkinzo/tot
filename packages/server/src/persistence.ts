@@ -12,7 +12,8 @@ export interface SessionIndex {
   status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   filePath: string;
-  nodeCount: number; // estimated from line count
+  /** Hypotheses reconstructed by folding the file. */
+  nodeCount: number;
 }
 
 export class Persistence {
@@ -113,7 +114,7 @@ export function scanSessions(dataDir: string): SessionIndex[] {
         status: deriveScanStatus(session, state.hypotheses, sawExplicitTerminal),
         createdAt: session.createdAt,
         filePath,
-        nodeCount: lines.length, // rough estimate (includes non-hypothesis events)
+        nodeCount: state.hypotheses.length,
       });
     } catch {
       // Skip files that can't be read or parsed
@@ -176,7 +177,11 @@ export function journalEventToEntry(event: TreeEvent): JournalRecord | null {
       return { sessionId: event.session.id, type: event.type, payload: event.session };
     case 'hypothesis-added':
     case 'hypothesis-updated':
-      return { sessionId: event.hypothesis.sessionId, type: event.type, payload: event.hypothesis };
+      return {
+        sessionId: event.hypothesis.sessionId,
+        type: event.type,
+        payload: persistedHypothesis(event.hypothesis),
+      };
     case 'session-completed':
       return { sessionId: event.sessionId, type: event.type, payload: { sessionId: event.sessionId, terminalStatus: event.terminalStatus } };
     case 'session-reopened':
@@ -185,6 +190,21 @@ export function journalEventToEntry(event: TreeEvent): JournalRecord | null {
     case 'snapshot':
       return null;
   }
+}
+
+/**
+ * The on-disk shape of a hypothesis: the in-memory node plus a single prose
+ * field.
+ *
+ * Central storage outlives any one build, so a previously released reader will
+ * open these files and expects one prose field rather than a title/statement
+ * pair. Projecting it here — at the only write site — keeps that reader working
+ * without holding a second copy of the prose in memory, where it could drift
+ * from the fields it was derived from. {@link normalizeHypothesisPayload} strips
+ * it again on read.
+ */
+function persistedHypothesis(h: Hypothesis): Hypothesis & { content: string } {
+  return { ...h, content: h.statement ?? h.title };
 }
 
 function ensureGitignore(dataDir: string): void {

@@ -11,6 +11,7 @@ import type {
   TreeState,
 } from './types.js';
 import { STAGNATION_THRESHOLD_DEFAULT, MAX_DEPTH_DEFAULT, MAX_HYPOTHESES_DEFAULT } from './defaults.js';
+import { nodeLabel, splitProse } from '@tot-mcp/shared';
 
 export class TreeManager extends EventEmitter {
   private sessions = new Map<string, Session>();
@@ -61,7 +62,7 @@ export class TreeManager extends EventEmitter {
       parentId: null,
       sessionId,
       depth: 0,
-      content: problem,
+      ...splitProse(problem),
       status: 'pending',
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' },
@@ -123,7 +124,7 @@ export class TreeManager extends EventEmitter {
       parentId: parent.id,
       sessionId: parent.sessionId,
       depth: parent.depth + 1,
-      content,
+      ...splitProse(content),
       status: 'pending' as const,
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' as const },
@@ -188,7 +189,7 @@ export class TreeManager extends EventEmitter {
       parentId: parent.id,
       sessionId: parent.sessionId,
       depth: parent.depth + 1,
-      content,
+      ...splitProse(content),
       status: 'pending',
       evidence: [],
       metadata: { createdAt: now, updatedAt: now, source: 'agent' },
@@ -490,7 +491,7 @@ export class TreeManager extends EventEmitter {
     const parent = this.getHypothesisOrThrow(parentId);
     const children = parent.children.map((id) => this.hypotheses.get(id)!).filter(Boolean);
 
-    const labels = children.map((c) => c.content.toLowerCase());
+    const labels = children.map((c) => nodeLabel(c).toLowerCase());
 
     const substringOverlaps: [string, string][] = [];
     for (let i = 0; i < labels.length; i++) {
@@ -512,7 +513,7 @@ export class TreeManager extends EventEmitter {
     let minWords: number | undefined;
     let maxWords: number | undefined;
     if (children.length >= 2) {
-      const wordCounts = children.map((c) => c.content.trim().split(/\s+/).filter(Boolean).length);
+      const wordCounts = children.map((c) => nodeLabel(c).trim().split(/\s+/).filter(Boolean).length);
       minWords = Math.min(...wordCounts);
       maxWords = Math.max(...wordCounts);
       abstractionMismatch = maxWords > minWords * 3;

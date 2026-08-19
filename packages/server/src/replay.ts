@@ -1,13 +1,26 @@
 import { subtreeContainsCorroborated } from './closure.js';
+import { normalizeHypothesisPayload } from '@tot-mcp/shared';
 import type { Evidence, Hypothesis, Session } from './types.js';
 
 /**
- * Current journal schema version, stamped on every entry written. Bump when the
- * on-disk entry/payload shape changes incompatibly; {@link applyEntry} can then
- * branch on `entry.v` to upcast older entries. Entries with no `v` predate
- * versioning and are treated as v1.
+ * Current journal schema version, stamped on every entry written.
+ *
+ * Field defaulting is deliberately NOT keyed on this: {@link applyEntry} pipes
+ * every hypothesis payload through {@link normalizeHypothesisPayload}, which
+ * defaults each field from its own absence. Writers that ship at different times
+ * all stamp the version current for them while omitting fields added later, so a
+ * version-keyed branch would not fire on them.
+ *
+ * The version's remaining use is detecting a file written by a NEWER build than
+ * the reader, which is reported rather than folded silently.
  */
-export const JOURNAL_SCHEMA_VERSION = 1;
+export const JOURNAL_SCHEMA_VERSION = 2;
+
+/** True when an entry was written by a build newer than this one. Entries with
+ *  no `v` predate versioning and are older, never newer. */
+export function isFromNewerWriter(entry: JournalEntry): boolean {
+  return (entry.v ?? 1) > JOURNAL_SCHEMA_VERSION;
+}
 
 /** A journal entry as stored on disk: a timestamped, typed, versioned payload. */
 export interface JournalEntry {
@@ -78,7 +91,7 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
     }
     case 'hypothesis-added':
     case 'hypothesis-updated': {
-      upsertHypothesis(entry.payload as Hypothesis);
+      upsertHypothesis(normalizeHypothesisPayload(entry.payload));
       break;
     }
     case 'evidence-added': {

@@ -4,7 +4,7 @@ import type { Session, Hypothesis } from '../types';
 
 const session = (id = 's'): Session => ({ id, problem: 'p', rootNodeId: 'r', status: 'open', createdAt: '' });
 const hyp = (id = 'h'): Hypothesis => ({
-  id, parentId: null, sessionId: 's', depth: 0, content: id, status: 'exploring',
+  id, parentId: null, sessionId: 's', depth: 0, title: id, status: 'exploring',
   evidence: [], metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
 });
 

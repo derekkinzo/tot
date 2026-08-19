@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { applyEntry, deriveScanStatus, emptyReplayState, type JournalEntry } from '../src/replay.js';
 import type { Hypothesis, Session } from '../src/types.js';
+import { deriveTitle } from '@tot-mcp/shared';
 
 const ts = '2024-01-01T00:00:00.000Z';
 
@@ -9,7 +10,7 @@ function session(over: Partial<Session> = {}): Session {
 }
 function hyp(id: string, over: Partial<Hypothesis> = {}): Hypothesis {
   return {
-    id, parentId: null, sessionId: 's', depth: 0, content: id, status: 'exploring',
+    id, parentId: null, sessionId: 's', depth: 0, title: id, status: 'exploring',
     evidence: [], metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [], ...over,
   };
 }
@@ -20,6 +21,79 @@ function fold(...entries: JournalEntry[]) {
   for (const e of entries) applyEntry(state, e);
   return state;
 }
+
+describe('applyEntry payload normalization', () => {
+  // Field defaulting keys on each field's own absence, never on the entry's
+  // schema version: independently-shipped writers all stamp the current version
+  // while omitting fields added later, so a version-keyed branch would not fire.
+
+  /** A pre-title journal payload, hand-authored so it cannot inherit v2 defaults. */
+  const legacyPayload = {
+    id: 'h1',
+    parentId: null,
+    sessionId: 's1',
+    depth: 0,
+    content: 'Writer pool exhausts under retry storms; callers block in getConnection.',
+    score: 0.8,
+    scoreRationale: 'gut feel',
+    status: 'exploring',
+    evidence: [],
+    metadata: { createdAt: ts, updatedAt: ts, source: 'agent' },
+    children: [],
+  };
+
+  it('derives a title and keeps the prose as the statement', () => {
+    expect('title' in legacyPayload).toBe(false); // guards against re-blinding the fixture
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: legacyPayload } as JournalEntry);
+    const h = s.hypotheses[0];
+    expect(h.title).toBe(deriveTitle(legacyPayload.content));
+    expect(h.statement).toBe(legacyPayload.content);
+  });
+
+  it('strips fields that are no longer part of the contract', () => {
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: legacyPayload } as JournalEntry);
+    const h = s.hypotheses[0] as unknown as Record<string, unknown>;
+    // Left in place, these would be re-journaled into every future snapshot.
+    expect('content' in h).toBe(false);
+    expect('score' in h).toBe(false);
+    expect('scoreRationale' in h).toBe(false);
+  });
+
+  it('preserves optional fields the contract still carries', () => {
+    const withConclusion = {
+      ...legacyPayload,
+      status: 'eliminated',
+      conclusion: {
+        verdict: 'eliminated', reason: 'r', timestamp: ts,
+        refutingEvidenceIds: ['e1'], supersededBy: 'self',
+      },
+    };
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: withConclusion } as JournalEntry);
+    expect(s.hypotheses[0].conclusion?.refutingEvidenceIds).toEqual(['e1']);
+    expect(s.hypotheses[0].conclusion?.supersededBy).toBe('self');
+  });
+
+  it('normalizes an update payload too, so a mixed-version file folds consistently', () => {
+    // A file spanning an upgrade holds a pre-title add followed by a current
+    // update for the same id; the update replaces the node wholesale.
+    const s = fold(
+      { timestamp: ts, type: 'hypothesis-added', payload: legacyPayload } as JournalEntry,
+      { timestamp: ts, type: 'hypothesis-updated', payload: { ...legacyPayload, status: 'corroborated' } } as JournalEntry,
+    );
+    expect(s.hypotheses).toHaveLength(1);
+    expect(s.hypotheses[0].status).toBe('corroborated');
+    expect(s.hypotheses[0].title).toBe(deriveTitle(legacyPayload.content));
+    expect(s.hypotheses[0].statement).toBe(legacyPayload.content);
+  });
+
+  it('leaves an authored title untouched rather than re-deriving it', () => {
+    const authored = { ...legacyPayload, title: 'Writer pool exhaustion', content: undefined, statement: 'The long form.' };
+    delete (authored as Record<string, unknown>).content;
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: authored } as JournalEntry);
+    expect(s.hypotheses[0].title).toBe('Writer pool exhaustion');
+    expect(s.hypotheses[0].statement).toBe('The long form.');
+  });
+});
 
 describe('applyEntry (shared event interpreter)', () => {
   it('reconstructs a session + hypotheses in order', () => {

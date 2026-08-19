@@ -5,6 +5,7 @@ import { Persistence } from './persistence.js';
 import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
+import { nodeLabel, splitProse } from '@tot-mcp/shared';
 
 // ─── Types ───
 
@@ -319,7 +320,7 @@ function renderCompactTree(
   if (visited.has(nodeId)) return `${indent}↺ (cycle)\n`;
   visited.add(nodeId);
 
-  let line = `${indent}${STATUS_ICONS[node.status]} ${node.content}\n`;
+  let line = `${indent}${STATUS_ICONS[node.status]} ${nodeLabel(node)}\n`;
 
   for (const childId of node.children) {
     line += renderCompactTree(hypotheses, childId, indent + '  ', visited);

@@ -11,7 +11,11 @@ export type {
   Session,
   TreeEvent,
 } from '@tot-mcp/shared';
-export { isPruned, isLive, isTerminal, isOpen, countSupporting, countRefuting } from '@tot-mcp/shared';
+export {
+  isPruned, isLive, isTerminal, isOpen,
+  countSupporting, countRefuting,
+  deriveTitle, nodeLabel, splitProse, TITLE_MAX_LENGTH,
+} from '@tot-mcp/shared';
 
 import type { HypothesisStatus } from '@tot-mcp/shared';
 

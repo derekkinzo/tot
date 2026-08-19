@@ -1,7 +1,7 @@
 import type { Node, Edge } from '@xyflow/react';
 import { flextree } from 'd3-flextree';
 import { hierarchy } from 'd3-hierarchy';
-import { isPruned, type Hypothesis, type HypothesisData } from '../types';
+import { isPruned, nodeLabel, type Hypothesis, type HypothesisData } from '../types';
 import { HIGHLIGHT_COLORS } from '../theme';
 import { walkToRoot } from '../tree/walk';
 
@@ -126,7 +126,7 @@ export function computeLayout(
       type: 'hypothesis',
       position: { x: treeNode.x - NODE_WIDTH / 2, y: treeNode.y },
       data: {
-        label: h.content,
+        label: nodeLabel(h),
         status: h.status,
         evidenceCount: h.evidence.length,
         selected: id === selectedId,

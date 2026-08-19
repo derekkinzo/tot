@@ -1,4 +1,4 @@
-import type { Hypothesis } from '../types';
+import { nodeLabel, type Hypothesis } from '../types';
 import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
 import { conclusionStatus } from '../tree/conclusion';
 
@@ -56,7 +56,7 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
       {/* Content */}
       <div>
         <div style={{ fontSize: 18, fontWeight: 500, lineHeight: 1.4, color: '#e1e4e8' }}>
-          {hypothesis.content}
+          {hypothesis.statement ?? nodeLabel(hypothesis)}
         </div>
       </div>
 

@@ -8,7 +8,7 @@ function hyp(id: string, over: Partial<Hypothesis> = {}): Hypothesis {
     parentId: null,
     sessionId: 's1',
     depth: 0,
-    content: `content ${id}`,
+    title: `content ${id}`,
     status: 'pending',
     evidence: [],
     metadata: { createdAt: 't', updatedAt: 't', source: 'agent' },
@@ -23,9 +23,9 @@ const session = (over: Partial<Session> = {}): Session => ({
 describe('generateMarkdown', () => {
   it('renders the tree with status icons, evidence counts, and nested children', () => {
     const map = new Map<string, Hypothesis>();
-    map.set('root', hyp('root', { content: 'Root', status: 'exploring', children: ['a'] }));
+    map.set('root', hyp('root', { title: 'Root', status: 'exploring', children: ['a'] }));
     map.set('a', hyp('a', {
-      content: 'Child A', status: 'corroborated', parentId: 'root', depth: 1,
+      title: 'Child A', status: 'corroborated', parentId: 'root', depth: 1,
       conclusion: { verdict: 'corroborated', reason: 'survived', timestamp: 't' },
       evidence: [{ id: 'e1', type: 'supports', content: 'good', timestamp: 't' }],
     }));
@@ -41,9 +41,9 @@ describe('generateMarkdown', () => {
     // A corrupt/hand-edited journal can produce a cycle (a→b→a). Every other
     // tree walk in the codebase guards against this; the export must too.
     const map = new Map<string, Hypothesis>();
-    map.set('root', hyp('root', { content: 'Root', children: ['a'] }));
-    map.set('a', hyp('a', { content: 'A', parentId: 'root', depth: 1, children: ['b'] }));
-    map.set('b', hyp('b', { content: 'B', parentId: 'a', depth: 2, children: ['a'] })); // cycle back to a
+    map.set('root', hyp('root', { title: 'Root', children: ['a'] }));
+    map.set('a', hyp('a', { title: 'A', parentId: 'root', depth: 1, children: ['b'] }));
+    map.set('b', hyp('b', { title: 'B', parentId: 'a', depth: 2, children: ['a'] })); // cycle back to a
 
     let md = '';
     expect(() => { md = generateMarkdown(session({ rootNodeId: 'root' }), map); }).not.toThrow();

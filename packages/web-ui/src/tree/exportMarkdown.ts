@@ -1,5 +1,5 @@
 import type { Hypothesis, Session } from '../types';
-import { countSupporting, countRefuting } from '../types';
+import { countSupporting, countRefuting, nodeLabel } from '../types';
 import { STATUS_NODE_STYLES } from '../theme';
 import { conclusionStatus } from './conclusion';
 
@@ -46,7 +46,7 @@ function renderNode(
     ? ` (${countSupporting(node)} supporting, ${countRefuting(node)} refuting)`
     : '';
 
-  lines.push(`${indent}- ${icon} **${node.content}**${ev} [${node.status}]`);
+  lines.push(`${indent}- ${icon} **${nodeLabel(node)}**${ev} [${node.status}]`);
 
   const concl = conclusionStatus(node);
   if (concl) {

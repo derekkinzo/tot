@@ -8,7 +8,7 @@ function hyp(id: string, over: Partial<Hypothesis> = {}): Hypothesis {
     parentId: null,
     sessionId: 's1',
     depth: 0,
-    content: `content ${id}`,
+    title: `content ${id}`,
     status: 'pending',
     evidence: [],
     metadata: { createdAt: 't', updatedAt: 't', source: 'agent' },

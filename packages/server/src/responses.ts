@@ -48,6 +48,7 @@ import {
   suggestsElimination,
   lacksDiagnosticity,
 } from './advisories.js';
+import { nodeLabel } from '@tot-mcp/shared';
 import { pickActiveSession } from './persistence.js';
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
@@ -134,9 +135,9 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   // node on follow-up.
   if (parent) {
     result += `\nStructural review (overlap, coverage, level, testability):\n`;
-    result += `  Parent: "${truncate(parent.content, 80)}"\n`;
+    result += `  Parent: "${nodeLabel(parent)}"\n`;
     for (const c of children) {
-      result += `  - ${c.id.slice(0, 8)}: "${truncate(c.content, 80)}"\n`;
+      result += `  - ${c.id.slice(0, 8)}: "${nodeLabel(c)}"\n`;
     }
   }
   result += `\n── Protocol ──\n`;
@@ -152,7 +153,7 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
   const activeSiblings = siblings.filter((s) => isLive(s.status));
 
   let result = JSON.stringify({ hypothesisId: hypothesis.id }) + '\n\n' +
-    `✓ Added hypothesis: "${truncate(hypothesis.content, 60)}"\n\n`;
+    `✓ Added hypothesis: "${nodeLabel(hypothesis)}"\n\n`;
 
   result += `── Sibling Review ──\n`;
   result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
@@ -180,7 +181,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   const openSiblings = siblings.filter((s) => isOpen(s.status));
 
   let result = JSON.stringify({ hypothesisId, evidenceCount: hypothesis.evidence.length }) + '\n\n' +
-    `✓ Evidence added to "${truncate(hypothesis.content, 50)}"\n\n`;
+    `✓ Evidence added to "${nodeLabel(hypothesis)}"\n\n`;
 
   // Evidence matrix across siblings
   result += `── Evidence Matrix ──\n`;
@@ -189,7 +190,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     const s = h.evidence.filter((e) => e.type === 'supports').length;
     const r = h.evidence.filter((e) => e.type === 'refutes').length;
     const marker = h.id === hypothesisId ? ' ←' : '';
-    result += `  ${truncate(h.content, 30)}: +${s} -${r}${marker}\n`;
+    result += `  ${nodeLabel(h)}: +${s} -${r}${marker}\n`;
   }
 
   // Baseline prompt: first evidence on this hypothesis
@@ -216,7 +217,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   // Unexplored siblings warning
   const unexplored = activeSiblings.filter((s) => s.evidence.length === 0);
   if (unexplored.length > 0) {
-    result += `\nUnexplored: ${unexplored.map((u) => truncate(u.content, 25)).join(', ')}\n`;
+    result += `\nUnexplored: ${unexplored.map((u) => nodeLabel(u)).join(', ')}\n`;
   }
 
   // Elimination nudge (Bacon/Mill eliminative induction)
@@ -230,7 +231,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     // non-empty here (lacksDiagnosticity requires it), and excludes
     // corroborated siblings (settled verdicts, not competitors).
     const topSibling = openSiblings[0];
-    result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
+    result += `\nDiagnosticity: Would this also hold if "${nodeLabel(topSibling)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
   }
 
   // Stale tree detection
@@ -239,14 +240,14 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     const session = tm.getActiveSession();
     result += `\n── Context (${Math.floor(secsSinceLastCall / 60)}m since last update) ──\n`;
     if (session) result += `Problem: "${truncate(session.problem, 50)}"\n`;
-    result += `You were testing: "${truncate(hypothesis.content, 40)}"\n`;
+    result += `You were testing: "${nodeLabel(hypothesis)}"\n`;
   }
 
   // Protocol — with specific named siblings for adversarial questions
   result += `\n── Protocol ──\n`;
   if (openSiblings.length > 0 && hypothesis.evidence.length >= 2 && refuting === 0) {
     const topSibling = openSiblings[0];
-    result += `What observation would be TRUE if "${truncate(hypothesis.content, 25)}" but FALSE if "${truncate(topSibling.content, 25)}"?\n`;
+    result += `What observation would be TRUE if "${nodeLabel(hypothesis)}" but FALSE if "${nodeLabel(topSibling)}"?\n`;
   } else if (activeSiblings.length > 1) {
     result += `Does this evidence also bear on sibling hypotheses?\n`;
   }
@@ -266,11 +267,11 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   const remainingOpen = siblings.filter((s) => isOpen(s.status));
 
   let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'eliminated' }) + '\n\n' +
-    `✓ Eliminated "${truncate(hypothesis.content, 50)}"\n` +
+    `✓ Eliminated "${nodeLabel(hypothesis)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
 
   result += `── Signals ──\n`;
-  result += `Remaining: ${remaining.length} (${remaining.map((r) => truncate(r.content, 25)).join(', ')})\n`;
+  result += `Remaining: ${remaining.length} (${remaining.map((r) => nodeLabel(r)).join(', ')})\n`;
 
   if (remaining.length === 1 && remainingOpen.length === 1) {
     result += `\n→ Only 1 hypothesis remains. Before corroborating, apply a SEVERE TEST:\n`;
@@ -304,7 +305,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     status: 'corroborated',
     sessionStatus: state?.session.status ?? 'open',
   }) + '\n\n' +
-    `✓ Corroborated "${truncate(hypothesis.content, 50)}"\n` +
+    `✓ Corroborated "${nodeLabel(hypothesis)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
 
   if (sessionResolved) {
@@ -315,7 +316,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     if (corroboratedLeaves.length > 1) {
       result += `${corroboratedLeaves.length} corroborated leaves (multiple co-instantiated contributors are admissible — Mackie INUS):\n`;
       for (const h of corroboratedLeaves) {
-        result += `  - ${h.id.slice(0, 8)}: "${truncate(h.content, 60)}"\n`;
+        result += `  - ${h.id.slice(0, 8)}: "${nodeLabel(h)}"\n`;
       }
     }
     result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
@@ -330,7 +331,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     result += `── Resolution pending ──\n`;
     result += `${open.length} hypothes${open.length === 1 ? 'is' : 'es'} still open:\n`;
     for (const h of open) {
-      result += `  - ${h.id.slice(0, 8)} [${h.status}]: "${truncate(h.content, 60)}"\n`;
+      result += `  - ${h.id.slice(0, 8)} [${h.status}]: "${nodeLabel(h)}"\n`;
     }
     result += `\nEach must be eliminated (with refuting evidence), corroborated, or set_out_of_scope before the session resolves.\n`;
   }
@@ -348,7 +349,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
 
 export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): string {
   let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'out-of-scope' }) + '\n\n' +
-    `⊘ Out-of-scope "${truncate(hypothesis.content, 50)}"\n` +
+    `⊘ Out-of-scope "${nodeLabel(hypothesis)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
   result += `Branch set aside without investigation. The audit trail records the choice; closure treats this as pruning.\n`;
   result += '\n' + formatTreeSummary(tm);
@@ -422,7 +423,7 @@ export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null
   if (session.status === 'open') {
     if (breakdown.activeParts.length > 0) result += `Active: ${breakdown.activeParts.join(', ')}\n`;
     if (unexplored.length > 0) {
-      result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
+      result += `Unexplored: ${unexplored.map((u) => nodeLabel(u)).join(', ')}\n`;
     }
     if (stagnant) {
       result += `\n⚠ STAGNATION: Multiple mutations without progress.\n`;

@@ -17,7 +17,7 @@ import Breadcrumb from './Breadcrumb';
 import Legend from './Legend';
 import FollowIndicator from './FollowIndicator';
 import SessionSelector from './SessionSelector';
-import { type Hypothesis, type Session } from '../types';
+import { nodeLabel, type Hypothesis, type Session } from '../types';
 import { STATUS_COLORS } from '../theme';
 import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
 import { nextNavTarget } from '../hooks/navTarget';
@@ -222,7 +222,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
         if (h) {
           // Swallow a rejected writeText Promise (unfocused doc / denied
           // permission) so it doesn't surface as an unhandledrejection.
-          void Promise.resolve(navigator.clipboard?.writeText(h.content)).catch(() => {});
+          void Promise.resolve(navigator.clipboard?.writeText(h.statement ?? nodeLabel(h))).catch(() => {});
         }
         break;
       }

@@ -12,13 +12,13 @@ function ev(type: Evidence['type'], content = 'x', source?: string): Evidence {
 }
 function hyp(evidence: Evidence[], status: HypothesisStatus = 'exploring'): Hypothesis {
   return {
-    id: 'h', parentId: 'root', sessionId: 's', depth: 1, content: 'h', status,
+    id: 'h', parentId: 'root', sessionId: 's', depth: 1, title: 'h', status,
     evidence, metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
   };
 }
 function sib(id: string, status: HypothesisStatus, evidence: Evidence[] = []): Hypothesis {
   return {
-    id, parentId: 'root', sessionId: 's', depth: 1, content: id, status,
+    id, parentId: 'root', sessionId: 's', depth: 1, title: id, status,
     evidence, metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
   };
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { TreeManager, TreeError } from '../src/tree-manager.js';
 import type { TreeEvent } from '../src/types.js';
+import { TITLE_MAX_LENGTH } from '@tot-mcp/shared';
 
 describe('TreeManager', () => {
   let tm: TreeManager;
@@ -21,7 +22,7 @@ describe('TreeManager', () => {
       expect(root.parentId).toBeNull();
       expect(root.depth).toBe(0);
       expect(root.status).toBe('pending');
-      expect(root.content).toBe('Why is the API slow?');
+      expect(root.title).toBe('Why is the API slow?');
     });
 
     it('rejects empty problem string', () => {
@@ -48,7 +49,7 @@ describe('TreeManager', () => {
       expect(children).toHaveLength(3);
       expect(children[0].parentId).toBe(root.id);
       expect(children[0].depth).toBe(1);
-      expect(children[0].content).toBe('Cause A');
+      expect(children[0].title).toBe('Cause A');
       expect(children[0].status).toBe('pending');
       expect(root.children).toHaveLength(3);
     });
@@ -121,7 +122,7 @@ describe('TreeManager', () => {
       const { root } = tm.createSession('Problem');
       const h = tm.addHypothesis(root.id, 'New idea');
       expect(h.parentId).toBe(root.id);
-      expect(h.content).toBe('New idea');
+      expect(h.title).toBe('New idea');
       expect(h.status).toBe('pending');
       expect(root.children).toContain(h.id);
     });
@@ -344,13 +345,13 @@ describe('TreeManager', () => {
       const now = new Date().toISOString();
       const session = { id: 'sx', problem: 'P', rootNodeId: 'root', status: 'open' as const, createdAt: now };
       const root = {
-        id: 'root', parentId: null, sessionId: 'sx', depth: 0, content: 'P',
+        id: 'root', parentId: null, sessionId: 'sx', depth: 0, title: 'P',
         status: 'exploring' as const, evidence: [],
         metadata: { createdAt: now, updatedAt: now, source: 'agent' as const },
         children: ['present', 'missing'],
       };
       const present = {
-        id: 'present', parentId: 'root', sessionId: 'sx', depth: 1, content: 'present child',
+        id: 'present', parentId: 'root', sessionId: 'sx', depth: 1, title: 'present child',
         status: 'eliminated' as const,
         conclusion: { verdict: 'eliminated' as const, reason: 'r', timestamp: now },
         evidence: [{ id: 'e', type: 'refutes' as const, content: 'x', timestamp: now }],
@@ -1026,7 +1027,7 @@ describe('TreeManager', () => {
       const children = tm.decompose(root.id, ['A', 'B', 'C']);
       const siblings = tm.getSiblings(children[0].id);
       expect(siblings).toHaveLength(2);
-      expect(siblings.map((s) => s.content).sort()).toEqual(['B', 'C']);
+      expect(siblings.map((s) => s.title).sort()).toEqual(['B', 'C']);
     });
 
     it('returns empty for root', () => {
@@ -1038,10 +1039,13 @@ describe('TreeManager', () => {
   // --- Boundary conditions ---
 
   describe('boundary conditions', () => {
-    it('handles long content strings', () => {
+    it('bounds the label of a long problem statement while preserving the prose', () => {
       const longContent = 'x'.repeat(10_000);
       const { root } = tm.createSession(longContent);
-      expect(root.content).toHaveLength(10_000);
+      // The label is what a canvas renders, so it stays within the bound; the
+      // full statement is retained for surfaces that have room for prose.
+      expect(root.title.length).toBeLessThanOrEqual(TITLE_MAX_LENGTH);
+      expect(root.statement).toHaveLength(10_000);
     });
 
     it('handles many children on one node', () => {

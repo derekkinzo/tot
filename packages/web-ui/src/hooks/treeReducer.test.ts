@@ -8,7 +8,7 @@ function hyp(id: string, over: Partial<Hypothesis> = {}): Hypothesis {
     parentId: null,
     sessionId: 's1',
     depth: 0,
-    content: `content ${id}`,
+    title: `content ${id}`,
     status: 'pending',
     evidence: [],
     metadata: { createdAt: 't', updatedAt: 't', source: 'agent' },
@@ -48,7 +48,7 @@ describe('treeReducer', () => {
 
   it('hypothesis-added inserts the node and records it as lastAddedId', () => {
     const next = reducer(initialTreeState(), { type: 'hypothesis-added', hypothesis: hyp('x') });
-    expect(next.hypotheses.get('x')?.content).toBe('content x');
+    expect(next.hypotheses.get('x')?.title).toBe('content x');
     expect(next.lastAddedId).toBe('x');
   });
 

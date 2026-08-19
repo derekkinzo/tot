@@ -102,12 +102,12 @@ describe('Persistence Roundtrip', () => {
     expect(sessions[0].problem).toBe('Persistent problem');
 
     expect(hypotheses).toHaveLength(4); // root + 3 children
-    const hypothesisA = hypotheses.find((h) => h.content === 'Cause A');
+    const hypothesisA = hypotheses.find((h) => h.title === 'Cause A');
     expect(hypothesisA?.status).toBe('exploring');
     expect(hypothesisA?.evidence).toHaveLength(1);
     expect(hypothesisA?.evidence[0].content).toBe('Evidence for A');
 
-    const hypothesisB = hypotheses.find((h) => h.content === 'Cause B');
+    const hypothesisB = hypotheses.find((h) => h.title === 'Cause B');
     expect(hypothesisB?.status).toBe('eliminated');
     expect(hypothesisB?.conclusion?.reason).toBe('B is ruled out');
   });
@@ -257,7 +257,9 @@ describe('Persistence Roundtrip', () => {
     expect(sessions[0].id).toBe(sessionId);
     const root = hypotheses.find((h) => h.id === rootId);
     expect(root).toBeDefined();
-    expect(root!.content).toBe('Root');
+    // A pre-title journal payload becomes a derived label plus the retained prose.
+    expect(root!.title).toBe('Root');
+    expect(root!.statement).toBe('Root');
     expect(root!.status).toBe('exploring');
     // Replay reconstructs via a structural cast, so the legacy `score` key
     // survives as an inert property — no code reads it. The contract is that
