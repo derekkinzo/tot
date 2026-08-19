@@ -20,6 +20,7 @@ import SessionSelector from './SessionSelector';
 import { type Hypothesis, type Session } from '../types';
 import { STATUS_COLORS } from '../theme';
 import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
+import { nextNavTarget } from '../hooks/navTarget';
 
 const FIT_MAX_ZOOM = 1.5;
 const FIT_PADDING_FOCUSED = 0.3;
@@ -165,29 +166,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
         setContextMenu(null);
         return;
       }
-      if (!selectedId) return;
-      const h = hypotheses.get(selectedId);
-      if (!h) return;
-
-      let targetId: string | null = null;
-      switch (e.key) {
-        case 'ArrowUp':
-          if (h.parentId) targetId = h.parentId;
-          break;
-        case 'ArrowDown':
-          if (h.children.length > 0) targetId = h.children[0];
-          break;
-        case 'ArrowLeft':
-        case 'ArrowRight': {
-          if (!h.parentId) break;
-          const parent = hypotheses.get(h.parentId);
-          if (!parent) break;
-          const idx = parent.children.indexOf(selectedId);
-          const next = idx + (e.key === 'ArrowLeft' ? -1 : 1);
-          if (next >= 0 && next < parent.children.length) targetId = parent.children[next];
-          break;
-        }
-      }
+      const targetId = nextNavTarget(e.key, selectedId, hypotheses);
       if (targetId) {
         e.preventDefault();
         onSelect(targetId);
