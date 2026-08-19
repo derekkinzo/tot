@@ -128,3 +128,38 @@ export const countSupporting = (h: Hypothesis): number =>
   h.evidence.filter((e) => e.type === 'supports').length;
 export const countRefuting = (h: Hypothesis): number =>
   h.evidence.filter((e) => e.type === 'refutes').length;
+
+// ─── Titles ───
+
+/** Longest label a hypothesis title may render as. */
+export const TITLE_MAX_LENGTH = 80;
+
+/** Sentence boundary: a period, then space, then the start of a new sentence.
+ *  Requiring a capital keeps "e.g. foo" and "v1.2 bar" intact. */
+const SENTENCE_BOUNDARY = /\.\s+(?=[A-Z])/;
+
+/**
+ * Projects free-form prose onto a single-line label of at most
+ * {@link TITLE_MAX_LENGTH} characters: collapses whitespace, keeps the first
+ * sentence, drops a trailing period, and — when still too long — cuts on a word
+ * boundary and appends an ellipsis.
+ *
+ * Idempotent, and returns an empty string for blank input. Used to render a
+ * label for a hypothesis that carries only long-form prose; it derives a label
+ * for display and never rewrites the stored text.
+ */
+export function deriveTitle(prose: string): string {
+  const flat = prose.replace(/\s+/g, ' ').trim();
+  if (flat === '') return '';
+
+  const firstSentence = flat.split(SENTENCE_BOUNDARY)[0].replace(/\.+$/, '').trim();
+  if (firstSentence === '') return '';
+  if (firstSentence.length <= TITLE_MAX_LENGTH) return firstSentence;
+
+  // Reserve the last position for the ellipsis, then prefer the last word
+  // boundary inside the budget; a single unbroken token has none, so cut it.
+  const budget = firstSentence.slice(0, TITLE_MAX_LENGTH - 1);
+  const lastSpace = budget.lastIndexOf(' ');
+  const cut = lastSpace > 0 ? budget.slice(0, lastSpace) : budget;
+  return `${cut.trimEnd()}…`;
+}
