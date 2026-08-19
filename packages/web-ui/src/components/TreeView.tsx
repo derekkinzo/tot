@@ -22,6 +22,7 @@ import { STATUS_COLORS } from '../theme';
 import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
 import { nextNavTarget } from '../hooks/navTarget';
 import { canvasOwnsKey, type KeyTarget } from '../hooks/keyboardOwnership';
+import { HEADER_TEXT_MAX_WIDTH } from '../geometry';
 
 const FIT_MAX_ZOOM = 1.5;
 const FIT_PADDING_FOCUSED = 0.3;
@@ -275,7 +276,13 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
                 <span style={{ color: connected ? '#3fb950' : '#f85149' }}>●</span>
                 {session ? (
                   <>
-                    <span>{session.problem.slice(0, 50)}{session.problem.length > 50 ? '...' : ''}</span>
+                    <span
+                      title={session.problem}
+                      style={{
+                        maxWidth: HEADER_TEXT_MAX_WIDTH, overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >{session.problem}</span>
                     <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onSelect(null); }} />
                   </>
                 ) : (

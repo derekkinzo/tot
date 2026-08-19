@@ -1,6 +1,7 @@
 import { memo, useState, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { STATUS_NODE_STYLES, EVIDENCE_TYPE_COLORS } from '../theme';
+import { NODE_WIDTH } from '../geometry';
 import { isPruned, type HypothesisData } from '../types';
 
 export type { HypothesisData };
@@ -36,9 +37,7 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           border: `2px solid ${borderColor}`,
           borderRadius: 8,
           padding: '10px 14px',
-          minWidth: 160,
-          maxWidth: 240,
-          width: 220,
+          width: NODE_WIDTH,
           opacity: pruned ? 0.5 : 1,
           boxShadow: d.onPath ? '0 0 12px rgba(88, 166, 255, 0.3)' : undefined,
           cursor: 'pointer',

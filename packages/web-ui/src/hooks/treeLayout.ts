@@ -5,6 +5,7 @@ import { isPruned, nodeLabel, sessionIsGrounded, type Hypothesis, type Hypothesi
 import { evidenceLedger } from '../tree/evidenceView';
 import { splitBadge, splitConflicts } from '../tree/splitView';
 import { HIGHLIGHT_COLORS } from '../theme';
+import { NODE_WIDTH, NODE_HEIGHT, NODE_GAP_X, NODE_GAP_Y } from '../geometry';
 import { walkToRoot } from '../tree/walk';
 
 /**
@@ -13,8 +14,6 @@ import { walkToRoot } from '../tree/walk';
  * computation (including transient-orphan adoption).
  */
 
-const NODE_WIDTH = 240;
-const NODE_HEIGHT = 100;
 
 /** Returns the set of node ids on the path from `nodeId` up to the root. */
 export function getPathToRoot(nodeId: string, hypotheses: Map<string, Hypothesis>): Set<string> {
@@ -106,7 +105,7 @@ export function computeLayout(
 
   // Run flextree layout (keeps children grouped under parent)
   const layout = flextree<TreeData>()
-    .nodeSize(() => [NODE_WIDTH + 40, NODE_HEIGHT + 60])
+    .nodeSize(() => [NODE_WIDTH + NODE_GAP_X, NODE_HEIGHT + NODE_GAP_Y])
     .spacing((a, b) => (a.parent === b.parent ? 20 : 40));
 
   const tree = layout(root);

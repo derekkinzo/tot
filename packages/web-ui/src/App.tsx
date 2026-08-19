@@ -5,6 +5,7 @@ import TreeView from './components/TreeView';
 import DetailPanel from './components/DetailPanel';
 import ArtifactViewer from './components/ArtifactViewer';
 import { canvasOwnsKey, type KeyTarget } from './hooks/keyboardOwnership';
+import { DETAIL_PANEL_WIDTH } from './geometry';
 import type { ArtifactRef } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -104,7 +105,7 @@ export default function App() {
         <ErrorBoundary
           fallback={
             <div style={{
-              width: 400, borderLeft: '1px solid #30363d', background: '#161b22',
+              width: DETAIL_PANEL_WIDTH, borderLeft: '1px solid #30363d', background: '#161b22',
               padding: 24, color: '#8b949e',
             }}>
               Failed to render detail panel.

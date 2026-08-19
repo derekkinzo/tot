@@ -2,6 +2,7 @@ import { gateLabel, gateMeaning, nodeLabel, type ArtifactRef, type Evidence, typ
 import { orderEvidenceRows } from '../tree/evidenceView';
 import { artifactSummary } from '../tree/artifactView';
 import { splitConflicts } from '../tree/splitView';
+import { DETAIL_PANEL_WIDTH } from '../geometry';
 import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
 import { conclusionStatus } from '../tree/conclusion';
 
@@ -31,7 +32,8 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
 
   return (
     <div style={{
-      width: 400,
+      width: DETAIL_PANEL_WIDTH,
+      flexShrink: 0,
       borderLeft: '1px solid #30363d',
       background: '#161b22',
       padding: '24px',
