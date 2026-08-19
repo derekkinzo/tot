@@ -211,7 +211,7 @@ describe('verbatim evidence capture, end to end', () => {
     const rootId = await rootOf(client);
     const children: any = await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['the linker', 'the test runner'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['the linker', 'the test runner'] },
     });
     expect(children.isError).toBeFalsy();
     const { hypotheses } = await state(s);

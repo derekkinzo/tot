@@ -70,6 +70,28 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           {d.label}
         </div>
 
+        {/* How this node was split, stated as declared. Amber when the verdicts
+            recorded under it contradict that declaration. */}
+        {d.split && (
+          <div
+            title={d.split.conflicted ? `${d.split.title}\n\nThe verdicts recorded under this split contradict it — open the node for detail.` : d.split.title}
+            style={{
+              display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4,
+              fontSize: 10, color: d.split.conflicted ? '#d29922' : '#6b7280',
+            }}
+          >
+            {d.split.conflicted && <span aria-hidden>⚠</span>}
+            {d.split.label && (
+              <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                {d.split.label}
+              </span>
+            )}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {d.split.axis}
+            </span>
+          </div>
+        )}
+
         {/* Footer: evidence ledger + collapse chevron. Refutation leads, and
             support is never given equal visual weight — evidence that has faced
             no refutation is the bias the method exists to counter. */}

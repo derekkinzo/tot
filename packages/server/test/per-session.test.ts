@@ -173,7 +173,7 @@ describe('per-session server', () => {
       await c1.callTool({ name: 'create_tree', arguments: { problem: 'Terminal then reload' } }),
     );
     const { childIds } = parseResult(
-      await c1.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+      await c1.callTool({ name: 'decompose', arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] } }),
     );
     await c1.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
     await c1.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
@@ -210,7 +210,7 @@ describe('per-session server', () => {
       await client.callTool({ name: 'create_tree', arguments: { problem: 'Closes fully' } }),
     );
     const { childIds } = parseResult(
-      await client.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+      await client.callTool({ name: 'decompose', arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] } }),
     );
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });

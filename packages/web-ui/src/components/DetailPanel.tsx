@@ -1,18 +1,23 @@
-import { nodeLabel, type ArtifactRef, type Evidence, type Hypothesis } from '../types';
+import { gateLabel, gateMeaning, nodeLabel, type ArtifactRef, type Evidence, type Hypothesis } from '../types';
 import { orderEvidenceRows } from '../tree/evidenceView';
 import { artifactSummary } from '../tree/artifactView';
+import { splitConflicts } from '../tree/splitView';
 import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
 import { conclusionStatus } from '../tree/conclusion';
 
 interface Props {
   hypothesis: Hypothesis;
+  /** The session's nodes, needed to read the verdicts under this node's split. */
+  hypotheses: Map<string, Hypothesis>;
   onClose: () => void;
   /** Opens the captured bytes a record cites. Raised to the layer that owns
    *  overlays, so the viewer can take the keyboard from the canvas. */
   onOpenArtifact?: (artifact: ArtifactRef, claim: string) => void;
 }
 
-export default function DetailPanel({ hypothesis, onClose, onOpenArtifact }: Props) {
+export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArtifact }: Props) {
+  const split = hypothesis.decomposition;
+  const conflicts = splitConflicts(hypothesis, hypotheses);
   const statusColor = STATUS_COLORS[hypothesis.status] ?? STATUS_COLORS.pending;
   const statusLabel = STATUS_LABELS[hypothesis.status] ?? STATUS_LABELS.pending;
   // A partial/legacy stream record may be missing optional arrays or a valid
@@ -65,6 +70,37 @@ export default function DetailPanel({ hypothesis, onClose, onOpenArtifact }: Pro
           {hypothesis.statement ?? nodeLabel(hypothesis)}
         </div>
       </div>
+
+      {/* How this node was split: the dimension its children divide and what
+          the declared relation commits to, followed by any verdict recorded
+          under it that contradicts that declaration. */}
+      {split && hypothesis.children.length > 0 && (
+        <div style={{ background: '#1c1f26', borderRadius: 8, padding: '12px 14px' }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+            letterSpacing: 0.5, color: '#8b949e', marginBottom: 6,
+          }}>
+            Split into {hypothesis.children.length}
+          </div>
+          <div style={{ fontSize: 14, color: '#e1e4e8' }}>{split.axis}</div>
+          <div style={{ fontSize: 12, color: '#8b949e', marginTop: 6 }}>
+            {split.gate
+              ? <><strong style={{ color: '#c9d1d9' }}>{gateLabel(split.gate)}</strong> — {gateMeaning(split.gate)}</>
+              : 'How these children relate was not declared.'}
+          </div>
+          {conflicts.map((conflict, i) => (
+            <div key={i} style={{
+              marginTop: 10, padding: '8px 10px', borderRadius: 6,
+              background: '#3d2f1d', color: '#f0d58c', fontSize: 12, lineHeight: 1.45,
+            }}>
+              ⚠ {conflict.message}
+              <div style={{ marginTop: 4, color: '#d29922' }}>
+                {conflict.nodes.map((n) => n.label).join(', ')}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Conclusion. A reopen-on-refute leaves the conclusion record on the
           hypothesis but demotes status back to 'exploring'; the banner is

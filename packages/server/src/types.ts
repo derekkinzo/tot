@@ -3,6 +3,8 @@
 // importers are unaffected.
 export type {
   ArtifactRef,
+  Decomposition,
+  DecompositionGate,
   ArtifactDigest,
   EvidenceKind,
   HypothesisDraft,

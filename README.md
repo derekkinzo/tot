@@ -103,7 +103,7 @@ tree. Each MCP server instance picks its own free port at startup.
 | Tool | Purpose |
 |------|---------|
 | `create_tree` | Start a new reasoning session with a problem statement |
-| `decompose` | Split a hypothesis into sibling sub-hypotheses comparable along one axis |
+| `decompose` | Split a hypothesis into sibling sub-hypotheses along a stated axis, declaring how they relate |
 | `add_hypothesis` | Add a missed hypothesis to the tree |
 | `add_evidence` | Attach supporting/refuting/neutral evidence, optionally capturing a log or command output verbatim |
 | `eliminate_hypothesis` | Mark a hypothesis as a dead end (with reason) |
@@ -165,6 +165,33 @@ port and reports the URL in the `get_status` tool response
   cites, with the lines it rests on highlighted
 - **Follow mode** — auto-tracks agent activity (press F to toggle)
 - **Export** — download tree as Markdown
+
+## Branches, axes, and how MECE applies
+
+Every node in the tree is a hypothesis. Being a branch is structural, not a
+different kind of thing: a branch is a claim whose children are the ways it
+could be true, or the parts it requires.
+
+Each split records two things the agent declares:
+
+- **Axis** — the single dimension the children divide, such as "by subsystem"
+  or "by lifecycle stage". Siblings can only be judged for overlap or coverage
+  against a stated dimension, and naming it exposes a split that is really two
+  splits at once.
+- **Gate** — how the children relate to the claim above them: `one-of` for
+  rivals where at most one holds, `any-of` for alternatives that may hold
+  together, `all-of` for parts that must all hold.
+
+The gate is what makes the two halves of MECE actionable. *Mutually exclusive*
+is the claim `one-of` makes, so two corroborated rivals become a contradiction
+worth reporting. *Collectively exhaustive* is never provable from the tree, so
+it stays a question — an explicit catch-all branch is first-class when
+exhaustiveness is uncertain.
+
+Neither property is checked as a verdict. What the tools report is a conflict
+between what was declared and what the evidence settled: two survivors under
+`one-of`, a defeated part under `all-of`, or every alternative ruled out with
+the parent still standing.
 
 ## Where your trees are stored
 

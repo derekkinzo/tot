@@ -27,7 +27,37 @@ export interface Hypothesis {
   conclusion?: Conclusion;
   metadata: HypothesisMetadata;
   children: string[];
+  /** How this node was split, recorded when it was decomposed. */
+  decomposition?: Decomposition;
 }
+
+/**
+ * The shape of a split: the one dimension the children were compared along, and
+ * how they relate to the claim above them.
+ *
+ * Both are the agent's declarations, not derived properties. Recording them is
+ * what makes a decomposition checkable at all: siblings can only be judged for
+ * overlap and coverage against a stated axis, and a verdict on a child only
+ * bears on its parent through a stated relation.
+ */
+export interface Decomposition {
+  /** The dimension the children divide, such as "by subsystem" or "by timing". */
+  axis: string;
+  gate?: DecompositionGate;
+}
+
+/**
+ * How children relate to the claim above them.
+ *
+ * - `one-of`: rivals, at most one of which holds — the mutually exclusive case.
+ * - `any-of`: alternatives that may hold together, as contributing causes do
+ *   (Mackie's INUS conditions).
+ * - `all-of`: parts that must all hold for the parent to hold.
+ */
+export type DecompositionGate = 'one-of' | 'any-of' | 'all-of';
+
+/** Every gate, so callers enumerate rather than restate the union. */
+export const GATES: readonly DecompositionGate[] = ['one-of', 'any-of', 'all-of'];
 
 // 'out-of-scope': terminal but no refutation claimed — the agent set this
 // branch aside as not worth investigating, distinct from elimination which
@@ -309,6 +339,94 @@ export function titleProblem(title: string): string | null {
   if (trimmed.length > TITLE_MAX_LENGTH) return `must be at most ${TITLE_MAX_LENGTH} characters`;
   if (trimmed.endsWith('.')) return 'must read as a short label, so it must not end with a period';
   return null;
+}
+
+// ─── Decompositions ───
+
+const GATE_TEXT: Record<DecompositionGate, { label: string; meaning: string }> = {
+  'one-of': {
+    label: 'one of',
+    meaning: 'Rivals: at most one of these holds, so evidence for one counts against the others.',
+  },
+  'any-of': {
+    label: 'any of',
+    meaning: 'Alternatives: one or more may hold together, so corroborating one does not rule out the rest.',
+  },
+  'all-of': {
+    label: 'all of',
+    meaning: 'Parts: every one must hold for the claim above them to hold, so defeating any part defeats it.',
+  },
+};
+
+/** Short label for a gate, as a canvas renders it. */
+export function gateLabel(gate: DecompositionGate): string {
+  return GATE_TEXT[gate].label;
+}
+
+/** What the gate claims about the children, in one sentence. */
+export function gateMeaning(gate: DecompositionGate): string {
+  return GATE_TEXT[gate].meaning;
+}
+
+export type GateFindingKind = 'rival-survivors' | 'required-part-defeated' | 'alternatives-exhausted';
+
+/** A conflict between a declared gate and the verdicts recorded under it. */
+export interface GateFinding {
+  kind: GateFindingKind;
+  /** The children the conflict rests on. */
+  nodeIds: string[];
+  message: string;
+}
+
+/**
+ * Conflicts between how a node declared its children relate and how they were
+ * actually settled.
+ *
+ * Reports only what follows from the declaration, never whether a decomposition
+ * is exhaustive or exclusive in fact — that cannot be computed from the tree, so
+ * asserting it would be an overclaim. Children absent from `children` are
+ * unknown rather than settled, so no finding rests on them.
+ */
+export function gateFindings(parent: Hypothesis, children: Hypothesis[]): GateFinding[] {
+  const gate = parent.decomposition?.gate;
+  if (gate === undefined) return [];
+
+  const known = new Map(children.map((c) => [c.id, c]));
+  const present = parent.children.map((id) => known.get(id));
+  if (present.length === 0 || present.some((c) => c === undefined)) return [];
+  const kids = present as Hypothesis[];
+
+  const findings: GateFinding[] = [];
+
+  if (gate === 'one-of') {
+    const survivors = kids.filter((c) => c.status === 'corroborated');
+    if (survivors.length > 1) {
+      findings.push({
+        kind: 'rival-survivors',
+        nodeIds: survivors.map((c) => c.id),
+        message: `${survivors.length} rivals are corroborated, but they were declared mutually exclusive. Either one of them is not the cause, or the split is along more than one dimension.`,
+      });
+    }
+  }
+
+  if (gate === 'all-of') {
+    const defeated = kids.filter((c) => isPruned(c.status));
+    if (defeated.length > 0) {
+      findings.push({
+        kind: 'required-part-defeated',
+        nodeIds: defeated.map((c) => c.id),
+        message: `${defeated.length} of the required parts no longer stands, so the claim above them cannot hold as stated. Eliminate it citing that part, or revise the split.`,
+      });
+    }
+  } else if (kids.every((c) => isPruned(c.status))) {
+    findings.push({
+      kind: 'alternatives-exhausted',
+      nodeIds: kids.map((c) => c.id),
+      message: 'Every alternative under this claim has been ruled out. Either the claim itself is refuted, or the alternatives did not cover the space and one is missing.',
+    });
+  }
+
+  return findings;
 }
 
 // ─── Payload normalization ───

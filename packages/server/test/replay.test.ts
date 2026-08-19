@@ -86,6 +86,25 @@ describe('applyEntry payload normalization', () => {
     expect(s.hypotheses[0].statement).toBe(legacyPayload.content);
   });
 
+  it('folds a parent written before splits were recorded, leaving it with none', () => {
+    // A tree from an earlier writer carries no axis or relation. Inventing one
+    // would put a declaration in the record that nobody made.
+    const parent = { ...legacyPayload, children: ['h2'] };
+    expect('decomposition' in parent).toBe(false); // guards against re-blinding the fixture
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: parent } as JournalEntry);
+    expect(s.hypotheses[0].decomposition).toBeUndefined();
+  });
+
+  it('preserves a recorded split, so an axis survives a restart', () => {
+    const parent = {
+      ...legacyPayload,
+      children: ['h2', 'h3'],
+      decomposition: { axis: 'by subsystem', gate: 'one-of' },
+    };
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: parent } as JournalEntry);
+    expect(s.hypotheses[0].decomposition).toEqual({ axis: 'by subsystem', gate: 'one-of' });
+  });
+
   it('leaves an authored title untouched rather than re-deriving it', () => {
     const authored = { ...legacyPayload, title: 'Writer pool exhaustion', content: undefined, statement: 'The long form.' };
     delete (authored as Record<string, unknown>).content;

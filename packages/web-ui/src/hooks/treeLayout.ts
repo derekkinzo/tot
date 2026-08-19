@@ -1,8 +1,9 @@
 import type { Node, Edge } from '@xyflow/react';
 import { flextree } from 'd3-flextree';
 import { hierarchy } from 'd3-hierarchy';
-import { isPruned, nodeLabel, sessionIsGrounded, type Hypothesis, type HypothesisData } from '../types';
+import { isPruned, nodeLabel, sessionIsGrounded, type Hypothesis, type HypothesisData, type SplitFace } from '../types';
 import { evidenceLedger } from '../tree/evidenceView';
+import { splitBadge, splitConflicts } from '../tree/splitView';
 import { HIGHLIGHT_COLORS } from '../theme';
 import { walkToRoot } from '../tree/walk';
 
@@ -133,6 +134,7 @@ export function computeLayout(
       data: {
         label: nodeLabel(h),
         ledger: evidenceLedger(h, { sessionGrounded }),
+        split: splitFace(h, hypotheses),
         status: h.status,
         evidenceCount: h.evidence.length,
         selected: id === selectedId,
@@ -163,4 +165,16 @@ export function computeLayout(
   }
 
   return { nodes, edges };
+}
+
+/**
+ * What a node face shows about its split, or null when it has none. The badge
+ * carries a conflict flag rather than the conflict text: a face states that the
+ * declaration and the verdicts disagree, and the panel says how.
+ */
+function splitFace(h: Hypothesis, hypotheses: Map<string, Hypothesis>): SplitFace | null {
+  const badge = splitBadge(h);
+  if (!badge) return null;
+  const conflicts = splitConflicts(h, hypotheses);
+  return { ...badge, conflicted: conflicts.length > 0 };
 }

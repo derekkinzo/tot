@@ -51,4 +51,46 @@ describe('generateMarkdown', () => {
     expect(md.match(/\bA\b/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
     expect(md).toContain('B');
   });
+
+  it('states how a branch was split, so a reader knows on what dimension its children divide', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('root', hyp('root', {
+      title: 'Root', status: 'exploring', children: ['a', 'b'],
+      decomposition: { axis: 'by subsystem', gate: 'one-of' },
+    }));
+    map.set('a', hyp('a', { title: 'A', parentId: 'root', depth: 1 }));
+    map.set('b', hyp('b', { title: 'B', parentId: 'root', depth: 1 }));
+    const md = generateMarkdown(session(), map);
+    expect(md).toContain('by subsystem');
+    expect(md.toLowerCase()).toContain('one of');
+  });
+
+  it('records that a relation was left undeclared rather than implying one', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('root', hyp('root', {
+      title: 'Root', status: 'exploring', children: ['a'],
+      decomposition: { axis: 'by timing' },
+    }));
+    map.set('a', hyp('a', { title: 'A', parentId: 'root', depth: 1 }));
+    const md = generateMarkdown(session(), map);
+    expect(md).toContain('by timing');
+    expect(md.toLowerCase()).not.toMatch(/one of|any of|all of/);
+  });
+
+  it('cites a captured artifact by name so a record can be traced to its bytes', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('root', hyp('root', {
+      title: 'Root', status: 'exploring',
+      evidence: [{
+        id: 'e1', type: 'refutes', kind: 'artifact', content: 'the run failed', timestamp: 't',
+        artifact: {
+          id: 'a1', sessionId: 's1', filename: 'ci-run.log', mediaType: 'text/plain', bytes: 10,
+          digest: { alg: 'sha-256', value: 'd' }, capturedAt: 't', excerpt: { startLine: 7, endLine: 9 },
+        },
+      }],
+    }));
+    const md = generateMarkdown(session(), map);
+    expect(md).toContain('ci-run.log');
+    expect(md).toContain('7');
+  });
 });

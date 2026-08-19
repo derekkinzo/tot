@@ -43,10 +43,16 @@ Common framing axes (pick one that suits the domain):
 - **By actor or population**: who or what is affected, or who is acting
 - **By category**: type of object, condition, or class of agent
 
+State the axis you picked as \`axis\`; it is required, because siblings can only be judged for overlap and coverage against a stated dimension.
+
+State how the children relate as \`gate\`: \`one-of\` for rivals where at most one holds, \`any-of\` for alternatives that may hold together, \`all-of\` for parts that must all hold. Every node is a hypothesis — being a branch is structural, not a different kind of thing; a branch is a claim whose children are the ways it could be true or the parts it requires.
+
 Aim for the underlying set-partition property — overlap is acceptable when the domain genuinely co-instantiates multiple factors:
-- **Distinct siblings**: each hypothesis covers a different possibility unless co-occurrence is real (Mackie's INUS conditions describe this).
+- **Distinct siblings**: each covers a different possibility unless co-occurrence is real (Mackie's INUS conditions describe this). \`gate=one-of\` declares them exclusive, so two corroborated siblings then need reconciling.
 - **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain.
 - **2-5 siblings per level** keeps the tree legible.
+
+Neither exclusivity nor exhaustiveness is checkable from the tree, so both stay advisory: what the tools report is a conflict between what you declared and what the verdicts show.
 
 ### Step 3: Gather evidence systematically
 For each hypothesis, call \`add_evidence\` with observations that either:

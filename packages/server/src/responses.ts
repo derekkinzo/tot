@@ -49,9 +49,9 @@ import {
   lacksDiagnosticity,
   readsAsRetypedOutput,
 } from './advisories.js';
-import { nodeLabel, supportingWeight, refutingWeight } from '@tot-mcp/shared';
+import { nodeLabel, supportingWeight, refutingWeight, gateLabel, gateMeaning, gateFindings } from '@tot-mcp/shared';
 import { pickActiveSession } from './persistence.js';
-import type { Hypothesis, StructuralCheck } from './types.js';
+import type { Decomposition, Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
 export function formatCreateTree(sessionId: string, rootId: string, problem: string): string {
@@ -75,6 +75,7 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
 }
 
 export function formatDecompose(children: Hypothesis[], check: StructuralCheck, tm: TreeManager): string {
+  const parent = tm.getHypothesis(children[0]?.parentId ?? '');
   const ids = children.map((c) => c.id);
   const isRootDecomposition = children[0]?.depth === 1;
   let result = JSON.stringify({ childIds: ids }) + '\n\n' +
@@ -84,6 +85,20 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     result += `── Initial Structure (Critical) ──\n`;
     result += `This is the foundational decomposition. Its quality determines the entire investigation.\n`;
     result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n\n`;
+  }
+
+  // The declared split: what the children divide, and what follows from how
+  // they relate. Restated because a gate governs which verdicts are consistent
+  // with each other later.
+  if (parent?.decomposition) {
+    result += `── Split ──\n`;
+    result += `Axis: ${parent.decomposition.axis}\n`;
+    if (parent.decomposition.gate) {
+      result += `${gateLabel(parent.decomposition.gate)}: ${gateMeaning(parent.decomposition.gate)}\n`;
+    } else {
+      result += `Relation not declared. State gate=one-of when the children are rivals, any-of when several may hold together, or all-of when every part is required.\n`;
+    }
+    result += `\n`;
   }
 
   // Structural checks
@@ -104,7 +119,6 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   }
 
   // Premature decomposition guard: parent had no evidence
-  const parent = tm.getHypothesis(children[0]?.parentId ?? '');
   if (parent && parent.evidence.length === 0 && parent.depth > 0) {
     result += `\n⚠ Parent has no evidence yet. A single observation at this level might eliminate it entirely, saving sub-investigation effort.\n`;
   }
@@ -157,6 +171,13 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
     `✓ Added hypothesis: "${nodeLabel(hypothesis)}"\n\n`;
 
   result += `── Sibling Review ──\n`;
+  // A sibling added later must divide the same dimension as the ones already
+  // there, or the set no longer compares along one axis.
+  const parentSplit = hypothesis.parentId ? tm.getHypothesis(hypothesis.parentId)?.decomposition : undefined;
+  if (parentSplit) {
+    result += `Axis: ${parentSplit.axis} — does this divide that same dimension?\n`;
+    if (parentSplit.gate) result += `${gateLabel(parentSplit.gate)}: ${gateMeaning(parentSplit.gate)}\n`;
+  }
   result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
   result += `  Overlap: does this overlap acknowledge a domain co-occurrence (e.g., an INUS cluster), or is it accidental redundancy?\n`;
   result += `  Coverage: does adding this close a gap, or is there still something missing?\n`;
@@ -265,6 +286,31 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   return result;
 }
 
+/**
+ * Conflicts a verdict on this node creates with the split it belongs to.
+ *
+ * A gate is the agent's declaration about how siblings relate, so what is
+ * reported is the contradiction between that declaration and the verdicts now
+ * recorded — never a judgement that a split is exclusive or exhaustive in fact.
+ * Empty when the node has no parent, or its parent declared no relation.
+ */
+function formatGateConflicts(hypothesis: Hypothesis, tm: TreeManager): string {
+  const parent = hypothesis.parentId ? tm.getHypothesis(hypothesis.parentId) : undefined;
+  if (!parent?.decomposition?.gate) return '';
+  const siblings = parent.children
+    .map((id) => tm.getHypothesis(id))
+    .filter((c): c is Hypothesis => c !== undefined);
+  const findings = gateFindings(parent, siblings);
+  if (findings.length === 0) return '';
+
+  let out = `\n── Split: "${nodeLabel(parent)}" (${gateLabel(parent.decomposition.gate)}, ${parent.decomposition.axis}) ──\n`;
+  for (const finding of findings) {
+    out += `⚠ ${finding.message}\n`;
+    out += `  Affected: ${finding.nodeIds.map((id) => nodeLabel(tm.getHypothesis(id) ?? { title: id } as Hypothesis)).join(', ')}\n`;
+  }
+  return out;
+}
+
 export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string {
   const siblings = tm.getSiblings(hypothesis.id);
   const remaining = siblings.filter((s) => isLive(s.status));
@@ -298,6 +344,7 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
     result += `Investigate each remaining hypothesis independently and challenge assumptions.\n`;
   }
 
+  result += formatGateConflicts(hypothesis, tm);
   result += '\n' + formatTreeSummary(tm);
   return result;
 }
@@ -326,6 +373,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
       }
     }
     result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
+    result += formatGateConflicts(hypothesis, tm);
   } else {
     // List only the open nodes that actually block resolution, matching the
     // engine's closure walk: nodes under an eliminated/out-of-scope ancestor
@@ -358,11 +406,16 @@ export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): st
     `⊘ Out-of-scope "${nodeLabel(hypothesis)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
   result += `Branch set aside without investigation. The audit trail records the choice; closure treats this as pruning.\n`;
+  result += formatGateConflicts(hypothesis, tm);
   result += '\n' + formatTreeSummary(tm);
   return result;
 }
 
-export function formatValidateDecomposition(parentId: string, check: StructuralCheck): string {
+export function formatValidateDecomposition(
+  parentId: string,
+  check: StructuralCheck,
+  decomposition?: Decomposition,
+): string {
   // Advisory output, not pass/fail. Strict mutual exclusivity is rejected
   // for hypothesis sets (Heuer 2005); siblings can overlap when they
   // reflect domain co-occurrence (Mackie INUS).
@@ -373,8 +426,24 @@ export function formatValidateDecomposition(parentId: string, check: StructuralC
   if (check.abstractionMismatch) advisories.push('level-mismatch-advisory');
   if (advisories.length === 0) advisories.push('no-issues-detected');
 
-  let result = JSON.stringify({ parentId, advisories: Array.from(new Set(advisories)), check }) + '\n\n' +
-    `── Structural Checks ──\n` +
+  let result = JSON.stringify({
+    parentId,
+    advisories: Array.from(new Set(advisories)),
+    check,
+    ...(decomposition === undefined ? {} : { decomposition }),
+  }) + '\n\n';
+
+  // The axis is what the overlap and coverage questions below are asked
+  // against; without it they have no stated dimension to be judged on.
+  if (decomposition) {
+    result += `── Split ──\n`;
+    result += `Axis: ${decomposition.axis}\n`;
+    result += decomposition.gate
+      ? `${gateLabel(decomposition.gate)}: ${gateMeaning(decomposition.gate)}\n\n`
+      : `Relation not declared — state one-of, any-of, or all-of on the next decomposition of this node.\n\n`;
+  }
+
+  result += `── Structural Checks ──\n` +
     `Children: ${check.childCount}\n`;
 
   if (check.substringOverlaps.length > 0) {

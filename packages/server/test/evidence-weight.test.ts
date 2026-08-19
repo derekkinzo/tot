@@ -182,7 +182,7 @@ describe('qualifyEvidence', () => {
     const { TreeManager } = await import('../src/tree-manager.js');
     const tm = new TreeManager({});
     const { session, root } = tm.createSession('P');
-    const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+    const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
     tm.addEvidence(a.id, 'refutes', 'no');
     tm.eliminateHypothesis(a.id, 'gone');
     const supporting = tm.addEvidence(b.id, 'supports', 'yes').evidence;

@@ -45,7 +45,7 @@ describe('TreeManager', () => {
   describe('decompose', () => {
     it('creates child hypotheses under parent', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'Cause A' }, { title: 'Cause B' }, { title: 'Cause C' }]);
+      const children = tm.decompose(root.id, [{ title: 'Cause A' }, { title: 'Cause B' }, { title: 'Cause C' }], { axis: 'by cause' });
       expect(children).toHaveLength(3);
       expect(children[0].parentId).toBe(root.id);
       expect(children[0].depth).toBe(1);
@@ -56,7 +56,7 @@ describe('TreeManager', () => {
 
     it('rejects fewer than 2 children', () => {
       const { root } = tm.createSession('Problem');
-      expect(() => tm.decompose(root.id, [{ title: 'Only one' }])).toThrow(TreeError);
+      expect(() => tm.decompose(root.id, [{ title: 'Only one' }], { axis: 'by cause' })).toThrow(TreeError);
     });
 
     it('rejects a whitespace-only child label', () => {
@@ -65,21 +65,21 @@ describe('TreeManager', () => {
       // every sibling; word-count 0 makes abstractionMismatch fire spuriously).
       // Reject it at the engine boundary rather than storing it.
       const { root } = tm.createSession('Problem');
-      expect(() => tm.decompose(root.id, [{ title: 'Real cause' }, { title: '   ' }])).toThrow(/empty|blank|whitespace/i);
+      expect(() => tm.decompose(root.id, [{ title: 'Real cause' }, { title: '   ' }], { axis: 'by cause' })).toThrow(/empty|blank|whitespace/i);
     });
 
     it('rejects decompose on eliminated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'refutes', 'Not this');
       tm.eliminateHypothesis(root.id, 'Dead end');
-      expect(() => tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }])).toThrow(TreeError);
+      expect(() => tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' })).toThrow(TreeError);
     });
 
     it('rejects decompose on confirmed hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'This is it');
       tm.corroborateHypothesis(root.id, 'Confirmed');
-      expect(() => tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }])).toThrow(TreeError);
+      expect(() => tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' })).toThrow(TreeError);
     });
 
     it('rejects decompose on out-of-scope hypothesis', () => {
@@ -87,21 +87,21 @@ describe('TreeManager', () => {
       // walker silently skips, leaving structural debt. Out-of-scope is a
       // pruning verdict and must reject decomposition the same as eliminated.
       const { root } = tm.createSession('Problem');
-      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.setOutOfScope(a.id, 'set aside');
-      expect(() => tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }])).toThrow(TreeError);
+      expect(() => tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' })).toThrow(TreeError);
     });
 
     it('rejects non-existent parent', () => {
       tm.createSession('Problem');
-      expect(() => tm.decompose('fake-id', [{ title: 'A' }, { title: 'B' }])).toThrow(TreeError);
+      expect(() => tm.decompose('fake-id', [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' })).toThrow(TreeError);
     });
 
     it('supports deep nesting', () => {
       const { root } = tm.createSession('Problem');
-      const level1 = tm.decompose(root.id, [{ title: 'L1A' }, { title: 'L1B' }]);
-      const level2 = tm.decompose(level1[0].id, [{ title: 'L2A' }, { title: 'L2B' }]);
-      const level3 = tm.decompose(level2[0].id, [{ title: 'L3A' }, { title: 'L3B' }]);
+      const level1 = tm.decompose(root.id, [{ title: 'L1A' }, { title: 'L1B' }], { axis: 'by cause' });
+      const level2 = tm.decompose(level1[0].id, [{ title: 'L2A' }, { title: 'L2B' }], { axis: 'by cause' });
+      const level3 = tm.decompose(level2[0].id, [{ title: 'L3A' }, { title: 'L3B' }], { axis: 'by cause' });
       expect(level3[0].depth).toBe(3);
     });
 
@@ -109,7 +109,7 @@ describe('TreeManager', () => {
       const { root } = tm.createSession('Problem');
       const events: TreeEvent[] = [];
       tm.on('event', (e) => events.push(e));
-      tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
+      tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' });
       const added = events.filter((e) => e.type === 'hypothesis-added');
       expect(added).toHaveLength(3);
     });
@@ -148,7 +148,7 @@ describe('TreeManager', () => {
 
     it('rejects when parent is out-of-scope', () => {
       const { root } = tm.createSession('Problem');
-      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.setOutOfScope(a.id, 'set aside');
       expect(() => tm.addHypothesis(a.id, { title: 'Late add' })).toThrow(TreeError);
     });
@@ -247,7 +247,7 @@ describe('TreeManager', () => {
       tm.addEvidence(b.id, 'supports', 's');
       expect(() => tm.corroborateHypothesis(b.id, '   ')).toThrow(/empty|blank|whitespace/i);
       const { root: parent } = tm.createSession('Parent');
-      const [child] = tm.decompose(parent.id, [{ title: 'C1' }, { title: 'C2' }]);
+      const [child] = tm.decompose(parent.id, [{ title: 'C1' }, { title: 'C2' }], { axis: 'by cause' });
       expect(() => tm.setOutOfScope(child.id, '  ')).toThrow(/empty|blank|whitespace/i);
     });
 
@@ -306,13 +306,13 @@ describe('TreeManager', () => {
 
     it('rejects corroborating a parent while a child is pending', () => {
       const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       expect(() => tm.corroborateHypothesis(root.id, 'reason')).toThrow(TreeError);
     });
 
     it('rejects corroborating a parent while a child is exploring', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(children[0].id, 'supports', 'note');
       expect(children[0].status).toBe('exploring');
       tm.addEvidence(children[1].id, 'refutes', 'no');
@@ -325,8 +325,8 @@ describe('TreeManager', () => {
       // while a sibling top-level branch (Q) keeps the session open — so this
       // exercises the child-terminality gate, not the closed-session path.
       const { session, root } = tm.createSession('Problem');
-      const [p] = tm.decompose(root.id, [{ title: 'P' }, { title: 'Q' }]);
-      const [a, b] = tm.decompose(p.id, [{ title: 'A' }, { title: 'B' }]);
+      const [p] = tm.decompose(root.id, [{ title: 'P' }, { title: 'Q' }], { axis: 'by cause' });
+      const [a, b] = tm.decompose(p.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'refutes', 'no');
       tm.eliminateHypothesis(a.id, 'reason');
       tm.addEvidence(b.id, 'refutes', 'no');
@@ -369,7 +369,7 @@ describe('TreeManager', () => {
   describe('session resolution (spine closure)', () => {
     it('corroborating one top-level branch leaves the session open while siblings are still pending', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'supports', 'good');
       tm.corroborateHypothesis(a.id, 'A survives');
       expect(a.status).toBe('corroborated');
@@ -379,7 +379,7 @@ describe('TreeManager', () => {
 
     it('resolves once every top-level branch is terminal', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
@@ -389,7 +389,7 @@ describe('TreeManager', () => {
 
     it('admits multiple corroborated leaves at the same level (INUS)', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'supports', 'a');
       tm.corroborateHypothesis(a.id, 'A');
       expect(session.status).toBe('open');
@@ -402,7 +402,7 @@ describe('TreeManager', () => {
 
     it('out-of-scope dispenses with a branch as pruning, allowing closure', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.setOutOfScope(b.id, 'not investigating');
       expect(b.status).toBe('out-of-scope');
       tm.addEvidence(a.id, 'supports', 'good');
@@ -412,7 +412,7 @@ describe('TreeManager', () => {
 
     it('refuting evidence on a corroborated leaf reopens the session', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
@@ -443,8 +443,8 @@ describe('TreeManager', () => {
       // A, eliminate A, eliminate B → no live corroboration on a non-pruned
       // lineage → session abandons. A2 stays corroborated.
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
-      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
       tm.addEvidence(a1.id, 'refutes', 'no');
       tm.eliminateHypothesis(a1.id, 'gone');
       tm.addEvidence(a2.id, 'supports', 'good');
@@ -476,8 +476,8 @@ describe('TreeManager', () => {
       // must climb the corroborated spine until it reaches a non-
       // corroborated parent.
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
-      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
       tm.addEvidence(a1.id, 'refutes', 'no');
       tm.eliminateHypothesis(a1.id, 'gone');
       tm.addEvidence(a2.id, 'supports', 'good');
@@ -524,7 +524,7 @@ describe('TreeManager', () => {
 
     it('rejects supports/neutral evidence on a corroborated leaf', () => {
       const { root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
@@ -538,11 +538,11 @@ describe('TreeManager', () => {
       // elimination does not cascade — a pending grandchild can legally
       // sit below an eliminated parent on a corroborated lineage.
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
-      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }]);
-      tm.decompose(a1.id, [{ title: 'A1a' }, { title: 'A1b' }]);  // A1a, A1b pending
+      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
+      tm.decompose(a1.id, [{ title: 'A1a' }, { title: 'A1b' }], { axis: 'by cause' });  // A1a, A1b pending
       tm.addEvidence(a1.id, 'refutes', 'no');
       tm.eliminateHypothesis(a1.id, 'no');
       tm.addEvidence(a2.id, 'refutes', 'no');
@@ -553,11 +553,11 @@ describe('TreeManager', () => {
 
     it('does not resolve when a pending grandchild hides under an out-of-scope intermediate of a corroborated branch', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
-      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }]);
-      tm.decompose(a1.id, [{ title: 'A1a' }, { title: 'A1b' }]);
+      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
+      tm.decompose(a1.id, [{ title: 'A1a' }, { title: 'A1b' }], { axis: 'by cause' });
       tm.setOutOfScope(a1.id, 'set aside');
       tm.addEvidence(a2.id, 'refutes', 'no');
       tm.eliminateHypothesis(a2.id, 'no');
@@ -567,7 +567,7 @@ describe('TreeManager', () => {
 
     it('clears completedAt when a corroborated leaf is reopened by refutation', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
@@ -581,7 +581,7 @@ describe('TreeManager', () => {
     it('resolves when set_out_of_scope completes the disposition of the last open top-level branch', () => {
       // Closure check must fire from setOutOfScope, not only from corroborate.
       const { session, root } = tm.createSession('Problem');
-      const [a, b, c] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
+      const [a, b, c] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'supports', 'good');
       tm.corroborateHypothesis(a.id, 'A survives');
       tm.addEvidence(b.id, 'refutes', 'no');
@@ -594,7 +594,7 @@ describe('TreeManager', () => {
     it('resolves when an elimination completes the disposition of the last open top-level branch', () => {
       // Closure check must fire from eliminate, not only from corroborate.
       const { session, root } = tm.createSession('Problem');
-      const [a, b, c] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
+      const [a, b, c] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'supports', 'good');
       tm.corroborateHypothesis(a.id, 'A survives');
       tm.setOutOfScope(b.id, 'set aside');
@@ -610,8 +610,8 @@ describe('TreeManager', () => {
       // walker applies. With every top-level pruned and no surviving
       // answer on a non-pruned lineage, the session abandons.
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
-      const [a1] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const [a1] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
       tm.addEvidence(a1.id, 'supports', 'good');
       tm.corroborateHypothesis(a1.id, 'A1 survives');
       tm.setOutOfScope(a.id, 'set aside');
@@ -624,7 +624,7 @@ describe('TreeManager', () => {
       // session has no live work and no surviving answer, so the only
       // honest disposition is abandonment.
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'refutes', 'no');
       tm.eliminateHypothesis(a.id, 'no');
       tm.setOutOfScope(b.id, 'set aside');
@@ -636,7 +636,7 @@ describe('TreeManager', () => {
       // The session has been wholly set aside; the closure rule must
       // recognise this as abandonment, not leave the session stuck open.
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.setOutOfScope(a.id, 'set aside');
       expect(session.status).toBe('open');
       tm.setOutOfScope(b.id, 'set aside');
@@ -645,10 +645,10 @@ describe('TreeManager', () => {
 
     it('resolves a deeply corroborated branch when every leaf is terminal', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
-      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }]);
+      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
       tm.addEvidence(a1.id, 'refutes', 'no');
       tm.eliminateHypothesis(a1.id, 'no');
       tm.addEvidence(a2.id, 'refutes', 'no');
@@ -670,8 +670,8 @@ describe('TreeManager', () => {
     /** Builds a session resolved with a pending grandchild leaked under pruned A. */
     function resolvedWithLeakedPending() {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
-      const [a1] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }]); // A1, A2 pending under A
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const [a1] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' }); // A1, A2 pending under A
       // Prune A and B without resolving A1/A2 (elimination does not cascade).
       tm.addEvidence(a.id, 'refutes', 'A wrong');
       tm.eliminateHypothesis(a.id, 'A pruned');
@@ -690,7 +690,7 @@ describe('TreeManager', () => {
 
     it('rejects decompose on a leaked pending node in a resolved session', () => {
       const { a1 } = resolvedWithLeakedPending();
-      expect(() => tm.decompose(a1.id, [{ title: 'X' }, { title: 'Y' }])).toThrow(/resolved|closed|completed/i);
+      expect(() => tm.decompose(a1.id, [{ title: 'X' }, { title: 'Y' }], { axis: 'by cause' })).toThrow(/resolved|closed|completed/i);
     });
 
     it('rejects add_hypothesis on a leaked pending node in a resolved session', () => {
@@ -712,7 +712,7 @@ describe('TreeManager', () => {
       // reopen path. Refuting the corroborated branch reopens, then the now-open
       // session accepts further mutation.
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(b.id, 'refutes', 'no');
       tm.eliminateHypothesis(b.id, 'no');
       tm.addEvidence(a.id, 'supports', 'good');
@@ -765,7 +765,7 @@ describe('TreeManager', () => {
   describe('setOutOfScope', () => {
     it('marks a hypothesis terminal with verdict out-of-scope', () => {
       const { root } = tm.createSession('Problem');
-      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       const result = tm.setOutOfScope(a.id, 'set aside');
       expect(result.status).toBe('out-of-scope');
       expect(result.conclusion?.verdict).toBe('out-of-scope');
@@ -778,7 +778,7 @@ describe('TreeManager', () => {
 
     it('rejects setting a terminal hypothesis out-of-scope', () => {
       const { root } = tm.createSession('Problem');
-      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'refutes', 'no');
       tm.eliminateHypothesis(a.id, 'gone');
       expect(() => tm.setOutOfScope(a.id, 'too late')).toThrow(TreeError);
@@ -790,7 +790,7 @@ describe('TreeManager', () => {
   describe('validateDecomposition', () => {
     it('returns structural checks for children', () => {
       const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: 'Network issue' }, { title: 'Application bug' }, { title: 'Data corruption' }]);
+      tm.decompose(root.id, [{ title: 'Network issue' }, { title: 'Application bug' }, { title: 'Data corruption' }], { axis: 'by cause' });
       const check = tm.validateDecomposition(root.id);
       expect(check.childCount).toBe(3);
       expect(check.substringOverlaps).toHaveLength(0);
@@ -800,21 +800,21 @@ describe('TreeManager', () => {
 
     it('detects substring overlap', () => {
       const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: 'Network error' }, { title: 'Network' }]);
+      tm.decompose(root.id, [{ title: 'Network error' }, { title: 'Network' }], { axis: 'by cause' });
       const check = tm.validateDecomposition(root.id);
       expect(check.substringOverlaps.length).toBeGreaterThan(0);
     });
 
     it('detects catch-all category', () => {
       const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: 'Known issue' }, { title: 'Other' }]);
+      tm.decompose(root.id, [{ title: 'Known issue' }, { title: 'Other' }], { axis: 'by cause' });
       const check = tm.validateDecomposition(root.id);
       expect(check.hasCatchAll).toBe(true);
     });
 
     it('detects duplicate labels', () => {
       const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: 'Same thing' }, { title: 'Same thing' }, { title: 'Different' }]);
+      tm.decompose(root.id, [{ title: 'Same thing' }, { title: 'Same thing' }, { title: 'Different' }], { axis: 'by cause' });
       const check = tm.validateDecomposition(root.id);
       expect(check.duplicateLabels).toContain('same thing');
     });
@@ -828,7 +828,7 @@ describe('TreeManager', () => {
       // 'database is slow' is 3 words; a leading space must not inflate it to
       // 4 and trip the maxLen > minLen*3 heuristic against the 1-word sibling.
       const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: ' database is slow' }, { title: 'cache' }]);
+      tm.decompose(root.id, [{ title: ' database is slow' }, { title: 'cache' }], { axis: 'by cause' });
       const check = tm.validateDecomposition(root.id);
       expect(check.abstractionMismatch).toBe(false);
       expect(check.minWords).toBe(1);
@@ -837,7 +837,7 @@ describe('TreeManager', () => {
 
     it('flags a genuine abstraction mismatch (>3x word span)', () => {
       const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: 'the database query plan regressed badly' }, { title: 'cache' }]);
+      tm.decompose(root.id, [{ title: 'the database query plan regressed badly' }, { title: 'cache' }], { axis: 'by cause' });
       const check = tm.validateDecomposition(root.id);
       expect(check.abstractionMismatch).toBe(true);
     });
@@ -873,7 +873,7 @@ describe('TreeManager', () => {
   describe('getStatus', () => {
     it('returns counts and progress', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' });
       tm.addEvidence(children[0].id, 'refutes', 'Bad');
       tm.eliminateHypothesis(children[0].id, 'Done');
 
@@ -892,7 +892,7 @@ describe('TreeManager', () => {
 
     it('reports unexplored pending hypotheses', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       const status = tm.getStatus();
       const unexploredIds = status.unexplored.map((u) => u.id).sort();
       expect(unexploredIds).toEqual([children[0].id, children[1].id].sort());
@@ -900,7 +900,7 @@ describe('TreeManager', () => {
 
     it('drops a hypothesis from unexplored once it has evidence', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(children[0].id, 'supports', 'data'); // pending -> exploring
       const status = tm.getStatus();
       expect(status.unexplored.map((u) => u.id)).toEqual([children[1].id]);
@@ -917,7 +917,7 @@ describe('TreeManager', () => {
 
     it('becomes stagnant after threshold mutations without status change', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       // First evidence flips pending->exploring (resets the counter); the
       // next four are same-status mutations that accumulate to the threshold.
       tm.addEvidence(children[0].id, 'neutral', 'n0');
@@ -930,7 +930,7 @@ describe('TreeManager', () => {
 
     it('resets after a status change', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       for (let i = 0; i < 5; i++) tm.addEvidence(children[0].id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
       // A real status change (eliminating a different sibling) resets it.
@@ -947,7 +947,7 @@ describe('TreeManager', () => {
       // the counter must reset so the next get_status on B does not
       // falsely warn about stagnation produced by unrelated activity.
       const { session: sessionA, root: rootA } = tm.createSession('Problem A');
-      const [a, bA] = tm.decompose(rootA.id, [{ title: 'A' }, { title: 'B' }]);
+      const [a, bA] = tm.decompose(rootA.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'supports', 'good');
       tm.corroborateHypothesis(a.id, 'A survives');
       tm.addEvidence(bA.id, 'refutes', 'no');
@@ -957,7 +957,7 @@ describe('TreeManager', () => {
       // Open session B and bump its stagnation counter via same-status
       // neutral evidence (first flips pending->exploring, rest accumulate).
       const { root: rootB } = tm.createSession('Problem B');
-      const [b1] = tm.decompose(rootB.id, [{ title: 'B1' }, { title: 'B2' }]);
+      const [b1] = tm.decompose(rootB.id, [{ title: 'B1' }, { title: 'B2' }], { axis: 'by cause' });
       for (let i = 0; i < 5; i++) tm.addEvidence(b1.id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
 
@@ -970,7 +970,7 @@ describe('TreeManager', () => {
 
     it('setOutOfScope resets the stagnation counter (it is real disposition progress)', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' });
       for (let i = 0; i < 5; i++) tm.addEvidence(children[0].id, 'neutral', `n${i}`);
       expect(tm.getStatus().stagnant).toBe(true);
       tm.setOutOfScope(children[1].id, 'set aside');
@@ -983,11 +983,11 @@ describe('TreeManager', () => {
       // get_status for A must report stagnant=false: each session's counter
       // is isolated, so B's churn cannot contaminate A's verdict.
       const { session: sessionA, root: rootA } = tm.createSession('Problem A');
-      const [a1] = tm.decompose(rootA.id, [{ title: 'A1' }, { title: 'A2' }]);
+      const [a1] = tm.decompose(rootA.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
       tm.addEvidence(a1.id, 'supports', 'real status change on A');
 
       const { root: rootB } = tm.createSession('Problem B');
-      const [b1] = tm.decompose(rootB.id, [{ title: 'B1' }, { title: 'B2' }]);
+      const [b1] = tm.decompose(rootB.id, [{ title: 'B1' }, { title: 'B2' }], { axis: 'by cause' });
       for (let i = 0; i < 5; i++) tm.addEvidence(b1.id, 'neutral', `n${i}`);
 
       // B is the active session (last mutated) and is stagnant.
@@ -1004,7 +1004,7 @@ describe('TreeManager', () => {
   describe('loadState', () => {
     it('restores sessions and hypotheses', () => {
       const { session, root } = tm.createSession('Original');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
 
       const tm2 = new TreeManager();
       tm2.loadState(
@@ -1024,7 +1024,7 @@ describe('TreeManager', () => {
   describe('getSiblings', () => {
     it('returns sibling hypotheses', () => {
       const { root } = tm.createSession('Problem');
-      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
+      const children = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' });
       const siblings = tm.getSiblings(children[0].id);
       expect(siblings).toHaveLength(2);
       expect(siblings.map((s) => s.title).sort()).toEqual(['B', 'C']);
@@ -1051,7 +1051,7 @@ describe('TreeManager', () => {
     it('handles many children on one node', () => {
       const { root } = tm.createSession('Problem');
       const contents = Array.from({ length: 50 }, (_, i) => ({ title: `Hypothesis ${i}` }));
-      const children = tm.decompose(root.id, contents);
+      const children = tm.decompose(root.id, contents, { axis: 'by cause' });
       expect(children).toHaveLength(50);
       expect(root.children).toHaveLength(50);
     });
@@ -1062,7 +1062,7 @@ describe('TreeManager', () => {
       const { root } = deepTm.createSession('Problem');
       let current = root;
       for (let i = 0; i < 100; i++) {
-        const children = deepTm.decompose(current.id, [{ title: `Depth ${i + 1} A` }, { title: `Depth ${i + 1} B` }]);
+        const children = deepTm.decompose(current.id, [{ title: `Depth ${i + 1} A` }, { title: `Depth ${i + 1} B` }], { axis: 'by cause' });
         current = children[0];
       }
       expect(current.depth).toBe(100);
@@ -1071,31 +1071,31 @@ describe('TreeManager', () => {
     it('rejects decompose when depth limit exceeded', () => {
       const shallowTm = new TreeManager({ maxDepth: 3 });
       const { root } = shallowTm.createSession('Problem');
-      const l1 = shallowTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
-      const l2 = shallowTm.decompose(l1[0].id, [{ title: 'C' }, { title: 'D' }]);
-      const l3 = shallowTm.decompose(l2[0].id, [{ title: 'E' }, { title: 'F' }]);
-      expect(() => shallowTm.decompose(l3[0].id, [{ title: 'G' }, { title: 'H' }])).toThrow('Tree depth limit (3) exceeded');
+      const l1 = shallowTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const l2 = shallowTm.decompose(l1[0].id, [{ title: 'C' }, { title: 'D' }], { axis: 'by cause' });
+      const l3 = shallowTm.decompose(l2[0].id, [{ title: 'E' }, { title: 'F' }], { axis: 'by cause' });
+      expect(() => shallowTm.decompose(l3[0].id, [{ title: 'G' }, { title: 'H' }], { axis: 'by cause' })).toThrow('Tree depth limit (3) exceeded');
     });
 
     it('rejects addHypothesis when depth limit exceeded', () => {
       const shallowTm = new TreeManager({ maxDepth: 2 });
       const { root } = shallowTm.createSession('Problem');
-      const l1 = shallowTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }]);
-      const l2 = shallowTm.decompose(l1[0].id, [{ title: 'C' }, { title: 'D' }]);
+      const l1 = shallowTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const l2 = shallowTm.decompose(l1[0].id, [{ title: 'C' }, { title: 'D' }], { axis: 'by cause' });
       expect(() => shallowTm.addHypothesis(l2[0].id, { title: 'Too deep' })).toThrow('Tree depth limit (2) exceeded');
     });
 
     it('rejects decompose when hypothesis count limit exceeded', () => {
       const smallTm = new TreeManager({ maxHypotheses: 5 });
       const { root } = smallTm.createSession('Problem');
-      smallTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]); // 4 total (root + 3)
-      expect(() => smallTm.decompose(root.children[0], [{ title: 'X' }, { title: 'Y' }])).toThrow('Maximum hypothesis count (5) exceeded');
+      smallTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' }); // 4 total (root + 3)
+      expect(() => smallTm.decompose(root.children[0], [{ title: 'X' }, { title: 'Y' }], { axis: 'by cause' })).toThrow('Maximum hypothesis count (5) exceeded');
     });
 
     it('rejects addHypothesis when hypothesis count limit exceeded', () => {
       const smallTm = new TreeManager({ maxHypotheses: 4 });
       const { root } = smallTm.createSession('Problem');
-      smallTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]); // 4 total
+      smallTm.decompose(root.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' }); // 4 total
       expect(() => smallTm.addHypothesis(root.id, { title: 'Overflow' })).toThrow('Maximum hypothesis count (4) exceeded');
     });
 
@@ -1104,11 +1104,11 @@ describe('TreeManager', () => {
       // decompose/add in a different, nearly-empty session of the same manager.
       const smallTm = new TreeManager({ maxHypotheses: 4 });
       const { root: rootA } = smallTm.createSession('Problem A');
-      smallTm.decompose(rootA.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }]); // session A: 4 nodes (at cap)
+      smallTm.decompose(rootA.id, [{ title: 'A' }, { title: 'B' }, { title: 'C' }], { axis: 'by cause' }); // session A: 4 nodes (at cap)
 
       const { root: rootB } = smallTm.createSession('Problem B');
       // Session B has only its root; decompose must succeed despite A being full.
-      expect(() => smallTm.decompose(rootB.id, [{ title: 'X' }, { title: 'Y' }])).not.toThrow();
+      expect(() => smallTm.decompose(rootB.id, [{ title: 'X' }, { title: 'Y' }], { axis: 'by cause' })).not.toThrow();
       expect(smallTm.getHypothesesBySession(rootB.sessionId)).toHaveLength(3);
     });
   });
@@ -1188,7 +1188,7 @@ describe('TreeManager', () => {
   describe('eliminateHypothesis abandons fully-pruned sessions', () => {
     it('marks a session abandoned when every top-level branch is eliminated', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'cause A' }, { title: 'cause B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'cause A' }, { title: 'cause B' }], { axis: 'by cause' });
 
       tm.addEvidence(a.id, 'refutes', 'no');
       tm.eliminateHypothesis(a.id, 'no');
@@ -1203,7 +1203,7 @@ describe('TreeManager', () => {
 
     it('marks a session abandoned when every top-level branch is terminal but none corroborated (mixed eliminated + out-of-scope)', () => {
       const { session, root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'cause A' }, { title: 'cause B' }]);
+      const [a, b] = tm.decompose(root.id, [{ title: 'cause A' }, { title: 'cause B' }], { axis: 'by cause' });
       tm.addEvidence(a.id, 'refutes', 'no');
       tm.eliminateHypothesis(a.id, 'no');
       tm.setOutOfScope(b.id, 'set aside');

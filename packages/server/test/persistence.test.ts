@@ -77,7 +77,7 @@ describe('Persistence Roundtrip', () => {
 
     const { childIds } = parseResult(await c1.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['Cause A', 'Cause B', 'Cause C'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['Cause A', 'Cause B', 'Cause C'] },
     }));
 
     await c1.callTool({
@@ -121,7 +121,7 @@ describe('Persistence Roundtrip', () => {
     }));
     await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['X', 'Y'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['X', 'Y'] },
     });
     await cleanup();
 
@@ -280,7 +280,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
@@ -306,11 +306,11 @@ describe('Persistence Roundtrip', () => {
     }));
     const decompA = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     const decompA1 = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+      arguments: { axis: 'by cause', parentId: decompA.childIds[0], children: ['A1', 'A2'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'supports', content: 'survives' } });
     await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'A1' } });
@@ -354,7 +354,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
     await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
@@ -374,7 +374,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
     await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
@@ -397,11 +397,11 @@ describe('Persistence Roundtrip', () => {
     }));
     const decompA = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     const decompA1 = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+      arguments: { axis: 'by cause', parentId: decompA.childIds[0], children: ['A1', 'A2'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'refutes', content: 'no' } });
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'gone' } });
@@ -442,11 +442,11 @@ describe('Persistence Roundtrip', () => {
     }));
     const decompA = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     const decompA1 = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+      arguments: { axis: 'by cause', parentId: decompA.childIds[0], children: ['A1', 'A2'] },
     }));
     // A2 corroborated under A; A then eliminated (A2 buried under pruned A);
     // B eliminated. Session abandons (no live corroboration on the spine).
@@ -475,7 +475,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'no' } });
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
@@ -577,7 +577,7 @@ describe('Persistence Roundtrip', () => {
       name: 'create_tree', arguments: { problem: 'Order pin' },
     }));
     const { childIds } = parseResult(await client.callTool({
-      name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] },
+      name: 'decompose', arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     // Resolve via A corroborated, B eliminated → session-completed.
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });

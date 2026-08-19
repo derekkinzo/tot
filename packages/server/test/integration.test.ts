@@ -109,11 +109,11 @@ describe('MCP Integration', () => {
   describe('decompose', () => {
     it('creates children and returns IDs', async () => {
       const { rootId } = parseResult(
-        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
+        await client.callTool({ name: 'create_tree', arguments: { axis: 'by cause', problem: 'Test' } }),
       );
       const result = await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Network', 'Application', 'Data', 'Infrastructure'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Network', 'Application', 'Data', 'Infrastructure'] },
       });
       expect(result.isError).toBeFalsy();
       const { childIds } = parseResult(result);
@@ -126,7 +126,7 @@ describe('MCP Integration', () => {
       );
       const result = await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Network layer', 'Application layer'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Network layer', 'Application layer'] },
       });
       const text = getText(result);
       expect(text).toContain('Decomposition Review');
@@ -139,13 +139,13 @@ describe('MCP Integration', () => {
       const { childIds: level1 } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['A', 'B'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
         }),
       );
       const { childIds: level2 } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: level1[0], children: ['A.1', 'A.2', 'A.3'] },
+          arguments: { axis: 'by cause', parentId: level1[0], children: ['A.1', 'A.2', 'A.3'] },
         }),
       );
       expect(level2).toHaveLength(3);
@@ -163,7 +163,7 @@ describe('MCP Integration', () => {
       );
       const result = await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Only one'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Only one'] },
       });
       expect(result.isError).toBe(true);
     });
@@ -172,7 +172,7 @@ describe('MCP Integration', () => {
       await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } });
       const result = await client.callTool({
         name: 'decompose',
-        arguments: { parentId: 'nonexistent', children: ['A', 'B'] },
+        arguments: { axis: 'by cause', parentId: 'nonexistent', children: ['A', 'B'] },
       });
       expect(result.isError).toBe(true);
     });
@@ -191,7 +191,7 @@ describe('MCP Integration', () => {
       });
       const result = await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['A', 'B'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
       });
       expect(result.isError).toBe(true);
     });
@@ -206,7 +206,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['A', 'B'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
       });
       const result = await client.callTool({
         name: 'add_hypothesis',
@@ -291,7 +291,7 @@ describe('MCP Integration', () => {
       const parentId = await root();
       const result = await client.callTool({
         name: 'decompose',
-        arguments: {
+        arguments: { axis: 'by cause',
           parentId,
           children: ['Network latency', { title: 'CPU contention', statement: 'The host is saturated.' }],
         },
@@ -308,7 +308,7 @@ describe('MCP Integration', () => {
     it('decompose rejects an over-long child title', async () => {
       const parentId = await root();
       const result = await client.callTool({
-        name: 'decompose', arguments: { parentId, children: ['ok', 'x'.repeat(81)] },
+        name: 'decompose', arguments: { axis: 'by cause', parentId, children: ['ok', 'x'.repeat(81)] },
       });
       expect(result.isError).toBe(true);
     });
@@ -362,7 +362,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['H1', 'H2', 'H3'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['H1', 'H2', 'H3'] },
         }),
       );
 
@@ -382,7 +382,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['Alpha', 'Beta'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['Alpha', 'Beta'] },
         }),
       );
       const result = await client.callTool({
@@ -433,7 +433,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['Will die', 'Will survive', 'Also survives'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['Will die', 'Will survive', 'Also survives'] },
         }),
       );
       await client.callTool({
@@ -544,7 +544,7 @@ describe('MCP Integration', () => {
       );
       const dec = await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['A', 'B'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
       });
       expect(getText(dec)).not.toMatch(/score/i);
       const tree = await client.callTool({ name: 'get_tree', arguments: { format: 'full' } });
@@ -566,7 +566,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['Network', 'App code'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['Network', 'App code'] },
         }),
       );
       await client.callTool({
@@ -595,7 +595,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['X', 'Y'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['X', 'Y'] },
       });
       const result = await client.callTool({
         name: 'get_tree',
@@ -668,7 +668,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['H1', 'H2', 'H3'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['H1', 'H2', 'H3'] },
         }),
       );
       await client.callTool({
@@ -729,7 +729,7 @@ describe('MCP Integration', () => {
           await client2.callTool({ name: 'create_tree', arguments: { problem: 'Resolves' } }),
         );
         const { childIds } = parseResult(
-          await client2.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+          await client2.callTool({ name: 'decompose', arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] } }),
         );
         // Drive the session to a terminal state: A eliminated, B corroborated.
         await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
@@ -762,10 +762,10 @@ describe('MCP Integration', () => {
           await client2.callTool({ name: 'create_tree', arguments: { problem: 'Leaked pending' } }),
         );
         const { childIds } = parseResult(
-          await client2.callTool({ name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] } }),
+          await client2.callTool({ name: 'decompose', arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] } }),
         );
         // Give A its own pending children, then prune A without resolving them.
-        await client2.callTool({ name: 'decompose', arguments: { parentId: childIds[0], children: ['A1', 'A2'] } });
+        await client2.callTool({ name: 'decompose', arguments: { axis: 'by cause', parentId: childIds[0], children: ['A1', 'A2'] } });
         await client2.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
         await client2.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
         // Corroborate B → session resolves while A1/A2 remain pending under pruned A.
@@ -790,7 +790,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['A', 'B', 'C'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B', 'C'] },
         }),
       );
       await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
@@ -814,7 +814,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['A', 'B'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
         }),
       );
       // First evidence flips the child pending→exploring (resets the
@@ -847,7 +847,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Network error', 'Network'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Network error', 'Network'] },
       });
       const result = await client.callTool({
         name: 'validate_decomposition',
@@ -863,7 +863,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Specific cause', 'Other'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Specific cause', 'Other'] },
       });
       const result = await client.callTool({
         name: 'validate_decomposition',
@@ -879,7 +879,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Network layer', 'Application layer', 'Data layer'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Network layer', 'Application layer', 'Data layer'] },
       });
       const result = await client.callTool({
         name: 'validate_decomposition',
@@ -895,7 +895,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Network error', 'Network'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Network error', 'Network'] },
       });
       const result = await client.callTool({
         name: 'validate_decomposition',
@@ -914,7 +914,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: [
+        arguments: { axis: 'by cause', parentId: rootId, children: [
           'Layer issue',
           'Persistent connection drift in long-lived socket pool under reuse pressure',
         ] },
@@ -953,7 +953,7 @@ describe('MCP Integration', () => {
       const { childIds: l1 } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: {
+          arguments: { axis: 'by cause',
             parentId: rootId,
             children: ['Application code error', 'Dependency failure', 'Infrastructure issue', 'Load pattern issue'],
           },
@@ -998,7 +998,7 @@ describe('MCP Integration', () => {
       const { childIds: l2 } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: {
+          arguments: { axis: 'by cause',
             parentId: l1[0],
             children: ['Null pointer on data patterns', 'Race condition', 'Schema mismatch', 'Bug in v2.4.1 code'],
           },
@@ -1034,7 +1034,7 @@ describe('MCP Integration', () => {
       );
       await client.callTool({
         name: 'decompose',
-        arguments: { parentId: rootId, children: ['Dep conflict', 'Syntax error'] },
+        arguments: { axis: 'by cause', parentId: rootId, children: ['Dep conflict', 'Syntax error'] },
       });
 
       // Agent realizes it missed something
@@ -1059,7 +1059,7 @@ describe('MCP Integration', () => {
       const { childIds } = parseResult(
         await client.callTool({
           name: 'decompose',
-          arguments: { parentId: rootId, children: ['A', 'B', 'C'] },
+          arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B', 'C'] },
         }),
       );
 

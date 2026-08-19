@@ -113,6 +113,7 @@ export default function App() {
         >
           <DetailPanel
             hypothesis={selected}
+            hypotheses={hypotheses}
             onClose={() => handleSelect(null)}
             onOpenArtifact={(artifact, claim) => setOpenArtifact({ artifact, claim })}
           />

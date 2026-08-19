@@ -5,7 +5,7 @@ import { Persistence } from './persistence.js';
 import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
-import { nodeLabel, titleProblem, TITLE_MAX_LENGTH, type HypothesisDraft } from '@tot-mcp/shared';
+import { gateLabel, nodeLabel, titleProblem, TITLE_MAX_LENGTH, type HypothesisDraft } from '@tot-mcp/shared';
 import { ArtifactError, artifactsDirFor, captureArtifact, discardArtifact } from './artifacts.js';
 
 // ─── Types ───
@@ -61,11 +61,15 @@ const TOOL_DEFS = {
     }),
   },
   decompose: {
-    description: 'Decompose a hypothesis into sibling sub-hypotheses comparable along a single framing axis. 2-5 keeps the tree legible; up to 20 are accepted when the domain genuinely warrants more. Aim for non-overlapping siblings unless the domain co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
+    description: 'Decompose a hypothesis into sibling sub-hypotheses comparable along a single stated axis. 2-5 keeps the tree legible; up to 20 are accepted when the domain genuinely warrants more. Aim for non-overlapping siblings unless the domain co-instantiates them (cf. Mackie INUS conditions). Use at any depth to drill deeper into a branch.',
     input: z.object({
       parentId: identifier().describe('ID of the hypothesis to decompose'),
       children: z.array(childDraft()).min(2).max(20).describe(
         `Sub-hypotheses, 2-20. Each is a short label of at most ${TITLE_MAX_LENGTH} characters, or an object { title, statement } when the claim needs a longer form.`),
+      axis: nonBlank(TITLE_MAX_LENGTH).describe(
+        'The single dimension these children divide, such as "by subsystem", "by lifecycle stage", or "by data source". Siblings can only be judged for overlap and coverage against a stated axis; if two children divide different dimensions, split along one axis and decompose again below it.'),
+      gate: z.enum(['one-of', 'any-of', 'all-of']).optional().describe(
+        'How the children relate to the parent claim. "one-of": rivals, at most one holds (mutually exclusive). "any-of": alternatives that may hold together, as contributing causes do. "all-of": parts that must all hold, so defeating any part defeats the parent. Omit only when the relation is genuinely undecided.'),
     }),
   },
   add_hypothesis: {
@@ -276,9 +280,9 @@ export function getToolHandlers(
     return { text: fmt.formatCreateTree(session.id, root.id, problem), sessionId: session.id };
   }));
 
-  handlers.set('decompose', dispatch(TOOL_DEFS.decompose.input, ({ parentId, children }) => {
+  handlers.set('decompose', dispatch(TOOL_DEFS.decompose.input, ({ parentId, children, axis, gate }) => {
     const drafts: HypothesisDraft[] = children.map((c) => (typeof c === 'string' ? { title: c } : c));
-    const created = tm.decompose(parentId, drafts);
+    const created = tm.decompose(parentId, drafts, { axis, ...(gate === undefined ? {} : { gate }) });
     const check = tm.validateDecomposition(parentId);
     return { text: fmt.formatDecompose(created, check, tm), sessionId: created[0].sessionId };
   }));
@@ -344,7 +348,9 @@ export function getToolHandlers(
   // Read-only: no sessionId → dispatch skips the drain.
   handlers.set('validate_decomposition', dispatch(TOOL_DEFS.validate_decomposition.input, ({ parentId }) => {
     const check = tm.validateDecomposition(parentId);
-    return { text: fmt.formatValidateDecomposition(parentId, check) };
+    return {
+      text: fmt.formatValidateDecomposition(parentId, check, tm.getHypothesis(parentId)?.decomposition),
+    };
   }));
 
   // get_tree returns a non-thrown isError result ("No such session"), which the
@@ -430,6 +436,13 @@ function renderCompactTree(
   visited.add(nodeId);
 
   let line = `${indent}${STATUS_ICONS[node.status]} ${nodeLabel(node)}\n`;
+
+  // The split sits above the children it describes, so a reader sees on what
+  // dimension they divide and how they relate before reading them.
+  if (node.decomposition && node.children.length > 0) {
+    const gate = node.decomposition.gate ? `${gateLabel(node.decomposition.gate)}, ` : '';
+    line += `${indent}  └ ${gate}${node.decomposition.axis}\n`;
+  }
 
   for (const childId of node.children) {
     line += renderCompactTree(hypotheses, childId, indent + '  ', visited);

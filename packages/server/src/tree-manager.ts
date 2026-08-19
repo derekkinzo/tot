@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { isPruned, isTerminal, subtreeContainsCorroborated, topLevelBranchesDisposed } from './closure.js';
 import type {
   ArtifactRef,
+  Decomposition,
   Evidence,
   Hypothesis,
   HypothesisStatus,
@@ -91,12 +92,17 @@ export class TreeManager extends EventEmitter {
    * Aim for non-overlapping siblings that collectively cover the parent's
    * claim — strict mutual exclusivity is not required (Heuer 2005).
    * Auto-transitions the parent from 'pending' to 'exploring'.
+   *
+   * The split records the axis it divides and, when declared, how the children
+   * relate to the parent; a re-decomposition of the same node replaces both,
+   * since they describe the children that now exist.
    * @param parentId - ID of the hypothesis to decompose
    * @param children_ - Labels (optionally with statements) for the sub-hypotheses (2+)
+   * @param split - The dimension the children divide, and how they relate to the parent
    * @returns The created child hypothesis nodes
-   * @throws TreeError if parent is in a terminal status, fewer than 2 children, depth exceeded, or count exceeded
+   * @throws TreeError if parent is in a terminal status, fewer than 2 children, the axis is blank, depth exceeded, or count exceeded
    */
-  decompose(parentId: string, children_: HypothesisDraft[]): Hypothesis[] {
+  decompose(parentId: string, children_: HypothesisDraft[], split: Decomposition): Hypothesis[] {
     const parent = this.getHypothesisOrThrow(parentId);
 
     this.assertSessionOpen(parent.sessionId, 'decompose');
@@ -107,6 +113,8 @@ export class TreeManager extends EventEmitter {
       throw new TreeError('Decomposition requires at least 2 sub-hypotheses');
     }
     for (const draft of children_) this.assertTitle(draft.title);
+    const axis = split.axis.trim();
+    if (axis === '') throw new TreeError('Decomposition requires the axis the children divide');
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
     }
@@ -140,6 +148,7 @@ export class TreeManager extends EventEmitter {
       this.emit('event', { type: 'hypothesis-added', hypothesis: child } satisfies TreeEvent);
     }
 
+    parent.decomposition = { axis, ...(split.gate === undefined ? {} : { gate: split.gate }) };
     parent.metadata.updatedAt = now;
 
     if (parent.status === 'pending') {

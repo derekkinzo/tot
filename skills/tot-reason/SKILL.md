@@ -47,9 +47,19 @@ Framing axes to choose from:
 - **By actor or population**: who or what is affected, or who is acting
 - **By category**: type of object, condition, or class of agent
 
+Pass the chosen axis as `axis` — it is required. Siblings can only be judged for overlap and coverage against a stated dimension, and naming it makes a split along two dimensions at once visible: if the children divide different dimensions, split along one and decompose again below it.
+
+Also state `gate`, how the children relate to the claim above them:
+
+- `one-of` — rivals, at most one of which holds. Two corroborated rivals are then a contradiction to resolve.
+- `any-of` — alternatives that may hold together, as contributing causes do (Mackie's INUS conditions).
+- `all-of` — parts that must all hold, so defeating any one part defeats the claim above it.
+
+Every node is a hypothesis: being a branch is structural, not a different kind of thing. A branch is a claim whose children are the ways it could be true (`one-of`, `any-of`) or the parts it requires (`all-of`).
+
 The siblings form a partition of the explanation space (cf. Chamberlin's method of multiple working hypotheses, 1890; Mill's joint methods, 1843):
-- **Distinct siblings**: each hypothesis covers a different possibility unless co-occurrence is real (Mackie's INUS conditions describe genuinely compound causes).
-- **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain.
+- **Distinct siblings**: each hypothesis covers a different possibility unless co-occurrence is real. `gate=one-of` is the claim that they are exclusive; declaring it means two corroborated siblings need reconciling.
+- **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain. Neither exclusivity nor exhaustiveness can be checked from the tree, so both stay advisory — what the tools report is a conflict between what was declared and what was found.
 
 After decomposing, STOP and review:
 - Dispatch the `decomposition-evaluator` subagent to advise on overlap, coverage, level of abstraction, and testability.
