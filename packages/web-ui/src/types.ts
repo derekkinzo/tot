@@ -4,6 +4,7 @@
 // unaffected.
 export type {
   HypothesisStatus,
+  EvidenceKind,
   Evidence,
   Conclusion,
   HypothesisMetadata,
@@ -15,13 +16,17 @@ export {
   isPruned, isLive, isTerminal, isOpen,
   countSupporting, countRefuting,
   deriveTitle, nodeLabel, splitProse, TITLE_MAX_LENGTH,
+  supportingWeight, refutingWeight, hasUngroundedVerdict, sessionIsGrounded,
 } from '@tot-mcp/shared';
 
 import type { HypothesisStatus } from '@tot-mcp/shared';
+import type { EvidenceLedger } from './tree/evidenceView';
 
 /** React Flow node payload for a hypothesis. Shared by the layout module and the node renderer. */
 export type HypothesisData = {
   label: string;
+  /** Evidence marks for the node face, precomputed so the renderer holds no rules. */
+  ledger: EvidenceLedger;
   status: HypothesisStatus;
   evidenceCount: number;
   selected: boolean;

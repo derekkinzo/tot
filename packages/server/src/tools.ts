@@ -83,6 +83,7 @@ const TOOL_DEFS = {
       type: z.enum(['supports', 'refutes', 'neutral']).describe('How this evidence relates to the hypothesis'),
       content: nonBlank(10000).describe('Description of the evidence'),
       source: z.string().max(10000).optional().describe('Where this evidence came from (logs, tests, docs, etc.)'),
+      decisive: z.boolean().optional().describe('Set when the verdict turns on this record, so it is read first.'),
     }),
   },
   eliminate_hypothesis: {
@@ -105,6 +106,16 @@ const TOOL_DEFS = {
     input: z.object({
       hypothesisId: identifier().describe('ID of the hypothesis to set out-of-scope'),
       reason: nonBlank(10000).describe('Why this branch is being set aside without investigation'),
+    }),
+  },
+  qualify_evidence: {
+    description: 'Re-label an existing evidence record: mark it as the record the verdict turns on, mark it as not discriminating between the live alternatives (it is retained and still listed, but stops counting toward a verdict), or link it to records it only observes jointly with. Only available while the session is open.',
+    input: z.object({
+      hypothesisId: identifier().describe('ID of the hypothesis holding the record'),
+      evidenceId: identifier().describe('ID of the evidence record to re-label'),
+      decisive: z.boolean().optional().describe('Set when the verdict turns on this record.'),
+      nonDiagnostic: z.boolean().optional().describe('Set when the record does not discriminate between the live alternatives.'),
+      linkedGroupId: z.string().min(1).max(200).optional().describe('Shared id for records that only support or refute jointly; a group counts as one observation.'),
     }),
   },
   get_tree: {
@@ -232,8 +243,8 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
     return { text: fmt.formatAddHypothesis(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
-  handlers.set('add_evidence', dispatch(TOOL_DEFS.add_evidence.input, ({ hypothesisId, type, content, source }) => {
-    tm.addEvidence(hypothesisId, type, content, source);
+  handlers.set('add_evidence', dispatch(TOOL_DEFS.add_evidence.input, ({ hypothesisId, type, content, source, decisive }) => {
+    tm.addEvidence(hypothesisId, type, content, source, decisive);
     // Re-read: addEvidence returns the cascade detail, but the formatter needs
     // the post-mutation hypothesis snapshot.
     const hypothesis = tm.getHypothesis(hypothesisId)!;
@@ -253,6 +264,11 @@ export function getToolHandlers(tm: TreeManager, getDataDir: () => string, onPer
   handlers.set('set_out_of_scope', dispatch(TOOL_DEFS.set_out_of_scope.input, ({ hypothesisId, reason }) => {
     const hypothesis = tm.setOutOfScope(hypothesisId, reason);
     return { text: fmt.formatSetOutOfScope(hypothesis, tm), sessionId: hypothesis.sessionId };
+  }));
+
+  handlers.set('qualify_evidence', dispatch(TOOL_DEFS.qualify_evidence.input, ({ hypothesisId, evidenceId, decisive, nonDiagnostic, linkedGroupId }) => {
+    const hypothesis = tm.qualifyEvidence(hypothesisId, evidenceId, { decisive, nonDiagnostic, linkedGroupId });
+    return { text: fmt.formatQualifyEvidence(hypothesis, evidenceId, tm), sessionId: hypothesis.sessionId };
   }));
 
   // Read-only: no sessionId → dispatch skips the drain.

@@ -27,7 +27,7 @@ describe('generateMarkdown', () => {
     map.set('a', hyp('a', {
       title: 'Child A', status: 'corroborated', parentId: 'root', depth: 1,
       conclusion: { verdict: 'corroborated', reason: 'survived', timestamp: 't' },
-      evidence: [{ id: 'e1', type: 'supports', content: 'good', timestamp: 't' }],
+      evidence: [{ id: 'e1', type: 'supports', kind: 'transcription', content: 'good', timestamp: 't' }],
     }));
     const md = generateMarkdown(session(), map);
     expect(md).toContain('# P');

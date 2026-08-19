@@ -49,15 +49,15 @@ describe('MCP Integration', () => {
   // ─── Tool Discovery ───
 
   describe('tool discovery', () => {
-    it('lists all 10 tools with correct names', async () => {
+    it('lists all 11 tools with correct names', async () => {
       const result = await client.listTools();
-      expect(result.tools).toHaveLength(10);
+      expect(result.tools).toHaveLength(11);
       const names = result.tools.map((t) => t.name).sort();
       expect(names).toEqual([
         'add_evidence', 'add_hypothesis', 'corroborate_hypothesis',
         'create_tree', 'decompose', 'eliminate_hypothesis',
         'get_status', 'get_tree',
-        'set_out_of_scope', 'validate_decomposition',
+        'qualify_evidence', 'set_out_of_scope', 'validate_decomposition',
       ]);
     });
 

@@ -1,4 +1,5 @@
-import { nodeLabel, type Hypothesis } from '../types';
+import { nodeLabel, type Evidence, type Hypothesis } from '../types';
+import { orderEvidenceRows } from '../tree/evidenceView';
 import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
 import { conclusionStatus } from '../tree/conclusion';
 
@@ -14,6 +15,7 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
   // timestamp; default them so the panel renders a graceful fallback instead
   // of throwing (it sits in its own ErrorBoundary, but degrading is friendlier).
   const evidence = hypothesis.evidence ?? [];
+  const rows = orderEvidenceRows({ ...hypothesis, evidence });
   const childCount = hypothesis.children?.length ?? 0;
   const createdAt = new Date(hypothesis.metadata?.createdAt ?? '');
   const createdLabel = Number.isNaN(createdAt.getTime()) ? '—' : createdAt.toLocaleTimeString();
@@ -107,7 +109,8 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
         );
       })()}
 
-      {/* Evidence */}
+      {/* Evidence, in reading order: refutation first, then neutral, then
+          support, and records asserted not to discriminate last. */}
       {evidence.length > 0 && (
         <div>
           <div style={{
@@ -121,33 +124,20 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
             Evidence ({evidence.length})
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {evidence.map((ev) => (
-              <div key={ev.id} style={{
-                padding: '12px 14px',
-                background: '#1c1f26',
-                borderRadius: 8,
-                borderLeft: `3px solid ${EVIDENCE_TYPE_COLORS[ev.type] ?? '#8b949e'}`,
-              }}>
-                <div style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  color: EVIDENCE_TYPE_COLORS[ev.type],
-                  marginBottom: 6,
-                }}>
-                  {ev.type}
-                </div>
-                <div style={{ fontSize: 15, lineHeight: 1.5, color: '#e1e4e8' }}>
-                  {ev.content}
-                </div>
-                {ev.source && (
-                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>
-                    Source: {ev.source}
-                  </div>
-                )}
-              </div>
+            {[...rows.refuters, ...rows.neutral, ...rows.supports].map((ev) => (
+              <EvidenceRow key={ev.id} ev={ev} />
             ))}
           </div>
+          {rows.tray.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
+                Considered, not discriminating ({rows.tray.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, opacity: 0.65 }}>
+                {rows.tray.map((ev) => <EvidenceRow key={ev.id} ev={ev} />)}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -178,6 +168,46 @@ export default function DetailPanel({ hypothesis, onClose }: Props) {
           <div>{childCount}</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * One evidence record. Verbatim capture and paraphrase are labelled distinctly,
+ * because whether a claim rests on bytes or on a retelling is the first thing an
+ * auditor needs to know.
+ */
+function EvidenceRow({ ev }: { ev: Evidence }) {
+  const accent = EVIDENCE_TYPE_COLORS[ev.type] ?? '#8b949e';
+  return (
+    <div style={{
+      padding: '12px 14px',
+      background: '#1c1f26',
+      borderRadius: 8,
+      borderLeft: `3px solid ${accent}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: accent }}>
+          {ev.type}
+        </span>
+        <span
+          title={ev.kind === 'artifact' ? 'Verbatim captured bytes' : 'Paraphrased by the agent'}
+          style={{
+            fontSize: 10, padding: '1px 6px', borderRadius: 10,
+            border: '1px solid #30363d',
+            color: ev.kind === 'artifact' ? '#3fb950' : '#8b949e',
+          }}
+        >
+          {ev.kind === 'artifact' ? 'verbatim' : 'paraphrase'}
+        </span>
+        {ev.decisive && (
+          <span title="The verdict turns on this record" style={{ fontSize: 11, color: '#d29922' }}>▪ decisive</span>
+        )}
+      </div>
+      <div style={{ fontSize: 15, lineHeight: 1.5, color: '#e1e4e8' }}>{ev.content}</div>
+      {ev.source && (
+        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>Source: {ev.source}</div>
+      )}
     </div>
   );
 }

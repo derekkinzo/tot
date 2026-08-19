@@ -42,10 +42,23 @@ export type HypothesisStatus =
 export interface Evidence {
   id: string;
   type: 'supports' | 'refutes' | 'neutral';
+  /** Whether the record is verbatim captured bytes or a paraphrase of them. */
+  kind: EvidenceKind;
   content: string;
   source?: string;
+  /** Marks a record the verdict turns on, so it can be read first. */
+  decisive?: boolean;
+  /** Asserted — never inferred — when a record does not discriminate between the
+   *  live alternatives. Such a record is retained and still counted, but carries
+   *  no weight toward a verdict. */
+  nonDiagnostic?: boolean;
+  /** Records that only support or refute jointly. A group carries the weight of
+   *  one independent observation however many records it holds. */
+  linkedGroupId?: string;
   timestamp: string;
 }
+
+export type EvidenceKind = 'artifact' | 'transcription';
 
 export interface Conclusion {
   verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
@@ -133,6 +146,48 @@ export const countSupporting = (h: Hypothesis): number =>
   h.evidence.filter((e) => e.type === 'supports').length;
 export const countRefuting = (h: Hypothesis): number =>
   h.evidence.filter((e) => e.type === 'refutes').length;
+
+/**
+ * Independent discriminating force of the supporting / refuting evidence, as
+ * distinct from how many records were filed.
+ *
+ * Records sharing a `linkedGroupId` only observe jointly, so a group weighs one;
+ * a record asserted `nonDiagnostic` weighs nothing. Use a weight wherever the
+ * question is "how strongly is this held", and a count wherever the reader is
+ * comparing the number against a list of records.
+ */
+export const supportingWeight = (h: Hypothesis): number => weigh(h, 'supports');
+export const refutingWeight = (h: Hypothesis): number => weigh(h, 'refutes');
+
+function weigh(h: Hypothesis, type: Evidence['type']): number {
+  const groups = new Set<string>();
+  let lone = 0;
+  for (const e of h.evidence) {
+    if (e.type !== type || e.nonDiagnostic) continue;
+    if (e.linkedGroupId === undefined) lone += 1;
+    else groups.add(e.linkedGroupId);
+  }
+  return lone + groups.size;
+}
+
+/**
+ * True when a hypothesis holds a settled verdict but no verbatim record.
+ *
+ * Exactly computable and free of judgement: it reports that a conclusion rests
+ * only on paraphrase, never that the conclusion is wrong.
+ */
+export function hasUngroundedVerdict(h: Hypothesis): boolean {
+  return isTerminal(h.status) && !h.evidence.some((e) => e.kind === 'artifact');
+}
+
+/** True when any hypothesis in the set carries a verbatim record. Distinguishes
+ *  a session that never captured artifacts from one whose verdicts skipped them. */
+export function sessionIsGrounded(hypotheses: Iterable<Hypothesis>): boolean {
+  for (const h of hypotheses) {
+    if (h.evidence.some((e) => e.kind === 'artifact')) return true;
+  }
+  return false;
+}
 
 // ─── Titles ───
 
@@ -242,6 +297,9 @@ export function normalizeHypothesisPayload(raw: unknown): Hypothesis {
   // becomes the statement, and the label is derived from it.
   const statement = node.statement ?? content;
   const title = node.title ?? deriveTitle(statement ?? '');
+  // A record written before the distinction existed is a paraphrase: it holds
+  // text the agent typed, not bytes captured from a source.
+  const evidence = (node.evidence ?? []).map((e) => (e.kind ? e : { ...e, kind: 'transcription' as const }));
 
-  return { ...node, title, ...(statement === undefined ? {} : { statement }) };
+  return { ...node, title, evidence, ...(statement === undefined ? {} : { statement }) };
 }

@@ -216,6 +216,7 @@ export class TreeManager extends EventEmitter {
    * @param type - Relationship of evidence to the hypothesis
    * @param content - Description of the evidence
    * @param source - Optional provenance
+   * @param decisive - Marks a record the verdict turns on
    * @returns The created evidence record plus the cascade-demoted ancestors
    *   so callers can journal each ancestor's hypothesis-updated entry.
    * @throws TreeError if hypothesis is eliminated/out-of-scope, or if
@@ -226,6 +227,7 @@ export class TreeManager extends EventEmitter {
     type: 'supports' | 'refutes' | 'neutral',
     content: string,
     source?: string,
+    decisive?: boolean,
   ): { evidence: Evidence; demotedAncestors: Hypothesis[] } {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
 
@@ -254,8 +256,10 @@ export class TreeManager extends EventEmitter {
     const evidence: Evidence = {
       id: uuid(),
       type,
+      kind: 'transcription',
       content,
       source,
+      ...(decisive === undefined ? {} : { decisive }),
       timestamp: now,
     };
 
@@ -307,6 +311,42 @@ export class TreeManager extends EventEmitter {
     this.setCurrent(hypothesis.sessionId);
 
     return { evidence, demotedAncestors };
+  }
+
+  /**
+   * Re-labels an existing evidence record: whether the verdict turns on it,
+   * whether it discriminates between the live alternatives, and which records it
+   * only observes jointly with.
+   *
+   * Permitted only while the session is open. New refuting evidence is new
+   * information and may reopen a closed session, but re-labelling a record that
+   * a verdict already rested on can hollow out that verdict's support, which
+   * deserves an explicit reopen rather than a silent one.
+   *
+   * @throws TreeError if the session is closed, or the record is not on the node
+   */
+  qualifyEvidence(
+    hypothesisId: string,
+    evidenceId: string,
+    qualifiers: { decisive?: boolean; nonDiagnostic?: boolean; linkedGroupId?: string },
+  ): Hypothesis {
+    const hypothesis = this.getHypothesisOrThrow(hypothesisId);
+    this.assertSessionOpen(hypothesis.sessionId, 'qualify evidence');
+
+    const record = hypothesis.evidence.find((e) => e.id === evidenceId);
+    if (!record) {
+      throw new TreeError(`No evidence record ${evidenceId} on this hypothesis`);
+    }
+
+    if (qualifiers.decisive !== undefined) record.decisive = qualifiers.decisive;
+    if (qualifiers.nonDiagnostic !== undefined) record.nonDiagnostic = qualifiers.nonDiagnostic;
+    if (qualifiers.linkedGroupId !== undefined) record.linkedGroupId = qualifiers.linkedGroupId;
+
+    hypothesis.metadata.updatedAt = new Date().toISOString();
+    this.incrementMutationCounter(hypothesis.sessionId);
+    this.emit('event', { type: 'hypothesis-updated', hypothesis } satisfies TreeEvent);
+    this.setCurrent(hypothesis.sessionId);
+    return hypothesis;
   }
 
   /**

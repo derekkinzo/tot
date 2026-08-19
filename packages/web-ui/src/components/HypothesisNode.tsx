@@ -1,6 +1,6 @@
 import { memo, useState, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { STATUS_NODE_STYLES } from '../theme';
+import { STATUS_NODE_STYLES, EVIDENCE_TYPE_COLORS } from '../theme';
 import { isPruned, type HypothesisData } from '../types';
 
 export type { HypothesisData };
@@ -70,12 +70,32 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           {d.label}
         </div>
 
-        {/* Footer: evidence count + collapse chevron */}
+        {/* Footer: evidence ledger + collapse chevron. Refutation leads, and
+            support is never given equal visual weight — evidence that has faced
+            no refutation is the bias the method exists to counter. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          {d.evidenceCount > 0 && (
-            <span style={{ fontSize: 11, color: '#8b949e' }}>
-              {d.evidenceCount} evidence
+          {d.ledger.refuting > 0 && (
+            <span title={`${d.ledger.refuting} independent refutation(s)`}
+              style={{ fontSize: 11, fontWeight: 700, color: EVIDENCE_TYPE_COLORS.refutes }}>
+              ✗{d.ledger.refuting}
             </span>
+          )}
+          {d.ledger.supporting > 0 && (
+            <span title={`${d.ledger.supporting} independent supporting observation(s)`}
+              style={{ fontSize: 11, color: '#8b949e' }}>
+              ✓{d.ledger.supporting}
+            </span>
+          )}
+          {d.ledger.neutral > 0 && (
+            <span title={`${d.ledger.neutral} neutral record(s)`} style={{ fontSize: 11, color: '#6b7280' }}>
+              ·{d.ledger.neutral}
+            </span>
+          )}
+          {d.ledger.hasDecisive && (
+            <span title="Carries a record the verdict turns on" style={{ fontSize: 11, color: '#d29922' }}>▪</span>
+          )}
+          {d.ledger.ungrounded && (
+            <span title="Settled without any verbatim record attached" style={{ fontSize: 11, color: '#d29922' }}>⚠</span>
           )}
           {d.childCount > 0 && (
             <button

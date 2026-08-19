@@ -1,7 +1,8 @@
 import type { Node, Edge } from '@xyflow/react';
 import { flextree } from 'd3-flextree';
 import { hierarchy } from 'd3-hierarchy';
-import { isPruned, nodeLabel, type Hypothesis, type HypothesisData } from '../types';
+import { isPruned, nodeLabel, sessionIsGrounded, type Hypothesis, type HypothesisData } from '../types';
+import { evidenceLedger } from '../tree/evidenceView';
 import { HIGHLIGHT_COLORS } from '../theme';
 import { walkToRoot } from '../tree/walk';
 
@@ -109,6 +110,10 @@ export function computeLayout(
 
   const tree = layout(root);
 
+  // Whether this session captured any verbatim record at all. Computed once:
+  // the ungrounded mark is only meaningful relative to a session that does.
+  const sessionGrounded = sessionIsGrounded(hypotheses.values());
+
   // Convert to React Flow nodes + edges
   const nodes: Node<HypothesisData>[] = [];
   const edges: Edge[] = [];
@@ -127,6 +132,7 @@ export function computeLayout(
       position: { x: treeNode.x - NODE_WIDTH / 2, y: treeNode.y },
       data: {
         label: nodeLabel(h),
+        ledger: evidenceLedger(h, { sessionGrounded }),
         status: h.status,
         evidenceCount: h.evidence.length,
         selected: id === selectedId,

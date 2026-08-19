@@ -20,7 +20,7 @@ function session(over: Partial<Session> = {}): Session {
   return { id: 's1', problem: 'P', rootNodeId: 'r', status: 'open', createdAt: 't', ...over };
 }
 function ev(id: string, type: Evidence['type'] = 'supports'): Evidence {
-  return { id, type, content: `ev ${id}`, timestamp: 't' };
+  return { id, type, kind: 'transcription', content: `ev ${id}`, timestamp: 't' };
 }
 
 describe('treeReducer', () => {

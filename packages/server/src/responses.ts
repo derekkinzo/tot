@@ -48,7 +48,7 @@ import {
   suggestsElimination,
   lacksDiagnosticity,
 } from './advisories.js';
-import { nodeLabel } from '@tot-mcp/shared';
+import { nodeLabel, supportingWeight, refutingWeight } from '@tot-mcp/shared';
 import { pickActiveSession } from './persistence.js';
 import type { Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
@@ -396,6 +396,22 @@ export function formatValidateDecomposition(parentId: string, check: StructuralC
   result += `Level: are all hypotheses at the same level of abstraction?\n`;
 
   return result;
+}
+
+/** Confirms a re-label and restates the resulting weights, so the caller sees
+ *  what the change did to the tally rather than only that it was accepted. */
+export function formatQualifyEvidence(hypothesis: Hypothesis, evidenceId: string, tm: TreeManager): string {
+  const record = hypothesis.evidence.find((e) => e.id === evidenceId);
+  const marks = [
+    record?.decisive ? 'decisive' : null,
+    record?.nonDiagnostic ? 'not discriminating' : null,
+    record?.linkedGroupId ? `linked to group ${record.linkedGroupId}` : null,
+  ].filter(Boolean);
+  return `✓ Evidence ${evidenceId.slice(0, 8)} on "${nodeLabel(hypothesis)}" is now ${marks.join(', ') || 'unqualified'}\n\n` +
+    `Weight: ${supportingWeight(hypothesis)} supporting, ${refutingWeight(hypothesis)} refuting ` +
+    `(${countSupporting(hypothesis)} and ${countRefuting(hypothesis)} records)\n` +
+    `A record that does not discriminate is retained and still listed; it stops counting toward a verdict.\n\n` +
+    formatTreeSummary(tm);
 }
 
 export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null): string {

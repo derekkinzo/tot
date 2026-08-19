@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { Hypothesis, Session } from '../types';
 import ExportButton from './ExportButton';
+import { groundingMeter } from '../tree/evidenceView';
 import { STATUS_COLORS, STATUS_LABELS } from '../theme';
 
 interface Props {
@@ -9,6 +10,9 @@ interface Props {
 }
 
 export default function StatusSummary({ hypotheses, session }: Props) {
+  // How many settled leaves rest on verbatim evidence: a session-level read on
+  // whether the conclusions can be checked at all.
+  const grounding = useMemo(() => groundingMeter(hypotheses.values()), [hypotheses]);
   const counts = useMemo(() => {
     let pending = 0, exploring = 0, eliminated = 0, corroborated = 0, outOfScope = 0;
     for (const [, h] of hypotheses) {
@@ -24,6 +28,7 @@ export default function StatusSummary({ hypotheses, session }: Props) {
   }, [hypotheses]);
 
   if (counts.total === 0) return null;
+
 
   return (
     <div className="overlay-widget" style={{
@@ -41,6 +46,17 @@ export default function StatusSummary({ hypotheses, session }: Props) {
       <span style={{ color: '#6b7280', borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
         {counts.total} total
       </span>
+      {grounding.total > 0 && (
+        <span
+          title="Settled leaves whose verdict rests on a verbatim record rather than a paraphrase"
+          style={{
+            borderLeft: '1px solid #30363d', paddingLeft: 12,
+            color: grounding.grounded === grounding.total ? '#3fb950' : '#d29922',
+          }}
+        >
+          grounded {grounding.grounded}/{grounding.total}
+        </span>
+      )}
       <span style={{ borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
         <ExportButton session={session} hypotheses={hypotheses} />
       </span>
