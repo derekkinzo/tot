@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { writeFileSync, renameSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { getTotDir } from './storage-paths.js';
+import { artifactsDirFor } from './artifacts.js';
 
 /**
  * Stable directory key for a project: the first 16 hex chars of
@@ -28,6 +29,11 @@ export function getCentralProjectDir(projectDir: string): string {
 export function getCentralSessionsDir(projectDir: string): string {
   return join(getCentralProjectDir(projectDir), 'sessions');
 }
+/** <totDir>/projects/<hash>/artifacts — where this project's captured bytes live. */
+export function getCentralArtifactsDir(projectDir: string): string {
+  return artifactsDirFor(getCentralSessionsDir(projectDir));
+}
+
 
 /**
  * Records the real project path alongside its hash so a future cross-project

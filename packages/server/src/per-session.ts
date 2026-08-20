@@ -20,7 +20,7 @@ import { registerTools } from './tools.js';
 import { registerPrompts } from './prompts.js';
 import { startHttpServer } from './http.js';
 import { makeLock } from './mutex.js';
-import { getCentralSessionsDir, writeProjectMeta } from './central-storage.js';
+import { getCentralArtifactsDir, getCentralSessionsDir, writeProjectMeta } from './central-storage.js';
 import { migrateLegacySessions } from './legacy-migration.js';
 import { STAGNATION_THRESHOLD_DEFAULT, SHUTDOWN_DEADLINE_MS } from './defaults.js';
 import type { ProjectState } from './project-state.js';
@@ -52,6 +52,7 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   writeProjectMeta(projectDir);
 
   const dataDir = getCentralSessionsDir(projectDir);
+  const artifactsDir = getCentralArtifactsDir(projectDir);
 
   const stagnationThreshold = parseInt(
     process.env['TOT_STAGNATION_THRESHOLD'] || String(STAGNATION_THRESHOLD_DEFAULT),
@@ -90,6 +91,7 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   const projectState: ProjectState = {
     projectDir,
     dataDir,
+    artifactsDir,
     tm,
     sessionIndex,
     ensureSessionLoaded,

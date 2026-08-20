@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { getPathToRoot, computeLayout } from './treeLayout';
 import { HIGHLIGHT_COLORS } from '../theme';
+import { NODE_WIDTH, NODE_HEIGHT } from '../geometry';
 import type { Hypothesis, HypothesisStatus } from '../types';
 
 function hyp(id: string, parentId: string | null, children: string[], status: HypothesisStatus = 'exploring'): Hypothesis {
   return {
-    id, parentId, sessionId: 's', depth: 0, content: id, status,
+    id, parentId, sessionId: 's', depth: 0, title: id, status,
     evidence: [], metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children,
   };
 }
@@ -41,6 +42,19 @@ describe('getPathToRoot', () => {
 describe('computeLayout', () => {
   const NO_PATH = new Set<string>();
   const NO_COLLAPSE = new Set<string>();
+
+  it('declares the box the layout reserved, so overview widgets can place a node', () => {
+    // The layout spaces siblings by NODE_WIDTH/NODE_HEIGHT plus a gap, so the
+    // reserved box is known before the DOM measures anything. A node that keeps
+    // it to itself leaves every consumer that reads dimensions off the node —
+    // the minimap among them — with nothing to draw.
+    const m = tree(hyp('root', null, ['a']), hyp('a', 'root', []));
+    const { nodes } = computeLayout(m, 'root', null, NO_PATH, NO_COLLAPSE);
+    for (const n of nodes) {
+      expect(n.width).toBe(NODE_WIDTH);
+      expect(n.height).toBe(NODE_HEIGHT);
+    }
+  });
 
   it('lays out a simple tree: every node becomes a positioned node', () => {
     const m = tree(hyp('root', null, ['a', 'b']), hyp('a', 'root', []), hyp('b', 'root', []));
@@ -105,6 +119,30 @@ describe('computeLayout', () => {
     expect(nodes.map((n) => n.id).sort()).toEqual(['a', 'b', 'root']);
     // No duplicate nodes from re-descending the cycle.
     expect(new Set(nodes.map((n) => n.id)).size).toBe(nodes.length);
+  });
+
+  it('leaves clear space between siblings, so no face overlaps its neighbour', () => {
+    // The layout reserves room for a face of NODE_WIDTH and positions each node
+    // by that same width; a disagreement between the two shows up here as
+    // overlapping siblings.
+    const m = tree(
+      hyp('root', null, ['a', 'b', 'c']),
+      hyp('a', 'root', []), hyp('b', 'root', []), hyp('c', 'root', []),
+    );
+    const { nodes } = computeLayout(m, 'root', null, NO_PATH, NO_COLLAPSE);
+    const xs = nodes.filter((n) => n.id !== 'root').map((n) => n.position.x).sort((p, q) => p - q);
+    for (let i = 1; i < xs.length; i++) {
+      expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(NODE_WIDTH);
+    }
+  });
+
+  it('separates each level by more than a face is tall, so a child never overlaps its parent', () => {
+    const m = tree(hyp('root', null, ['a']), hyp('a', 'root', ['b']), hyp('b', 'a', []));
+    const { nodes } = computeLayout(m, 'root', null, NO_PATH, NO_COLLAPSE);
+    const ys = nodes.map((n) => n.position.y).sort((p, q) => p - q);
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(NODE_HEIGHT);
+    }
   });
 
   it('styles an edge as on-path only when BOTH endpoints are on the path', () => {

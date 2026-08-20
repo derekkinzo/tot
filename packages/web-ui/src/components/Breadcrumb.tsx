@@ -1,3 +1,4 @@
+import { nodeLabel } from '../types';
 import type { Hypothesis } from '../types';
 import { walkToRoot } from '../tree/walk';
 
@@ -33,7 +34,7 @@ export default function Breadcrumb({ selectedId, hypotheses, onNavigate }: Props
               maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}
           >
-            {h.content.slice(0, 30)}{h.content.length > 30 ? '…' : ''}
+            {nodeLabel(h)}
           </button>
         </span>
       ))}

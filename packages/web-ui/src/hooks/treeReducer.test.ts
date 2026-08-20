@@ -8,7 +8,7 @@ function hyp(id: string, over: Partial<Hypothesis> = {}): Hypothesis {
     parentId: null,
     sessionId: 's1',
     depth: 0,
-    content: `content ${id}`,
+    title: `content ${id}`,
     status: 'pending',
     evidence: [],
     metadata: { createdAt: 't', updatedAt: 't', source: 'agent' },
@@ -20,7 +20,7 @@ function session(over: Partial<Session> = {}): Session {
   return { id: 's1', problem: 'P', rootNodeId: 'r', status: 'open', createdAt: 't', ...over };
 }
 function ev(id: string, type: Evidence['type'] = 'supports'): Evidence {
-  return { id, type, content: `ev ${id}`, timestamp: 't' };
+  return { id, type, kind: 'transcription', content: `ev ${id}`, timestamp: 't' };
 }
 
 describe('treeReducer', () => {
@@ -48,7 +48,7 @@ describe('treeReducer', () => {
 
   it('hypothesis-added inserts the node and records it as lastAddedId', () => {
     const next = reducer(initialTreeState(), { type: 'hypothesis-added', hypothesis: hyp('x') });
-    expect(next.hypotheses.get('x')?.content).toBe('content x');
+    expect(next.hypotheses.get('x')?.title).toBe('content x');
     expect(next.lastAddedId).toBe('x');
   });
 

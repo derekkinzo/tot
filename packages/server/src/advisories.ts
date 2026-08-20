@@ -60,6 +60,23 @@ export function lacksSourceDiversity(hypothesis: Hypothesis): boolean {
   return sources.length >= 2 && new Set(sources).size === 1;
 }
 
+/**
+ * Whether the latest record spans several lines while citing no captured bytes.
+ *
+ * That shape is what output pasted into a record looks like, and it is all this
+ * observes: a note somebody typed across two lines satisfies it too, so the
+ * origin of the text is not established here.
+ *
+ * Worth surfacing because text that only exists inside a record cannot be
+ * re-read or checked against a source, while a file it may have come from can be
+ * captured and cited instead.
+ */
+export function readsAsRetypedOutput(hypothesis: Hypothesis): boolean {
+  const last = hypothesis.evidence[hypothesis.evidence.length - 1];
+  if (!last || last.kind === 'artifact') return false;
+  return last.content.trim().includes('\n');
+}
+
 /** Elimination nudge (Bacon/Mill eliminative induction): ≥2 refuting, zero supporting. */
 export function suggestsElimination(hypothesis: Hypothesis): boolean {
   return countRefuting(hypothesis) >= 2 && countSupporting(hypothesis) === 0;

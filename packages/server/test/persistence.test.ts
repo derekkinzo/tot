@@ -77,7 +77,7 @@ describe('Persistence Roundtrip', () => {
 
     const { childIds } = parseResult(await c1.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['Cause A', 'Cause B', 'Cause C'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['Cause A', 'Cause B', 'Cause C'] },
     }));
 
     await c1.callTool({
@@ -102,12 +102,12 @@ describe('Persistence Roundtrip', () => {
     expect(sessions[0].problem).toBe('Persistent problem');
 
     expect(hypotheses).toHaveLength(4); // root + 3 children
-    const hypothesisA = hypotheses.find((h) => h.content === 'Cause A');
+    const hypothesisA = hypotheses.find((h) => h.title === 'Cause A');
     expect(hypothesisA?.status).toBe('exploring');
     expect(hypothesisA?.evidence).toHaveLength(1);
     expect(hypothesisA?.evidence[0].content).toBe('Evidence for A');
 
-    const hypothesisB = hypotheses.find((h) => h.content === 'Cause B');
+    const hypothesisB = hypotheses.find((h) => h.title === 'Cause B');
     expect(hypothesisB?.status).toBe('eliminated');
     expect(hypothesisB?.conclusion?.reason).toBe('B is ruled out');
   });
@@ -121,7 +121,7 @@ describe('Persistence Roundtrip', () => {
     }));
     await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['X', 'Y'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['X', 'Y'] },
     });
     await cleanup();
 
@@ -230,6 +230,40 @@ describe('Persistence Roundtrip', () => {
     expect(index[0].status).toBe('open');
   });
 
+  it('says so when a journal was written by a newer build, and still reads it', () => {
+    // Silence would leave a reader believing they had the whole tree while
+    // fields this build does not know about were dropped on the way in.
+    const sessionId = '00000000-0000-4000-8000-aaaaaaaaaa11';
+    const rootId = '00000000-0000-4000-8000-aaaaaaaaaa12';
+    const ts = '2024-03-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, v: JOURNAL_SCHEMA_VERSION + 1, type: 'session-created', payload: {
+        id: sessionId, problem: 'From the future', rootNodeId: rootId, status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, v: JOURNAL_SCHEMA_VERSION + 1, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, title: 'Root',
+        status: 'exploring', evidence: [],
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const warnings: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { warnings.push(args.join(' ')); };
+    try {
+      const { sessions, hypotheses } = loadAllSessions(tempDir);
+      // Read, not refused: a partial view of a session beats no view of it.
+      expect(sessions).toHaveLength(1);
+      expect(hypotheses.find((h) => h.id === rootId)?.title).toBe('Root');
+    } finally {
+      console.error = original;
+    }
+    expect(warnings.join('\n')).toMatch(/newer version/i);
+    expect(warnings.join('\n')).toContain(filePath);
+  });
+
   it('replays a legacy session whose events carry the removed score fields', () => {
     // score / scoreRationale were removed from the model. Old .tot sessions
     // on user machines still carry those keys in their hypothesis payloads;
@@ -257,12 +291,18 @@ describe('Persistence Roundtrip', () => {
     expect(sessions[0].id).toBe(sessionId);
     const root = hypotheses.find((h) => h.id === rootId);
     expect(root).toBeDefined();
-    expect(root!.content).toBe('Root');
+    // The one prose field a pre-title payload carries becomes the label. It
+    // becomes a statement only where it says more than the label does, so a
+    // node whose prose was already label-sized comes back without one.
+    expect(root!.title).toBe('Root');
+    expect(root!.statement).toBeUndefined();
     expect(root!.status).toBe('exploring');
-    // Replay reconstructs via a structural cast, so the legacy `score` key
-    // survives as an inert property — no code reads it. The contract is that
-    // replay tolerates the extra field and the tree is fully usable, NOT
-    // that the property is stripped.
+    // Fields no longer in the contract are dropped rather than carried as inert
+    // properties, so they cannot be re-journaled into every future snapshot.
+    const asRecord = root! as unknown as Record<string, unknown>;
+    expect('score' in asRecord).toBe(false);
+    expect('scoreRationale' in asRecord).toBe(false);
+    expect('content' in asRecord).toBe(false);
     expect(root!.evidence).toEqual([]);
     expect(root!.children).toEqual([]);
   });
@@ -278,7 +318,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'refutes', content: 'no' } });
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'gone' } });
@@ -304,11 +344,11 @@ describe('Persistence Roundtrip', () => {
     }));
     const decompA = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     const decompA1 = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+      arguments: { axis: 'by cause', parentId: decompA.childIds[0], children: ['A1', 'A2'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'supports', content: 'survives' } });
     await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'A1' } });
@@ -352,7 +392,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
     await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
@@ -372,7 +412,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });
     await client.callTool({ name: 'corroborate_hypothesis', arguments: { hypothesisId: childIds[0], reason: 'A' } });
@@ -395,11 +435,11 @@ describe('Persistence Roundtrip', () => {
     }));
     const decompA = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     const decompA1 = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+      arguments: { axis: 'by cause', parentId: decompA.childIds[0], children: ['A1', 'A2'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: decompA1.childIds[0], type: 'refutes', content: 'no' } });
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: decompA1.childIds[0], reason: 'gone' } });
@@ -440,11 +480,11 @@ describe('Persistence Roundtrip', () => {
     }));
     const decompA = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     const decompA1 = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: decompA.childIds[0], children: ['A1', 'A2'] },
+      arguments: { axis: 'by cause', parentId: decompA.childIds[0], children: ['A1', 'A2'] },
     }));
     // A2 corroborated under A; A then eliminated (A2 buried under pruned A);
     // B eliminated. Session abandons (no live corroboration on the spine).
@@ -473,7 +513,7 @@ describe('Persistence Roundtrip', () => {
     }));
     const { childIds } = parseResult(await client.callTool({
       name: 'decompose',
-      arguments: { parentId: rootId, children: ['A', 'B'] },
+      arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[1], type: 'refutes', content: 'no' } });
     await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: childIds[1], reason: 'gone' } });
@@ -575,7 +615,7 @@ describe('Persistence Roundtrip', () => {
       name: 'create_tree', arguments: { problem: 'Order pin' },
     }));
     const { childIds } = parseResult(await client.callTool({
-      name: 'decompose', arguments: { parentId: rootId, children: ['A', 'B'] },
+      name: 'decompose', arguments: { axis: 'by cause', parentId: rootId, children: ['A', 'B'] },
     }));
     // Resolve via A corroborated, B eliminated → session-completed.
     await client.callTool({ name: 'add_evidence', arguments: { hypothesisId: childIds[0], type: 'supports', content: 'yes' } });

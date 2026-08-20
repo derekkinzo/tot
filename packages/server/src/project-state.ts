@@ -9,6 +9,8 @@ import type { SessionIndex } from './persistence.js';
 export interface ProjectState {
   projectDir: string;
   dataDir: string;
+  /** Where this project's captured evidence bytes live. */
+  artifactsDir: string;
   tm: TreeManager;
   sessionIndex: SessionIndex[];
   ensureSessionLoaded: (sessionId: string) => boolean;

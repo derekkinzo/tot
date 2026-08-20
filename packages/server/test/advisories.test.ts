@@ -2,23 +2,33 @@ import { describe, it, expect } from 'vitest';
 import {
   countSupporting, countRefuting,
   needsBaselinePrompt, readsAsInference, isConfirmationBias,
-  lacksSourceDiversity, suggestsElimination, lacksDiagnosticity,
+  lacksSourceDiversity, suggestsElimination, lacksDiagnosticity, readsAsRetypedOutput,
 } from '../src/advisories.js';
 import type { Evidence, Hypothesis, HypothesisStatus } from '../src/types.js';
 
 let n = 0;
 function ev(type: Evidence['type'], content = 'x', source?: string): Evidence {
-  return { id: `e${n++}`, type, content, source, timestamp: '' };
+  return { id: `e${n++}`, type, kind: 'transcription', content, source, timestamp: '' };
+}
+/** A record backed by captured bytes. */
+function captured(type: Evidence['type'], content = 'x'): Evidence {
+  return {
+    id: `e${n++}`, type, kind: 'artifact', content, timestamp: '',
+    artifact: {
+      id: 'a', sessionId: 's', filename: 'build.log', mediaType: 'text/plain',
+      bytes: 1, digest: { alg: 'sha-256', value: 'd' }, capturedAt: '',
+    },
+  };
 }
 function hyp(evidence: Evidence[], status: HypothesisStatus = 'exploring'): Hypothesis {
   return {
-    id: 'h', parentId: 'root', sessionId: 's', depth: 1, content: 'h', status,
+    id: 'h', parentId: 'root', sessionId: 's', depth: 1, title: 'h', status,
     evidence, metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
   };
 }
 function sib(id: string, status: HypothesisStatus, evidence: Evidence[] = []): Hypothesis {
   return {
-    id, parentId: 'root', sessionId: 's', depth: 1, content: id, status,
+    id, parentId: 'root', sessionId: 's', depth: 1, title: id, status,
     evidence, metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
   };
 }
@@ -134,5 +144,36 @@ describe('lacksDiagnosticity (Heuer ACH)', () => {
   it('false when the latest evidence is not supporting', () => {
     const h = hyp([ev('supports'), ev('refutes')]);
     expect(lacksDiagnosticity(h, [sib('a', 'exploring')])).toBe(false);
+  });
+});
+
+describe('readsAsRetypedOutput', () => {
+  // Bytes that were retyped into a record cannot be re-read or checked against
+  // their source; the file they came from can be captured and cited instead.
+
+  it('fires on a transcription carrying several lines of output', () => {
+    const h = hyp([ev('refutes', 'FAILED test_parse\n  expected 3, got 0\n  at parser.ts:88')]);
+    expect(readsAsRetypedOutput(h)).toBe(true);
+  });
+
+  it('does not fire on a single-line observation, which is a summary not a paste', () => {
+    expect(readsAsRetypedOutput(hyp([ev('refutes', 'the parser rejects the third field')]))).toBe(false);
+  });
+
+  it('does not fire once the record cites captured bytes', () => {
+    expect(readsAsRetypedOutput(hyp([captured('refutes', 'FAILED test_parse\n  expected 3, got 0')]))).toBe(false);
+  });
+
+  it('judges the record just filed, not an earlier one', () => {
+    const h = hyp([ev('refutes', 'line one\nline two'), ev('supports', 'a summary')]);
+    expect(readsAsRetypedOutput(h)).toBe(false);
+  });
+
+  it('does not fire on an empty node', () => {
+    expect(readsAsRetypedOutput(hyp([]))).toBe(false);
+  });
+
+  it('ignores surrounding blank lines, which are not multiple lines of output', () => {
+    expect(readsAsRetypedOutput(hyp([ev('supports', '\n  one observation  \n')]))).toBe(false);
   });
 });

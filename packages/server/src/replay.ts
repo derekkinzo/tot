@@ -1,13 +1,26 @@
 import { subtreeContainsCorroborated } from './closure.js';
+import { normalizeEvidenceRecord, normalizeHypothesisPayload } from '@tot-mcp/shared';
 import type { Evidence, Hypothesis, Session } from './types.js';
 
 /**
- * Current journal schema version, stamped on every entry written. Bump when the
- * on-disk entry/payload shape changes incompatibly; {@link applyEntry} can then
- * branch on `entry.v` to upcast older entries. Entries with no `v` predate
- * versioning and are treated as v1.
+ * Current journal schema version, stamped on every entry written.
+ *
+ * Field defaulting is deliberately NOT keyed on this: {@link applyEntry} pipes
+ * every hypothesis payload through {@link normalizeHypothesisPayload}, which
+ * defaults each field from its own absence. Writers that ship at different times
+ * all stamp the version current for them while omitting fields added later, so a
+ * version-keyed branch would not fire on them.
+ *
+ * The version's remaining use is detecting a file written by a NEWER build than
+ * the reader, which is reported rather than folded silently.
  */
-export const JOURNAL_SCHEMA_VERSION = 1;
+export const JOURNAL_SCHEMA_VERSION = 2;
+
+/** True when an entry was written by a build newer than this one. Entries with
+ *  no `v` predate versioning and are older, never newer. */
+export function isFromNewerWriter(entry: JournalEntry): boolean {
+  return (entry.v ?? 1) > JOURNAL_SCHEMA_VERSION;
+}
 
 /** A journal entry as stored on disk: a timestamped, typed, versioned payload. */
 export interface JournalEntry {
@@ -32,10 +45,16 @@ export interface ReplayState {
    *  flushed onto the node when it first appears, so order-tolerance extends to
    *  evidence and nothing is silently dropped. */
   pendingEvidence: Map<string, Evidence[]>;
+  /** Whether any entry was stamped by a build newer than this one, so a reader
+   *  can say that fields it does not know about were dropped on the way in. */
+  sawNewerWriter: boolean;
 }
 
 export function emptyReplayState(): ReplayState {
-  return { sessions: [], hypotheses: [], hypothesisIndex: new Map(), pendingEvidence: new Map() };
+  return {
+    sessions: [], hypotheses: [], hypothesisIndex: new Map(),
+    pendingEvidence: new Map(), sawNewerWriter: false,
+  };
 }
 
 /**
@@ -52,6 +71,7 @@ export function emptyReplayState(): ReplayState {
  */
 export function applyEntry(state: ReplayState, entry: JournalEntry): void {
   const { sessions, hypotheses, hypothesisIndex, pendingEvidence } = state;
+  if (isFromNewerWriter(entry)) state.sawNewerWriter = true;
   // Upsert a hypothesis by id in O(1): replace in place if known, else append
   // and record its index. Shared by add (writer never re-adds an id, but upsert
   // is safe) and update (order-tolerant: an update with no prior add lands it).
@@ -78,7 +98,7 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
     }
     case 'hypothesis-added':
     case 'hypothesis-updated': {
-      upsertHypothesis(entry.payload as Hypothesis);
+      upsertHypothesis(normalizeHypothesisPayload(entry.payload));
       break;
     }
     case 'evidence-added': {
@@ -87,7 +107,10 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
       // does not fire on journals this writer produces. It is retained so a
       // legacy or hand-authored journal that does carry the event still replays
       // correctly.
-      const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
+      const { hypothesisId, evidence: raw } = entry.payload as { hypothesisId: string; evidence: unknown };
+      // Normalized on the same terms as a snapshot's records, so a required
+      // field does not depend on which event carried it.
+      const evidence = normalizeEvidenceRecord(raw);
       const idx = hypothesisIndex.get(hypothesisId);
       if (idx !== undefined) {
         hypotheses[idx].evidence.push(evidence);

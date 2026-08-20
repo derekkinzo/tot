@@ -2,10 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
 import type { ProjectState } from './project-state.js';
 import { pickActiveSession } from './persistence.js';
+import { checkIntegrity, readLineWindow, resolveArtifactPath } from './artifacts.js';
+import { rendersAsLines } from './types.js';
+import { findArtifactRef, parseArtifactRoute, type ArtifactRoute } from './artifact-routes.js';
 import { SseHub } from './sse-hub.js';
 
 /** Most recently created open session, falling back to the most recent overall. */
@@ -97,6 +101,14 @@ export async function startHttpServer(
     if (url.pathname === '/api/info') {
       setCorsHeaders(res);
       handleInfoAPI(res, project);
+      return;
+    }
+
+    // Before the /api/ catch-all below, which would otherwise answer 404.
+    const artifactRoute = parseArtifactRoute(url.pathname, url.searchParams);
+    if (artifactRoute) {
+      setCorsHeaders(res);
+      await handleArtifactAPI(res, artifactRoute, project, lock);
       return;
     }
 
@@ -276,6 +288,77 @@ function handleInfoAPI(res: ServerResponse, project: ProjectState): void {
     sessionCount: project.sessionIndex.length || project.tm.getAllSessions().length,
     persistenceHealthy: project.persistenceHealthy,
   }));
+}
+
+/**
+ * Serves a captured artifact: its metadata with a freshly recomputed integrity
+ * verdict, a line window of it, or its raw bytes.
+ *
+ * The reference is resolved from the session's evidence under the project lock,
+ * so only bytes some record actually cites are reachable, and the digest checked
+ * against is the one recorded at capture.
+ */
+async function handleArtifactAPI(
+  res: ServerResponse,
+  route: ArtifactRoute,
+  project: ProjectState,
+  lock: ProjectLock,
+): Promise<void> {
+  if (route.kind === 'invalid') {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'bad-artifact-request' }));
+    return;
+  }
+
+  try {
+    const ref = await lock(async () => {
+      project.ensureSessionLoaded(route.sessionId);
+      return findArtifactRef(project.tm.getHypothesesBySession(route.sessionId), route.artifactId);
+    });
+    if (!ref) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'artifact-not-found' }));
+      return;
+    }
+
+    if (route.kind === 'meta') {
+      const integrity = await checkIntegrity(project.artifactsDir, ref);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ...ref, integrity }));
+      return;
+    }
+
+    const path = resolveArtifactPath(project.artifactsDir, ref);
+
+    if (route.kind === 'lines') {
+      const window = await readLineWindow({
+        read: () => readFile(path, 'utf-8'),
+        from: route.from,
+        to: route.to,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(window));
+      return;
+    }
+
+    // Raw bytes. The recorded filename is offered for the download name only;
+    // it never took part in resolving the path. Bytes a viewer cannot render
+    // are offered as a download rather than dropped into a tab.
+    const bytes = await readFile(path);
+    const shown = rendersAsLines(ref);
+    res.writeHead(200, {
+      'Content-Type': ref.mediaType,
+      'Content-Disposition':
+        `${shown ? 'inline' : 'attachment'}; filename*=UTF-8\'\'${encodeURIComponent(ref.filename)}`,
+      'Cache-Control': 'no-store',
+    });
+    res.end(bytes);
+  } catch (err) {
+    const missing = (err as NodeJS.ErrnoException).code === 'ENOENT';
+    res.writeHead(missing ? 410 : 500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: missing ? 'artifact-bytes-missing' : 'artifact-read-failed' }));
+    if (!missing) console.error('[tot-mcp] handleArtifactAPI error:', err);
+  }
 }
 
 async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {

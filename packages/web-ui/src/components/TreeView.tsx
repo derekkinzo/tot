@@ -17,9 +17,12 @@ import Breadcrumb from './Breadcrumb';
 import Legend from './Legend';
 import FollowIndicator from './FollowIndicator';
 import SessionSelector from './SessionSelector';
-import { type Hypothesis, type Session } from '../types';
+import { nodeLabel, type Hypothesis, type Session } from '../types';
 import { STATUS_COLORS } from '../theme';
 import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
+import { nextNavTarget } from '../hooks/navTarget';
+import { canvasOwnsKey, type KeyTarget } from '../hooks/keyboardOwnership';
+import { HEADER_STACK_MAX_WIDTH, HEADER_TEXT_MAX_WIDTH } from '../geometry';
 
 const FIT_MAX_ZOOM = 1.5;
 const FIT_PADDING_FOCUSED = 0.3;
@@ -46,6 +49,9 @@ interface Props {
   followMode: 'following' | 'paused';
   onToggleFollow: () => void;
   onLoadSession: (id: string) => void;
+  /** Layers stacked above the canvas that read keys; while any is open the
+   *  canvas shortcuts stand down. */
+  overlayCount: number;
 }
 
 interface ContextMenuState {
@@ -54,7 +60,7 @@ interface ContextMenuState {
   y: number;
 }
 
-function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession }: Props) {
+function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, overlayCount }: Props) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const { fitView } = useReactFlow();
@@ -160,34 +166,15 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // A layer above the canvas owns the keyboard while it is open, including
+      // Escape: closing it must not also clear the selection behind it.
+      if (!canvasOwnsKey({ overlays: overlayCount, target: e.target as KeyTarget | null })) return;
       if (e.key === 'Escape') {
         onSelect(null);
         setContextMenu(null);
         return;
       }
-      if (!selectedId) return;
-      const h = hypotheses.get(selectedId);
-      if (!h) return;
-
-      let targetId: string | null = null;
-      switch (e.key) {
-        case 'ArrowUp':
-          if (h.parentId) targetId = h.parentId;
-          break;
-        case 'ArrowDown':
-          if (h.children.length > 0) targetId = h.children[0];
-          break;
-        case 'ArrowLeft':
-        case 'ArrowRight': {
-          if (!h.parentId) break;
-          const parent = hypotheses.get(h.parentId);
-          if (!parent) break;
-          const idx = parent.children.indexOf(selectedId);
-          const next = idx + (e.key === 'ArrowLeft' ? -1 : 1);
-          if (next >= 0 && next < parent.children.length) targetId = parent.children[next];
-          break;
-        }
-      }
+      const targetId = nextNavTarget(e.key, selectedId, hypotheses);
       if (targetId) {
         e.preventDefault();
         onSelect(targetId);
@@ -195,7 +182,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, hypotheses, onSelect]);
+  }, [selectedId, hypotheses, onSelect, overlayCount]);
 
   const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
     setContextMenu(null);
@@ -243,7 +230,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
         if (h) {
           // Swallow a rejected writeText Promise (unfocused doc / denied
           // permission) so it doesn't surface as an unhandledrejection.
-          void Promise.resolve(navigator.clipboard?.writeText(h.content)).catch(() => {});
+          void Promise.resolve(navigator.clipboard?.writeText(h.statement ?? nodeLabel(h))).catch(() => {});
         }
         break;
       }
@@ -282,14 +269,20 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
 
         {/* Info overlays cluster in the top corners, each corner a vertical
             stack so widgets flow instead of overlapping. */}
-        <Panel position="top-left">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <Panel position="top-left" style={{ maxWidth: HEADER_STACK_MAX_WIDTH }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
             <div className="overlay-widget" style={{ fontSize: 13 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ color: connected ? '#3fb950' : '#f85149' }}>●</span>
                 {session ? (
                   <>
-                    <span>{session.problem.slice(0, 50)}{session.problem.length > 50 ? '...' : ''}</span>
+                    <span
+                      title={session.problem}
+                      style={{
+                        maxWidth: HEADER_TEXT_MAX_WIDTH, overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >{session.problem}</span>
                     <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onSelect(null); }} />
                   </>
                 ) : (

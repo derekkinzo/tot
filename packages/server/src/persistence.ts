@@ -1,7 +1,10 @@
 import { appendFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyEntry, deriveScanStatus, emptyReplayState, JOURNAL_SCHEMA_VERSION, type JournalEntry } from './replay.js';
+import {
+  applyEntry, deriveScanStatus, emptyReplayState, JOURNAL_SCHEMA_VERSION,
+  type JournalEntry, type ReplayState,
+} from './replay.js';
 import type { Hypothesis, Session, TreeEvent } from './types.js';
 
 // ─── Session Index (lightweight metadata for lazy loading) ───
@@ -12,7 +15,8 @@ export interface SessionIndex {
   status: 'open' | 'resolved' | 'abandoned';
   createdAt: string;
   filePath: string;
-  nodeCount: number; // estimated from line count
+  /** Hypotheses reconstructed by folding the file. */
+  nodeCount: number;
 }
 
 export class Persistence {
@@ -106,6 +110,7 @@ export function scanSessions(dataDir: string): SessionIndex[] {
 
       const session = state.sessions[0];
       if (!session) continue; // no session-created header → not a usable session file
+      warnIfFromNewerWriter(state, filePath);
 
       index.push({
         id: session.id,
@@ -113,7 +118,7 @@ export function scanSessions(dataDir: string): SessionIndex[] {
         status: deriveScanStatus(session, state.hypotheses, sawExplicitTerminal),
         createdAt: session.createdAt,
         filePath,
-        nodeCount: lines.length, // rough estimate (includes non-hypothesis events)
+        nodeCount: state.hypotheses.length,
       });
     } catch {
       // Skip files that can't be read or parsed
@@ -143,10 +148,28 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
     }
 
     if (state.sessions.length === 0) return null;
+    warnIfFromNewerWriter(state, filePath);
     return { session: state.sessions[0], hypotheses: state.hypotheses };
   } catch {
     return null;
   }
+}
+
+/**
+ * Says so when a journal was written by a newer build than this one.
+ *
+ * Such a file can carry fields this reader drops on the way in, so folding it
+ * without a word would leave the reader believing it had the whole tree. Nothing
+ * is refused: the entries still fold, because a partial view of a session beats
+ * no view of it.
+ */
+function warnIfFromNewerWriter(state: ReplayState, filePath: string): void {
+  if (!state.sawNewerWriter) return;
+  console.error(
+    `[tot-mcp] Warning: ${filePath} was written by a newer version of tot-mcp ` +
+    `(journal schema above v${JOURNAL_SCHEMA_VERSION}). It has been read as far as this ` +
+    'build understands it; anything newer was left out. Upgrade to see the whole session.',
+  );
 }
 
 /** A journalable record derived from an engine event: which session's file it
@@ -176,7 +199,11 @@ export function journalEventToEntry(event: TreeEvent): JournalRecord | null {
       return { sessionId: event.session.id, type: event.type, payload: event.session };
     case 'hypothesis-added':
     case 'hypothesis-updated':
-      return { sessionId: event.hypothesis.sessionId, type: event.type, payload: event.hypothesis };
+      return {
+        sessionId: event.hypothesis.sessionId,
+        type: event.type,
+        payload: persistedHypothesis(event.hypothesis),
+      };
     case 'session-completed':
       return { sessionId: event.sessionId, type: event.type, payload: { sessionId: event.sessionId, terminalStatus: event.terminalStatus } };
     case 'session-reopened':
@@ -185,6 +212,20 @@ export function journalEventToEntry(event: TreeEvent): JournalRecord | null {
     case 'snapshot':
       return null;
   }
+}
+
+/**
+ * The on-disk shape of a hypothesis: the in-memory node plus a single prose
+ * field.
+ *
+ * Central storage is shared by every build that opens it, and a reader that
+ * knows only one prose field has to find one. Projecting it here — at the only
+ * write site — serves that reader without holding a second copy of the prose in
+ * memory, where it could drift from the fields it came from.
+ * {@link normalizeHypothesisPayload} strips it again on read.
+ */
+function persistedHypothesis(h: Hypothesis): Hypothesis & { content: string } {
+  return { ...h, content: h.statement ?? h.title };
 }
 
 function ensureGitignore(dataDir: string): void {

@@ -103,15 +103,16 @@ tree. Each MCP server instance picks its own free port at startup.
 | Tool | Purpose |
 |------|---------|
 | `create_tree` | Start a new reasoning session with a problem statement |
-| `decompose` | Split a hypothesis into sibling sub-hypotheses comparable along one axis |
+| `decompose` | Split a hypothesis into sibling sub-hypotheses along a stated axis, declaring how they relate |
 | `add_hypothesis` | Add a missed hypothesis to the tree |
-| `add_evidence` | Attach supporting/refuting/neutral evidence |
+| `add_evidence` | Attach supporting/refuting/neutral evidence, optionally capturing a log or command output verbatim |
 | `eliminate_hypothesis` | Mark a hypothesis as a dead end (with reason) |
 | `corroborate_hypothesis` | Mark a surviving hypothesis as corroborated (provisionally retained) |
 | `set_out_of_scope` | Mark a branch terminal without investigating it (no refutation claimed) |
 | `get_tree` | View the current tree structure |
 | `get_status` | Progress summary + stagnation detection |
 | `validate_decomposition` | Check structural properties of a decomposition |
+| `qualify_evidence` | Mark a record decisive, non-discriminating, or dependent on another |
 
 ## Claude Code Skills, Agents, and Hooks
 
@@ -158,9 +159,39 @@ port and reports the URL in the `get_status` tool response
 - **Live tree updates** via Server-Sent Events (no polling)
 - **Color-coded status** — pending (blue), exploring (yellow), eliminated (dimmed), corroborated (green)
 - **Path highlighting** — click a node to see the path from root
-- **Evidence detail panel** — click any node to see all attached evidence
+- **Evidence detail panel** — click any node to see all attached evidence,
+  refutation first, with each record marked verbatim or paraphrase
+- **Captured evidence viewer** — open the stored log or command output a record
+  cites, with the lines it rests on highlighted
 - **Follow mode** — auto-tracks agent activity (press F to toggle)
 - **Export** — download tree as Markdown
+
+## Branches, axes, and how MECE applies
+
+Every node in the tree is a hypothesis. Being a branch is structural, not a
+different kind of thing: a branch is a claim whose children are the ways it
+could be true, or the parts it requires.
+
+Each split records two things the agent declares:
+
+- **Axis** — the single dimension the children divide, such as "by subsystem"
+  or "by lifecycle stage". Siblings can only be judged for overlap or coverage
+  against a stated dimension, and naming it exposes a split that is really two
+  splits at once.
+- **Gate** — how the children relate to the claim above them: `one-of` for
+  rivals where at most one holds, `any-of` for alternatives that may hold
+  together, `all-of` for parts that must all hold.
+
+The gate is what makes the two halves of MECE actionable. *Mutually exclusive*
+is the claim `one-of` makes, so two corroborated rivals become a contradiction
+worth reporting. *Collectively exhaustive* is never provable from the tree, so
+it stays a question — an explicit catch-all branch is first-class when
+exhaustiveness is uncertain.
+
+Neither property is checked as a verdict. What the tools report is a conflict
+between what was declared and what the evidence settled: two survivors under
+`one-of`, a defeated part under `all-of`, or every alternative ruled out with
+the parent still standing.
 
 ## Where your trees are stored
 
@@ -170,6 +201,9 @@ directory, grouped by project:
 ```
 ~/.tot/projects/<project-id>/sessions/<sessionId>.jsonl
 ```
+
+Logs and command output captured as evidence are stored alongside the trees
+that cite them, so a record can be read back exactly as it was observed.
 
 Trees persist across restarts — reopen a project and its sessions are still
 there. To store them somewhere else, set the `TOT_DATA_DIR` environment

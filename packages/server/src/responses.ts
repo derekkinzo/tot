@@ -47,9 +47,11 @@ import {
   lacksSourceDiversity,
   suggestsElimination,
   lacksDiagnosticity,
+  readsAsRetypedOutput,
 } from './advisories.js';
+import { nodeLabel, supportingWeight, refutingWeight, gateLabel, gateMeaning, gateFindings } from '@tot-mcp/shared';
 import { pickActiveSession } from './persistence.js';
-import type { Hypothesis, StructuralCheck } from './types.js';
+import type { Decomposition, DecompositionGate, Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 
 export function formatCreateTree(sessionId: string, rootId: string, problem: string): string {
@@ -72,7 +74,24 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
     `0 hypotheses | Session: ${sessionId.slice(0, 8)}`;
 }
 
+/** What a gate commits to, as one line. */
+function gateLine(gate: DecompositionGate): string {
+  return `${gateLabel(gate)}: ${gateMeaning(gate)}\n`;
+}
+
+/**
+ * A recorded split: the dimension its children divide, then what the declared
+ * relation commits to — or how to declare one, since a missing relation is the
+ * reason a verdict on a child says nothing about its parent.
+ */
+function formatSplit(decomposition: Decomposition): string {
+  return `Axis: ${decomposition.axis}\n` + (decomposition.gate
+    ? gateLine(decomposition.gate)
+    : `Relation not declared. State gate=one-of when the children are rivals, any-of when several may hold together, or all-of when every part is required.\n`);
+}
+
 export function formatDecompose(children: Hypothesis[], check: StructuralCheck, tm: TreeManager): string {
+  const parent = tm.getHypothesis(children[0]?.parentId ?? '');
   const ids = children.map((c) => c.id);
   const isRootDecomposition = children[0]?.depth === 1;
   let result = JSON.stringify({ childIds: ids }) + '\n\n' +
@@ -82,6 +101,15 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
     result += `── Initial Structure (Critical) ──\n`;
     result += `This is the foundational decomposition. Its quality determines the entire investigation.\n`;
     result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n\n`;
+  }
+
+  // The declared split: what the children divide, and what follows from how
+  // they relate. Restated because a gate governs which verdicts are consistent
+  // with each other later.
+  if (parent?.decomposition) {
+    result += `── Split ──\n`;
+    result += formatSplit(parent.decomposition);
+    result += `\n`;
   }
 
   // Structural checks
@@ -102,7 +130,6 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   }
 
   // Premature decomposition guard: parent had no evidence
-  const parent = tm.getHypothesis(children[0]?.parentId ?? '');
   if (parent && parent.evidence.length === 0 && parent.depth > 0) {
     result += `\n⚠ Parent has no evidence yet. A single observation at this level might eliminate it entirely, saving sub-investigation effort.\n`;
   }
@@ -134,9 +161,9 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   // node on follow-up.
   if (parent) {
     result += `\nStructural review (overlap, coverage, level, testability):\n`;
-    result += `  Parent: "${truncate(parent.content, 80)}"\n`;
+    result += `  Parent: "${nodeLabel(parent)}"\n`;
     for (const c of children) {
-      result += `  - ${c.id.slice(0, 8)}: "${truncate(c.content, 80)}"\n`;
+      result += `  - ${c.id.slice(0, 8)}: "${nodeLabel(c)}"\n`;
     }
   }
   result += `\n── Protocol ──\n`;
@@ -152,9 +179,16 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
   const activeSiblings = siblings.filter((s) => isLive(s.status));
 
   let result = JSON.stringify({ hypothesisId: hypothesis.id }) + '\n\n' +
-    `✓ Added hypothesis: "${truncate(hypothesis.content, 60)}"\n\n`;
+    `✓ Added hypothesis: "${nodeLabel(hypothesis)}"\n\n`;
 
   result += `── Sibling Review ──\n`;
+  // A sibling added later must divide the same dimension as the ones already
+  // there, or the set no longer compares along one axis.
+  const parentSplit = hypothesis.parentId ? tm.getHypothesis(hypothesis.parentId)?.decomposition : undefined;
+  if (parentSplit) {
+    result += `Axis: ${parentSplit.axis} — does this divide that same dimension?\n`;
+    if (parentSplit.gate) result += gateLine(parentSplit.gate);
+  }
   result += `Review the full set of ${activeSiblings.length + 1} siblings:\n`;
   result += `  Overlap: does this overlap acknowledge a domain co-occurrence (e.g., an INUS cluster), or is it accidental redundancy?\n`;
   result += `  Coverage: does adding this close a gap, or is there still something missing?\n`;
@@ -180,7 +214,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   const openSiblings = siblings.filter((s) => isOpen(s.status));
 
   let result = JSON.stringify({ hypothesisId, evidenceCount: hypothesis.evidence.length }) + '\n\n' +
-    `✓ Evidence added to "${truncate(hypothesis.content, 50)}"\n\n`;
+    `✓ Evidence added to "${nodeLabel(hypothesis)}"\n\n`;
 
   // Evidence matrix across siblings
   result += `── Evidence Matrix ──\n`;
@@ -189,7 +223,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     const s = h.evidence.filter((e) => e.type === 'supports').length;
     const r = h.evidence.filter((e) => e.type === 'refutes').length;
     const marker = h.id === hypothesisId ? ' ←' : '';
-    result += `  ${truncate(h.content, 30)}: +${s} -${r}${marker}\n`;
+    result += `  ${nodeLabel(h)}: +${s} -${r}${marker}\n`;
   }
 
   // Baseline prompt: first evidence on this hypothesis
@@ -208,6 +242,12 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
   }
 
+  // Text that lives only inside a record cannot be re-read; a file it came from
+  // can be. What was observed is the shape of the record, not where it came from.
+  if (readsAsRetypedOutput(hypothesis)) {
+    result += `\nThis record spans several lines and cites no captured bytes. If that text came from a file or a command, pass artifactPath so the bytes themselves are stored and can be read back verbatim.\n`;
+  }
+
   // Source independence (Heuer 1999)
   if (lacksSourceDiversity(hypothesis)) {
     result += `\nAll evidence cites the same source. Independent corroboration from a different data source would strengthen this.\n`;
@@ -216,7 +256,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   // Unexplored siblings warning
   const unexplored = activeSiblings.filter((s) => s.evidence.length === 0);
   if (unexplored.length > 0) {
-    result += `\nUnexplored: ${unexplored.map((u) => truncate(u.content, 25)).join(', ')}\n`;
+    result += `\nUnexplored: ${unexplored.map((u) => nodeLabel(u)).join(', ')}\n`;
   }
 
   // Elimination nudge (Bacon/Mill eliminative induction)
@@ -230,7 +270,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     // non-empty here (lacksDiagnosticity requires it), and excludes
     // corroborated siblings (settled verdicts, not competitors).
     const topSibling = openSiblings[0];
-    result += `\nDiagnosticity: Would this also hold if "${truncate(topSibling.content, 40)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
+    result += `\nDiagnosticity: Would this also hold if "${nodeLabel(topSibling)}" were the cause? Evidence consistent with multiple hypotheses does not discriminate.\n`;
   }
 
   // Stale tree detection
@@ -239,14 +279,14 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     const session = tm.getActiveSession();
     result += `\n── Context (${Math.floor(secsSinceLastCall / 60)}m since last update) ──\n`;
     if (session) result += `Problem: "${truncate(session.problem, 50)}"\n`;
-    result += `You were testing: "${truncate(hypothesis.content, 40)}"\n`;
+    result += `You were testing: "${nodeLabel(hypothesis)}"\n`;
   }
 
   // Protocol — with specific named siblings for adversarial questions
   result += `\n── Protocol ──\n`;
   if (openSiblings.length > 0 && hypothesis.evidence.length >= 2 && refuting === 0) {
     const topSibling = openSiblings[0];
-    result += `What observation would be TRUE if "${truncate(hypothesis.content, 25)}" but FALSE if "${truncate(topSibling.content, 25)}"?\n`;
+    result += `What observation would be TRUE if "${nodeLabel(hypothesis)}" but FALSE if "${nodeLabel(topSibling)}"?\n`;
   } else if (activeSiblings.length > 1) {
     result += `Does this evidence also bear on sibling hypotheses?\n`;
   }
@@ -258,6 +298,35 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   return result;
 }
 
+/**
+ * Conflicts a verdict on this node creates with the split it belongs to.
+ *
+ * A gate is the agent's declaration about how siblings relate, so what is
+ * reported is the contradiction between that declaration and the verdicts now
+ * recorded — never a judgement that a split is exclusive or exhaustive in fact.
+ * Empty when the node has no parent, or its parent declared no relation.
+ */
+function formatGateConflicts(hypothesis: Hypothesis, tm: TreeManager): string {
+  const parent = hypothesis.parentId ? tm.getHypothesis(hypothesis.parentId) : undefined;
+  if (!parent?.decomposition?.gate) return '';
+  const siblings = parent.children
+    .map((id) => tm.getHypothesis(id))
+    .filter((c): c is Hypothesis => c !== undefined);
+  const findings = gateFindings(parent, siblings);
+  if (findings.length === 0) return '';
+
+  let out = `\n── Split: "${nodeLabel(parent)}" (${gateLabel(parent.decomposition.gate)}, ${parent.decomposition.axis}) ──\n`;
+  for (const finding of findings) {
+    out += `⚠ ${finding.message}\n`;
+    const affected = finding.nodeIds.map((id) => {
+      const node = tm.getHypothesis(id);
+      return node ? nodeLabel(node) : id;
+    });
+    out += `  Affected: ${affected.join(', ')}\n`;
+  }
+  return out;
+}
+
 export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string {
   const siblings = tm.getSiblings(hypothesis.id);
   const remaining = siblings.filter((s) => isLive(s.status));
@@ -266,11 +335,11 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   const remainingOpen = siblings.filter((s) => isOpen(s.status));
 
   let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'eliminated' }) + '\n\n' +
-    `✓ Eliminated "${truncate(hypothesis.content, 50)}"\n` +
+    `✓ Eliminated "${nodeLabel(hypothesis)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
 
   result += `── Signals ──\n`;
-  result += `Remaining: ${remaining.length} (${remaining.map((r) => truncate(r.content, 25)).join(', ')})\n`;
+  result += `Remaining: ${remaining.length} (${remaining.map((r) => nodeLabel(r)).join(', ')})\n`;
 
   if (remaining.length === 1 && remainingOpen.length === 1) {
     result += `\n→ Only 1 hypothesis remains. Before corroborating, apply a SEVERE TEST:\n`;
@@ -291,6 +360,7 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
     result += `Investigate each remaining hypothesis independently and challenge assumptions.\n`;
   }
 
+  result += formatGateConflicts(hypothesis, tm);
   result += '\n' + formatTreeSummary(tm);
   return result;
 }
@@ -304,7 +374,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     status: 'corroborated',
     sessionStatus: state?.session.status ?? 'open',
   }) + '\n\n' +
-    `✓ Corroborated "${truncate(hypothesis.content, 50)}"\n` +
+    `✓ Corroborated "${nodeLabel(hypothesis)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
 
   if (sessionResolved) {
@@ -315,7 +385,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     if (corroboratedLeaves.length > 1) {
       result += `${corroboratedLeaves.length} corroborated leaves (multiple co-instantiated contributors are admissible — Mackie INUS):\n`;
       for (const h of corroboratedLeaves) {
-        result += `  - ${h.id.slice(0, 8)}: "${truncate(h.content, 60)}"\n`;
+        result += `  - ${h.id.slice(0, 8)}: "${nodeLabel(h)}"\n`;
       }
     }
     result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
@@ -330,10 +400,15 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     result += `── Resolution pending ──\n`;
     result += `${open.length} hypothes${open.length === 1 ? 'is' : 'es'} still open:\n`;
     for (const h of open) {
-      result += `  - ${h.id.slice(0, 8)} [${h.status}]: "${truncate(h.content, 60)}"\n`;
+      result += `  - ${h.id.slice(0, 8)} [${h.status}]: "${nodeLabel(h)}"\n`;
     }
     result += `\nEach must be eliminated (with refuting evidence), corroborated, or set_out_of_scope before the session resolves.\n`;
   }
+
+  // A verdict that contradicts the declared relation is a property of the
+  // verdicts, not of closure: it reaches the agent while the split is still open
+  // and something can be done about it.
+  result += formatGateConflicts(hypothesis, tm);
 
   result += `\n── Verification ──\n`;
   result += `1. Does this account for ALL the relevant observations?\n`;
@@ -348,14 +423,19 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
 
 export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): string {
   let result = JSON.stringify({ hypothesisId: hypothesis.id, status: 'out-of-scope' }) + '\n\n' +
-    `⊘ Out-of-scope "${truncate(hypothesis.content, 50)}"\n` +
+    `⊘ Out-of-scope "${nodeLabel(hypothesis)}"\n` +
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
   result += `Branch set aside without investigation. The audit trail records the choice; closure treats this as pruning.\n`;
+  result += formatGateConflicts(hypothesis, tm);
   result += '\n' + formatTreeSummary(tm);
   return result;
 }
 
-export function formatValidateDecomposition(parentId: string, check: StructuralCheck): string {
+export function formatValidateDecomposition(
+  parentId: string,
+  check: StructuralCheck,
+  decomposition?: Decomposition,
+): string {
   // Advisory output, not pass/fail. Strict mutual exclusivity is rejected
   // for hypothesis sets (Heuer 2005); siblings can overlap when they
   // reflect domain co-occurrence (Mackie INUS).
@@ -366,8 +446,21 @@ export function formatValidateDecomposition(parentId: string, check: StructuralC
   if (check.abstractionMismatch) advisories.push('level-mismatch-advisory');
   if (advisories.length === 0) advisories.push('no-issues-detected');
 
-  let result = JSON.stringify({ parentId, advisories: Array.from(new Set(advisories)), check }) + '\n\n' +
-    `── Structural Checks ──\n` +
+  let result = JSON.stringify({
+    parentId,
+    advisories: Array.from(new Set(advisories)),
+    check,
+    ...(decomposition === undefined ? {} : { decomposition }),
+  }) + '\n\n';
+
+  // The axis is what the overlap and coverage questions below are asked
+  // against; without it they have no stated dimension to be judged on.
+  if (decomposition) {
+    result += `── Split ──\n`;
+    result += formatSplit(decomposition) + `\n`;
+  }
+
+  result += `── Structural Checks ──\n` +
     `Children: ${check.childCount}\n`;
 
   if (check.substringOverlaps.length > 0) {
@@ -397,6 +490,22 @@ export function formatValidateDecomposition(parentId: string, check: StructuralC
   return result;
 }
 
+/** Confirms a re-label and restates the resulting weights, so the caller sees
+ *  what the change did to the tally rather than only that it was accepted. */
+export function formatQualifyEvidence(hypothesis: Hypothesis, evidenceId: string, tm: TreeManager): string {
+  const record = hypothesis.evidence.find((e) => e.id === evidenceId);
+  const marks = [
+    record?.decisive ? 'decisive' : null,
+    record?.nonDiagnostic ? 'not discriminating' : null,
+    record?.linkedGroupId ? `linked to group ${record.linkedGroupId}` : null,
+  ].filter(Boolean);
+  return `✓ Evidence ${evidenceId.slice(0, 8)} on "${nodeLabel(hypothesis)}" is now ${marks.join(', ') || 'unqualified'}\n\n` +
+    `Weight: ${supportingWeight(hypothesis)} supporting, ${refutingWeight(hypothesis)} refuting ` +
+    `(${countSupporting(hypothesis)} and ${countRefuting(hypothesis)} records)\n` +
+    `A record that does not discriminate is retained and still listed; it stops counting toward a verdict.\n\n` +
+    formatTreeSummary(tm);
+}
+
 export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null): string {
   // Summarize the same session the dashboard renders: the active one when an
   // investigation is in progress, otherwise the most recent. This keeps the
@@ -422,7 +531,7 @@ export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null
   if (session.status === 'open') {
     if (breakdown.activeParts.length > 0) result += `Active: ${breakdown.activeParts.join(', ')}\n`;
     if (unexplored.length > 0) {
-      result += `Unexplored: ${unexplored.map((u) => truncate(u.content, 30)).join(', ')}\n`;
+      result += `Unexplored: ${unexplored.map((u) => nodeLabel(u)).join(', ')}\n`;
     }
     if (stagnant) {
       result += `\n⚠ STAGNATION: Multiple mutations without progress.\n`;

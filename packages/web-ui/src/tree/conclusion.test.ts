@@ -4,7 +4,7 @@ import type { Hypothesis, HypothesisStatus } from '../types';
 
 function hyp(status: HypothesisStatus, conclusion?: Hypothesis['conclusion']): Hypothesis {
   return {
-    id: 'h', parentId: null, sessionId: 's', depth: 0, content: 'h', status,
+    id: 'h', parentId: null, sessionId: 's', depth: 0, title: 'h', status,
     evidence: [], metadata: { createdAt: '', updatedAt: '', source: 'agent' }, children: [],
     conclusion,
   };

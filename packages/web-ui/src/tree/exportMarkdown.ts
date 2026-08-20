@@ -1,5 +1,5 @@
 import type { Hypothesis, Session } from '../types';
-import { countSupporting, countRefuting } from '../types';
+import { countSupporting, countRefuting, gateLabel, nodeLabel } from '../types';
 import { STATUS_NODE_STYLES } from '../theme';
 import { conclusionStatus } from './conclusion';
 
@@ -46,7 +46,7 @@ function renderNode(
     ? ` (${countSupporting(node)} supporting, ${countRefuting(node)} refuting)`
     : '';
 
-  lines.push(`${indent}- ${icon} **${node.content}**${ev} [${node.status}]`);
+  lines.push(`${indent}- ${icon} **${nodeLabel(node)}**${ev} [${node.status}]`);
 
   const concl = conclusionStatus(node);
   if (concl) {
@@ -59,7 +59,26 @@ function renderNode(
   }
 
   for (const ev of node.evidence) {
-    lines.push(`${indent}  - _${ev.type}_: ${ev.content}${ev.source ? ` (${ev.source})` : ''}`);
+    const marks: string[] = [];
+    // Whether a record rests on captured bytes or on a retelling is the first
+    // thing a reader of the report needs, so it travels with the record.
+    if (ev.artifact) {
+      const range = ev.artifact.excerpt
+        ? ` L${ev.artifact.excerpt.startLine}–${ev.artifact.excerpt.endLine}`
+        : '';
+      marks.push(`verbatim: \`${ev.artifact.filename}\`${range}`);
+    }
+    if (ev.decisive) marks.push('decisive');
+    if (ev.nonDiagnostic) marks.push('not discriminating');
+    if (ev.source) marks.push(ev.source);
+    const suffix = marks.length > 0 ? ` (${marks.join('; ')})` : '';
+    lines.push(`${indent}  - _${ev.type}_: ${ev.content}${suffix}`);
+  }
+
+  // The split sits above the children it describes.
+  if (node.decomposition && node.children.length > 0) {
+    const gate = node.decomposition.gate ? `${gateLabel(node.decomposition.gate)}: ` : '';
+    lines.push(`${indent}  - Split ${node.decomposition.axis} — ${gate}${node.children.length} children`);
   }
 
   for (const childId of node.children) {

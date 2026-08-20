@@ -64,6 +64,28 @@
       }
       .follow-dot { animation: follow-pulse 1.5s ease-in-out infinite; }
 
+      /* The zoom controls and the minimap ship defaults built for a light
+         canvas: a near-white button and a bright wash over the area outside the
+         viewport. Both are restated here in the canvas palette. */
+      .react-flow .react-flow__controls {
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .react-flow .react-flow__controls-button {
+        background: #1c1f26;
+        border-bottom: 1px solid #30363d;
+      }
+      .react-flow .react-flow__controls-button:hover {
+        background: #21262d;
+      }
+      .react-flow .react-flow__controls-button svg {
+        fill: #e1e4e8;
+      }
+      .react-flow .react-flow__minimap-mask {
+        fill: rgba(9, 11, 16, 0.72);
+      }
+
       /* Overlay widget base style */
       .overlay-widget {
         background: #1c1f26;

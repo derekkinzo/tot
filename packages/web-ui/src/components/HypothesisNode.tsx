@@ -1,6 +1,7 @@
 import { memo, useState, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { STATUS_NODE_STYLES } from '../theme';
+import { STATUS_NODE_STYLES, EVIDENCE_TYPE_COLORS } from '../theme';
+import { NODE_WIDTH } from '../geometry';
 import { isPruned, type HypothesisData } from '../types';
 
 export type { HypothesisData };
@@ -36,9 +37,7 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           border: `2px solid ${borderColor}`,
           borderRadius: 8,
           padding: '10px 14px',
-          minWidth: 160,
-          maxWidth: 240,
-          width: 220,
+          width: NODE_WIDTH,
           opacity: pruned ? 0.5 : 1,
           boxShadow: d.onPath ? '0 0 12px rgba(88, 166, 255, 0.3)' : undefined,
           cursor: 'pointer',
@@ -70,12 +69,54 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           {d.label}
         </div>
 
-        {/* Footer: evidence count + collapse chevron */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-          {d.evidenceCount > 0 && (
-            <span style={{ fontSize: 11, color: '#8b949e' }}>
-              {d.evidenceCount} evidence
+        {/* How this node was split, stated as declared. Amber when the verdicts
+            recorded under it contradict that declaration. */}
+        {d.split && (
+          <div
+            title={d.split.conflicted ? `${d.split.title}\n\nThe verdicts recorded under this split contradict it — open the node for detail.` : d.split.title}
+            style={{
+              display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4,
+              fontSize: 10, color: d.split.conflicted ? '#d29922' : '#6b7280',
+            }}
+          >
+            {d.split.conflicted && <span aria-hidden>⚠</span>}
+            {d.split.label && (
+              <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                {d.split.label}
+              </span>
+            )}
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {d.split.axis}
             </span>
+          </div>
+        )}
+
+        {/* Footer: evidence ledger + collapse chevron. Refutation leads, and
+            support is never given equal visual weight — evidence that has faced
+            no refutation is the bias the method exists to counter. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          {d.ledger.refuting > 0 && (
+            <span title={`Counts as ${d.ledger.refuting} refutation(s); records declared as one observation count once`}
+              style={{ fontSize: 11, fontWeight: 700, color: EVIDENCE_TYPE_COLORS.refutes }}>
+              ✗{d.ledger.refuting}
+            </span>
+          )}
+          {d.ledger.supporting > 0 && (
+            <span title={`Counts as ${d.ledger.supporting} supporting observation(s); records declared as one observation count once`}
+              style={{ fontSize: 11, color: '#8b949e' }}>
+              ✓{d.ledger.supporting}
+            </span>
+          )}
+          {d.ledger.neutral > 0 && (
+            <span title={`${d.ledger.neutral} neutral record(s)`} style={{ fontSize: 11, color: '#6b7280' }}>
+              ·{d.ledger.neutral}
+            </span>
+          )}
+          {d.ledger.hasDecisive && (
+            <span title="Carries a record the verdict turns on" style={{ fontSize: 11, color: '#d29922' }}>▪</span>
+          )}
+          {d.ledger.ungrounded && (
+            <span title="Settled without any verbatim record attached" style={{ fontSize: 11, color: '#d29922' }}>⚠</span>
           )}
           {d.childCount > 0 && (
             <button

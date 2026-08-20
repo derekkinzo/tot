@@ -1,8 +1,11 @@
 import type { Node, Edge } from '@xyflow/react';
 import { flextree } from 'd3-flextree';
 import { hierarchy } from 'd3-hierarchy';
-import { isPruned, type Hypothesis, type HypothesisData } from '../types';
+import { isPruned, nodeLabel, sessionIsGrounded, type Hypothesis, type HypothesisData, type SplitFace } from '../types';
+import { evidenceLedger } from '../tree/evidenceView';
+import { splitBadge, splitConflicts } from '../tree/splitView';
 import { HIGHLIGHT_COLORS } from '../theme';
+import { NODE_WIDTH, NODE_HEIGHT, NODE_GAP_X, NODE_GAP_Y } from '../geometry';
 import { walkToRoot } from '../tree/walk';
 
 /**
@@ -11,8 +14,6 @@ import { walkToRoot } from '../tree/walk';
  * computation (including transient-orphan adoption).
  */
 
-const NODE_WIDTH = 240;
-const NODE_HEIGHT = 100;
 
 /** Returns the set of node ids on the path from `nodeId` up to the root. */
 export function getPathToRoot(nodeId: string, hypotheses: Map<string, Hypothesis>): Set<string> {
@@ -104,10 +105,14 @@ export function computeLayout(
 
   // Run flextree layout (keeps children grouped under parent)
   const layout = flextree<TreeData>()
-    .nodeSize(() => [NODE_WIDTH + 40, NODE_HEIGHT + 60])
+    .nodeSize(() => [NODE_WIDTH + NODE_GAP_X, NODE_HEIGHT + NODE_GAP_Y])
     .spacing((a, b) => (a.parent === b.parent ? 20 : 40));
 
   const tree = layout(root);
+
+  // Whether this session captured any verbatim record at all. Computed once:
+  // the ungrounded mark is only meaningful relative to a session that does.
+  const sessionGrounded = sessionIsGrounded(hypotheses.values());
 
   // Convert to React Flow nodes + edges
   const nodes: Node<HypothesisData>[] = [];
@@ -125,10 +130,16 @@ export function computeLayout(
       id,
       type: 'hypothesis',
       position: { x: treeNode.x - NODE_WIDTH / 2, y: treeNode.y },
+      // The same box the spacing above reserved. Stating it on the node lets
+      // overview widgets place the node before the DOM has measured it, and
+      // spares the canvas a measure-then-relayout pass.
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
       data: {
-        label: h.content,
+        label: nodeLabel(h),
+        ledger: evidenceLedger(h, { sessionGrounded }),
+        split: splitFace(h, hypotheses),
         status: h.status,
-        evidenceCount: h.evidence.length,
         selected: id === selectedId,
         childCount: h.children.length,
         onPath: isOnPath,
@@ -157,4 +168,16 @@ export function computeLayout(
   }
 
   return { nodes, edges };
+}
+
+/**
+ * What a node face shows about its split, or null when it has none. The badge
+ * carries a conflict flag rather than the conflict text: a face states that the
+ * declaration and the verdicts disagree, and the panel says how.
+ */
+function splitFace(h: Hypothesis, hypotheses: Map<string, Hypothesis>): SplitFace | null {
+  const badge = splitBadge(h);
+  if (!badge) return null;
+  const conflicts = splitConflicts(h, hypotheses);
+  return { ...badge, conflicted: conflicts.length > 0 };
 }

@@ -34,6 +34,8 @@ Call \`create_tree\` with the problem statement.
 ### Step 2: Decompose into competing hypotheses
 Call \`decompose\` to split the problem into 2-5 sibling hypotheses that are comparable along a single framing axis.
 
+Name each hypothesis with a short label — a noun phrase such as "Writer pool exhaustion", not a sentence. The label is what the tree renders, so it is capped short; put the full claim in \`statement\` when it needs more than the label conveys.
+
 Common framing axes (pick one that suits the domain):
 - **By mechanism**: distinct causal pathways that could produce the same effect
 - **By location or layer**: where in the system the cause sits
@@ -41,16 +43,24 @@ Common framing axes (pick one that suits the domain):
 - **By actor or population**: who or what is affected, or who is acting
 - **By category**: type of object, condition, or class of agent
 
+State the axis you picked as \`axis\`; it is required, because siblings can only be judged for overlap and coverage against a stated dimension.
+
+State how the children relate as \`gate\`: \`one-of\` for rivals where at most one holds, \`any-of\` for alternatives that may hold together, \`all-of\` for parts that must all hold. Every node is a hypothesis — being a branch is structural, not a different kind of thing; a branch is a claim whose children are the ways it could be true or the parts it requires.
+
 Aim for the underlying set-partition property — overlap is acceptable when the domain genuinely co-instantiates multiple factors:
-- **Distinct siblings**: each hypothesis covers a different possibility unless co-occurrence is real (Mackie's INUS conditions describe this).
+- **Distinct siblings**: each covers a different possibility unless co-occurrence is real (Mackie's INUS conditions describe this). \`gate=one-of\` declares them exclusive, so two corroborated siblings then need reconciling.
 - **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain.
 - **2-5 siblings per level** keeps the tree legible.
+
+Neither exclusivity nor exhaustiveness is checkable from the tree, so both stay advisory: what the tools report is a conflict between what you declared and what the verdicts show.
 
 ### Step 3: Gather evidence systematically
 For each hypothesis, call \`add_evidence\` with observations that either:
 - **support** the hypothesis (raises its standing)
 - **refute** the hypothesis (falsifies or weakens it)
 - **neutral** (relevant but not discriminating)
+
+When the observation came from a file or a command — a log, a test run, a diff — write the output to a file and pass \`artifactPath\` (with \`command\`, \`exitCode\`, and the \`excerptStartLine\`/\`excerptEndLine\` the claim rests on). The bytes are stored and can be re-read; a retyped log cannot be checked against anything. Keep \`content\` for what the output shows, not a copy of it.
 
 After each piece of evidence, ask: does this also bear on sibling hypotheses?
 
