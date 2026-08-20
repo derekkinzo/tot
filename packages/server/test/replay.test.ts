@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { applyEntry, deriveScanStatus, emptyReplayState, type JournalEntry } from '../src/replay.js';
+import {
+  applyEntry, deriveScanStatus, emptyReplayState, isFromNewerWriter,
+  JOURNAL_SCHEMA_VERSION, type JournalEntry,
+} from '../src/replay.js';
 import type { Hypothesis, Session } from '../src/types.js';
 import { deriveTitle } from '@tot-mcp/shared';
 
@@ -21,6 +24,101 @@ function fold(...entries: JournalEntry[]) {
   for (const e of entries) applyEntry(state, e);
   return state;
 }
+
+describe('a journal written by a newer build', () => {
+  // Folding one silently would leave a reader believing it had the whole tree
+  // when fields this build does not know about were dropped on the way in.
+
+  const newer = (type: string, payload: unknown): JournalEntry =>
+    ({ timestamp: ts, type, payload, v: JOURNAL_SCHEMA_VERSION + 1 });
+
+  it('is recognised by its stamped version', () => {
+    expect(isFromNewerWriter(newer('session-created', session()))).toBe(true);
+    expect(isFromNewerWriter(entry('session-created', session()))).toBe(false);
+    // An entry with no version predates versioning, so it is older, never newer.
+    expect(isFromNewerWriter({ timestamp: ts, type: 'x', payload: {} })).toBe(false);
+  });
+
+  it('is recorded on the folded state, so a reader can say so', () => {
+    const state = fold(newer('session-created', session()));
+    expect(state.sawNewerWriter).toBe(true);
+  });
+
+  it('leaves the flag clear for a journal this build could have written', () => {
+    const state = fold(entry('session-created', session()), entry('hypothesis-added', hyp('root')));
+    expect(state.sawNewerWriter).toBe(false);
+  });
+
+  it('is still folded, because reporting is not refusing', () => {
+    const state = fold(newer('session-created', session()), newer('hypothesis-added', hyp('root')));
+    expect(state.sessions).toHaveLength(1);
+    expect(state.hypotheses).toHaveLength(1);
+  });
+});
+
+describe('evidence folded through the legacy event', () => {
+  // journalEventToEntry does not write evidence-added — the hypothesis-updated
+  // snapshot carries the evidence — but a hand-authored or legacy journal can,
+  // and that path has to land a record the contract accepts.
+
+  const legacyRecord = {
+    id: 'e1', type: 'supports', content: 'the traces show it',
+    timestamp: ts,
+  };
+
+  it('defaults the record kind the same way a snapshot would', () => {
+    const state = fold(
+      entry('hypothesis-added', hyp('h1')),
+      entry('evidence-added', { hypothesisId: 'h1', evidence: legacyRecord }),
+    );
+    // 'artifact' is claimed only by a record that carries captured bytes.
+    expect(state.hypotheses[0].evidence[0].kind).toBe('transcription');
+  });
+
+  it('defaults it the same way when the evidence arrives before its node', () => {
+    const state = fold(
+      entry('evidence-added', { hypothesisId: 'h1', evidence: legacyRecord }),
+      entry('hypothesis-added', hyp('h1')),
+    );
+    expect(state.hypotheses[0].evidence[0].kind).toBe('transcription');
+  });
+
+  it('calls a record carrying captured bytes verbatim, whatever it was labelled', () => {
+    // kind and artifact are one fact stated twice. A reader that trusts the label
+    // would show 'paraphrase' beside a capture it can open, so the label is
+    // derived from the bytes rather than taken on faith.
+    const state = fold(
+      entry('hypothesis-added', hyp('h1')),
+      entry('evidence-added', {
+        hypothesisId: 'h1',
+        evidence: { ...legacyRecord, kind: 'transcription', artifact: { id: 'a1' } },
+      }),
+    );
+    expect(state.hypotheses[0].evidence[0].kind).toBe('artifact');
+  });
+
+  it('calls a record with no captured bytes a paraphrase, whatever it was labelled', () => {
+    const state = fold(
+      entry('hypothesis-added', hyp('h1')),
+      entry('evidence-added', {
+        hypothesisId: 'h1',
+        evidence: { ...legacyRecord, kind: 'artifact' },
+      }),
+    );
+    expect(state.hypotheses[0].evidence[0].kind).toBe('transcription');
+  });
+
+  it('keeps a kind the record already declares', () => {
+    const state = fold(
+      entry('hypothesis-added', hyp('h1')),
+      entry('evidence-added', {
+        hypothesisId: 'h1',
+        evidence: { ...legacyRecord, kind: 'artifact', artifact: { id: 'a1' } },
+      }),
+    );
+    expect(state.hypotheses[0].evidence[0].kind).toBe('artifact');
+  });
+});
 
 describe('applyEntry payload normalization', () => {
   // Field defaulting keys on each field's own absence, never on the entry's
@@ -48,6 +146,32 @@ describe('applyEntry payload normalization', () => {
     const h = s.hypotheses[0];
     expect(h.title).toBe(deriveTitle(legacyPayload.content));
     expect(h.statement).toBe(legacyPayload.content);
+  });
+
+  it('does not invent a statement for a node whose prose was only its title', () => {
+    // The projection writes one prose field, taken from the statement when there
+    // was one and from the title otherwise. Adopting it back as a statement
+    // whenever it is present resurrects a field the author left out — every
+    // title-only node returns from the journal with its label duplicated.
+    const titleOnly = {
+      ...legacyPayload,
+      title: 'Writer pool exhaustion',
+      content: 'Writer pool exhaustion',
+    };
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: titleOnly } as JournalEntry);
+    const h = s.hypotheses[0];
+    expect(h.title).toBe('Writer pool exhaustion');
+    expect(h.statement).toBeUndefined();
+  });
+
+  it('keeps a statement that says more than the title', () => {
+    const both = {
+      ...legacyPayload,
+      title: 'Writer pool exhaustion',
+      content: 'Callers block in getConnection once the pool is saturated by retries.',
+    };
+    const s = fold({ timestamp: ts, type: 'hypothesis-added', payload: both } as JournalEntry);
+    expect(s.hypotheses[0].statement).toBe(both.content);
   });
 
   it('strips fields that are no longer part of the contract', () => {
@@ -161,7 +285,7 @@ describe('applyEntry (shared event interpreter)', () => {
       entry('hypothesis-added', hyp('a')),
       entry('evidence-added', { hypothesisId: 'a', evidence: ev }),
     );
-    expect(s.hypotheses[0].evidence).toEqual([ev]);
+    expect(s.hypotheses[0].evidence).toEqual([{ ...ev, kind: 'transcription' }]);
   });
 
   it('does not lose an evidence-added that precedes its hypothesis (order-tolerant)', () => {
@@ -175,7 +299,7 @@ describe('applyEntry (shared event interpreter)', () => {
       entry('hypothesis-added', hyp('a')),
     );
     expect(s.hypotheses.map((h) => h.id)).toEqual(['a']);
-    expect(s.hypotheses[0].evidence).toEqual([ev]);
+    expect(s.hypotheses[0].evidence).toEqual([{ ...ev, kind: 'transcription' }]);
   });
 
   it('merges buffered out-of-order evidence ahead of evidence carried on the later snapshot', () => {

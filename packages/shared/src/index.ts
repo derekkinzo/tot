@@ -131,6 +131,42 @@ export interface ArtifactDigest {
   value: string;
 }
 
+/** Where artifact reads are addressed. The server routes this prefix and the
+ *  dashboard composes its URLs from it, so neither can move alone. */
+export const ARTIFACT_ROUTE_PREFIX = '/api/artifacts';
+
+/**
+ * What recomputing the digest found: bytes that still match what was captured,
+ * bytes that no longer do, or bytes that are gone.
+ *
+ * A read never trusts a stored verdict, so this is always the result of a fresh
+ * check rather than a field on the reference.
+ */
+export type ArtifactIntegrity = 'verified' | 'mismatch' | 'missing';
+
+/** One page of an artifact's lines, as the line-window endpoint returns it. */
+export interface ArtifactLineWindow {
+  lines: string[];
+  /** The first and last line served, which is what the range was clamped to. */
+  from: number;
+  to: number;
+  totalLines: number;
+  /** True when the requested range was cut to the window cap. */
+  truncated: boolean;
+}
+
+/**
+ * Whether an artifact is shown as numbered lines rather than offered as a
+ * download.
+ *
+ * Reads the line count the capture recorded, which is present exactly when the
+ * bytes were treated as text there. Both the read endpoint and the viewer ask
+ * this one question, so a viewer can never page a file the store never counted.
+ */
+export function rendersAsLines(ref: Pick<ArtifactRef, 'lineCount'>): boolean {
+  return ref.lineCount !== undefined;
+}
+
 export interface Conclusion {
   verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
   reason: string;
@@ -369,7 +405,12 @@ export function gateMeaning(gate: DecompositionGate): string {
   return GATE_TEXT[gate].meaning;
 }
 
-export type GateFindingKind = 'rival-survivors' | 'required-part-defeated' | 'alternatives-exhausted';
+export type GateFindingKind =
+  | 'rival-survivors'
+  | 'required-part-defeated'
+  | 'required-part-untested'
+  | 'alternatives-exhausted'
+  | 'alternatives-abandoned';
 
 /** A conflict between a declared gate and the verdicts recorded under it. */
 export interface GateFinding {
@@ -410,8 +451,10 @@ export function gateFindings(parent: Hypothesis, children: Hypothesis[]): GateFi
     }
   }
 
+  // A refuted child and one merely set aside are reported apart throughout: only
+  // the first was tested, so only the first can defeat anything.
   if (gate === 'all-of') {
-    const defeated = kids.filter((c) => isPruned(c.status));
+    const defeated = kids.filter((c) => c.status === 'eliminated');
     if (defeated.length > 0) {
       findings.push({
         kind: 'required-part-defeated',
@@ -419,12 +462,27 @@ export function gateFindings(parent: Hypothesis, children: Hypothesis[]): GateFi
         message: `${defeated.length} of the required parts no longer stands, so the claim above them cannot hold as stated. Eliminate it citing that part, or revise the split.`,
       });
     }
+    const untested = kids.filter((c) => c.status === 'out-of-scope');
+    if (untested.length > 0) {
+      findings.push({
+        kind: 'required-part-untested',
+        nodeIds: untested.map((c) => c.id),
+        message: `${untested.length} of the required parts was set aside without being investigated, so the claim above them rests on a part nobody has checked. Investigate it, or say what the claim above is worth without it.`,
+      });
+    }
   } else if (kids.every((c) => isPruned(c.status))) {
-    findings.push({
-      kind: 'alternatives-exhausted',
-      nodeIds: kids.map((c) => c.id),
-      message: 'Every alternative under this claim has been ruled out. Either the claim itself is refuted, or the alternatives did not cover the space and one is missing.',
-    });
+    const setAside = kids.filter((c) => c.status === 'out-of-scope');
+    findings.push(setAside.length === 0
+      ? {
+        kind: 'alternatives-exhausted',
+        nodeIds: kids.map((c) => c.id),
+        message: 'Every alternative under this claim has been ruled out. Either the claim itself is refuted, or the alternatives did not cover the space and one is missing.',
+      }
+      : {
+        kind: 'alternatives-abandoned',
+        nodeIds: setAside.map((c) => c.id),
+        message: `Every alternative under this claim is closed, but ${setAside.length} of them ${setAside.length === 1 ? 'was' : 'were'} set aside without being investigated, so the space was never eliminated. Nothing here refutes the claim above; investigate what was set aside before treating this branch as answered.`,
+      });
   }
 
   return findings;
@@ -440,9 +498,9 @@ export function gateFindings(parent: Hypothesis, children: Hypothesis[]): GateFi
  * version current for them while omitting fields introduced later; keying on the
  * version would leave those fields undefined.
  *
- * Fields no longer in the contract are removed explicitly rather than by
- * allowlisting the ones that remain, so an optional field the contract still
- * carries is never silently dropped.
+ * Fields the contract does not carry are removed by name rather than by
+ * allowlisting the ones that remain, so an optional field the contract does
+ * carry is never silently dropped.
  */
 export function normalizeHypothesisPayload(raw: unknown): Hypothesis {
   const { content, score, scoreRationale, ...rest } = (raw ?? {}) as Record<string, unknown> & {
@@ -452,13 +510,29 @@ export function normalizeHypothesisPayload(raw: unknown): Hypothesis {
   };
   const node = rest as unknown as Hypothesis;
 
-  // A payload predating the title/statement split carries one prose field; it
-  // becomes the statement, and the label is derived from it.
-  const statement = node.statement ?? content;
-  const title = node.title ?? deriveTitle(statement ?? '');
-  // A record written before the distinction existed is a paraphrase: it holds
-  // text the agent typed, not bytes captured from a source.
-  const evidence = (node.evidence ?? []).map((e) => (e.kind ? e : { ...e, kind: 'transcription' as const }));
+  // A payload carrying one prose field states either a long-form claim or, when
+  // there was none, the label again. The label wins if it is there, and the prose
+  // becomes the statement only where it says something the label does not —
+  // adopting a restated label would hand back a field nobody authored.
+  const prose = node.statement ?? content;
+  const title = node.title ?? deriveTitle(prose ?? '');
+  const statement = node.statement ?? (prose !== title ? prose : undefined);
+  const evidence = (node.evidence ?? []).map(normalizeEvidenceRecord);
 
   return { ...node, title, evidence, ...(statement === undefined ? {} : { statement }) };
+}
+
+/**
+ * Projects a persisted evidence record onto the current contract.
+ *
+ * `kind` and `artifact` state one fact twice, so the label is derived from the
+ * bytes rather than taken as written: a reader that trusted a stale label would
+ * call a record a paraphrase while offering the capture it can open. Shared by
+ * the snapshot path and the per-record journal event, which would otherwise
+ * disagree about a required field.
+ */
+export function normalizeEvidenceRecord(raw: unknown): Evidence {
+  const record = (raw ?? {}) as Evidence;
+  const kind: EvidenceKind = record.artifact !== undefined ? 'artifact' : 'transcription';
+  return record.kind === kind ? record : { ...record, kind };
 }

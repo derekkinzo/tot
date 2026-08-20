@@ -230,6 +230,40 @@ describe('Persistence Roundtrip', () => {
     expect(index[0].status).toBe('open');
   });
 
+  it('says so when a journal was written by a newer build, and still reads it', () => {
+    // Silence would leave a reader believing they had the whole tree while
+    // fields this build does not know about were dropped on the way in.
+    const sessionId = '00000000-0000-4000-8000-aaaaaaaaaa11';
+    const rootId = '00000000-0000-4000-8000-aaaaaaaaaa12';
+    const ts = '2024-03-01T00:00:00.000Z';
+    const lines = [
+      { timestamp: ts, v: JOURNAL_SCHEMA_VERSION + 1, type: 'session-created', payload: {
+        id: sessionId, problem: 'From the future', rootNodeId: rootId, status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, v: JOURNAL_SCHEMA_VERSION + 1, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, title: 'Root',
+        status: 'exploring', evidence: [],
+        metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const warnings: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { warnings.push(args.join(' ')); };
+    try {
+      const { sessions, hypotheses } = loadAllSessions(tempDir);
+      // Read, not refused: a partial view of a session beats no view of it.
+      expect(sessions).toHaveLength(1);
+      expect(hypotheses.find((h) => h.id === rootId)?.title).toBe('Root');
+    } finally {
+      console.error = original;
+    }
+    expect(warnings.join('\n')).toMatch(/newer version/i);
+    expect(warnings.join('\n')).toContain(filePath);
+  });
+
   it('replays a legacy session whose events carry the removed score fields', () => {
     // score / scoreRationale were removed from the model. Old .tot sessions
     // on user machines still carry those keys in their hypothesis payloads;
@@ -257,14 +291,18 @@ describe('Persistence Roundtrip', () => {
     expect(sessions[0].id).toBe(sessionId);
     const root = hypotheses.find((h) => h.id === rootId);
     expect(root).toBeDefined();
-    // A pre-title journal payload becomes a derived label plus the retained prose.
+    // The one prose field a pre-title payload carries becomes the label. It
+    // becomes a statement only where it says more than the label does, so a
+    // node whose prose was already label-sized comes back without one.
     expect(root!.title).toBe('Root');
-    expect(root!.statement).toBe('Root');
+    expect(root!.statement).toBeUndefined();
     expect(root!.status).toBe('exploring');
-    // Replay reconstructs via a structural cast, so the legacy `score` key
-    // survives as an inert property — no code reads it. The contract is that
-    // replay tolerates the extra field and the tree is fully usable, NOT
-    // that the property is stripped.
+    // Fields no longer in the contract are dropped rather than carried as inert
+    // properties, so they cannot be re-journaled into every future snapshot.
+    const asRecord = root! as unknown as Record<string, unknown>;
+    expect('score' in asRecord).toBe(false);
+    expect('scoreRationale' in asRecord).toBe(false);
+    expect('content' in asRecord).toBe(false);
     expect(root!.evidence).toEqual([]);
     expect(root!.children).toEqual([]);
   });

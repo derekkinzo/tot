@@ -54,6 +54,37 @@ describe('TreeManager', () => {
       expect(root.children).toHaveLength(3);
     });
 
+    it('refuses a second split, which would apply its axis to children it never described', () => {
+      // A decomposition declares that *these* children divide *this* axis.
+      // Splitting again appends to the same child list while replacing the
+      // declaration, so the new axis and gate end up describing the earlier
+      // children too — and the gate check then reports conflicts about a child
+      // from a different split. A missing sibling is addHypothesis's job.
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, [{ title: 'Writer pool' }, { title: 'Query plan' }], { axis: 'by subsystem' });
+      expect(() => tm.decompose(root.id, [{ title: 'Before 4.2' }, { title: 'After 4.2' }], { axis: 'by release' }))
+        .toThrow(TreeError);
+      // The first declaration and its children are left exactly as they were.
+      expect(root.decomposition?.axis).toBe('by subsystem');
+      expect(root.children).toHaveLength(2);
+    });
+
+    it('names the way to add a sibling to an existing split', () => {
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      expect(() => tm.decompose(root.id, [{ title: 'C' }, { title: 'D' }], { axis: 'by cause' }))
+        .toThrow(/add_hypothesis/);
+    });
+
+    it('still admits a sibling added to a declared split, under the declared axis', () => {
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const added = tm.addHypothesis(root.id, { title: 'C' });
+      expect(root.children).toHaveLength(3);
+      expect(added.parentId).toBe(root.id);
+      expect(root.decomposition?.axis).toBe('by cause');
+    });
+
     it('rejects fewer than 2 children', () => {
       const { root } = tm.createSession('Problem');
       expect(() => tm.decompose(root.id, [{ title: 'Only one' }], { axis: 'by cause' })).toThrow(TreeError);

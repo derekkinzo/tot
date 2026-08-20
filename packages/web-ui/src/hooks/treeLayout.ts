@@ -130,12 +130,16 @@ export function computeLayout(
       id,
       type: 'hypothesis',
       position: { x: treeNode.x - NODE_WIDTH / 2, y: treeNode.y },
+      // The same box the spacing above reserved. Stating it on the node lets
+      // overview widgets place the node before the DOM has measured it, and
+      // spares the canvas a measure-then-relayout pass.
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
       data: {
         label: nodeLabel(h),
         ledger: evidenceLedger(h, { sessionGrounded }),
         split: splitFace(h, hypotheses),
         status: h.status,
-        evidenceCount: h.evidence.length,
         selected: id === selectedId,
         childCount: h.children.length,
         onPath: isOnPath,

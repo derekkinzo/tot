@@ -84,6 +84,18 @@ describe('declared splits at the tool surface', () => {
     expect(text).toMatch(/mutually exclusive|rivals/i);
   });
 
+  it('flags two corroborated rivals while the split still has a branch open', async () => {
+    // The conflict is a property of the verdicts, not of session closure. With a
+    // third child left pending the session stays open, and the warning has to
+    // reach the agent at the moment it is created — that is when it can still
+    // act on it.
+    const rootId = await tree();
+    const [a, b] = await split(rootId, ['the database', 'the network', 'the client'], 'by subsystem', 'one-of');
+    await corroborate(a);
+    const text = await corroborate(b);
+    expect(text).toMatch(/mutually exclusive|rivals/i);
+  });
+
   it('does not flag two corroborated alternatives under an any-of split', async () => {
     // Several contributing causes are first-class, so this is only a conflict
     // when the children were declared exclusive.
@@ -132,12 +144,28 @@ describe('declared splits at the tool surface', () => {
     expect(text).toContain('by subsystem');
   });
 
-  it('replaces the recorded split when the same node is decomposed again', async () => {
-    // The record describes the children that exist now; a stale axis would
-    // describe a set that is no longer there.
+  it('refuses to re-split a node, keeping the declaration true of its children', async () => {
+    // A second split appends to the same child list, so replacing the record
+    // would leave 'by timing' describing two children divided by subsystem —
+    // and the gate check would then report conflicts across both splits.
     const rootId = await tree();
     await split(rootId, ['the database', 'the network'], 'by subsystem', 'one-of');
-    await split(rootId, ['before the deploy', 'after the deploy'], 'by timing', 'any-of');
-    expect(tm.getHypothesis(rootId)!.decomposition).toEqual({ axis: 'by timing', gate: 'any-of' });
+    const again = await call('decompose', {
+      parentId: rootId, children: ['before the deploy', 'after the deploy'],
+      axis: 'by timing', gate: 'any-of',
+    });
+    expect(again.isError).toBe(true);
+    expect(tm.getHypothesis(rootId)!.decomposition).toEqual({ axis: 'by subsystem', gate: 'one-of' });
+    expect(tm.getHypothesis(rootId)!.children).toHaveLength(2);
+  });
+
+  it('points a caller with a missing sibling at add_hypothesis', async () => {
+    const rootId = await tree();
+    await split(rootId, ['the database', 'the network'], 'by subsystem', 'one-of');
+    const again = await call('decompose', {
+      parentId: rootId, children: ['the cache', 'the queue'], axis: 'by subsystem',
+    });
+    expect(again.isError).toBe(true);
+    expect(again.text).toMatch(/add_hypothesis/);
   });
 });

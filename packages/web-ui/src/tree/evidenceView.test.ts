@@ -92,12 +92,13 @@ describe('evidenceLedger', () => {
     expect(l.supporting).toBe(1);
   });
 
-  it('names theme tokens rather than colour values, so the palette stays in one place', () => {
+  it('carries only what a node face reads, so nothing on it can go stale unnoticed', () => {
+    // A field no renderer reads is still recomputed for every node on every
+    // layout, and a test that compares it to the literal it was built from would
+    // not notice if it stopped being right.
     const l = evidenceLedger(hyp([ev({ type: 'refutes' })]), { sessionGrounded: false });
-    expect(l.refutingToken).toBe('refutes');
-    expect(l.supportingToken).toBe('supports');
-    // A token is a key, never a resolved colour.
-    expect(l.refutingToken).not.toMatch(/^#/);
+    expect(Object.keys(l).sort())
+      .toEqual(['hasDecisive', 'neutral', 'refuting', 'supporting', 'ungrounded']);
   });
 
   it('flags a decisive record on the node', () => {
@@ -118,6 +119,19 @@ describe('evidenceLedger', () => {
     expect(evidenceLedger(grounded, { sessionGrounded: true }).ungrounded).toBe(false);
   });
 
+  it('does not mark a settled parent, whose verdict rests on its children', () => {
+    // The session meter skips a settled parent for exactly this reason. A face
+    // that marks one anyway contradicts the meter beside it, and an advisory that
+    // fires where it cannot apply teaches a reader to ignore it.
+    const parent = hyp([], { status: 'corroborated', children: ['c1'] });
+    expect(evidenceLedger(parent, { sessionGrounded: true }).ungrounded).toBe(false);
+  });
+
+  it('does not mark a branch set aside, which claims no verdict to ground', () => {
+    const setAside = hyp([ev({ type: 'neutral' })], { status: 'out-of-scope' });
+    expect(evidenceLedger(setAside, { sessionGrounded: true }).ungrounded).toBe(false);
+  });
+
   it('counts neutral records for display without weighing them', () => {
     const l = evidenceLedger(hyp([ev({ type: 'neutral' }), ev({ type: 'neutral' })]), { sessionGrounded: false });
     expect(l.neutral).toBe(2);
@@ -128,13 +142,23 @@ describe('groundingMeter', () => {
   const leaf = (status: HypothesisStatus, kind: Evidence['kind']) =>
     hyp([ev({ type: 'supports', kind })], { status });
 
-  it('measures settled leaves that rest on a verbatim record', () => {
+  it('measures settled leaves that carry a verbatim record', () => {
     const m = groundingMeter([
       leaf('corroborated', 'artifact'),
       leaf('eliminated', 'transcription'),
+    ]);
+    expect(m).toEqual({ grounded: 1, total: 2 });
+  });
+
+  it('leaves a branch set aside out of the count entirely', () => {
+    // Out-of-scope asserts no refutation and claims no verdict, so counting it
+    // as a verdict that lacks grounding reports a gap that does not exist.
+    const m = groundingMeter([
+      leaf('corroborated', 'artifact'),
+      leaf('out-of-scope', 'transcription'),
       leaf('out-of-scope', 'artifact'),
     ]);
-    expect(m).toEqual({ grounded: 2, total: 3 });
+    expect(m).toEqual({ grounded: 1, total: 1 });
   });
 
   it('ignores nodes still open — they have no verdict to ground', () => {

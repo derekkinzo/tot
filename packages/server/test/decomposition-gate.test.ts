@@ -71,9 +71,25 @@ describe('gateFindings', () => {
     expect(findings[0].nodeIds).toEqual(['a']);
   });
 
-  it('reports a part set aside under an all-of gate, since the parent then rests on an untested part', () => {
+  it('separates a part set aside from a part refuted under an all-of gate', () => {
+    // Setting a branch aside records a choice not to investigate it. Reporting
+    // that as a defeated part would assert a refutation from a branch nobody
+    // tested — the parent is not refuted, it is unestablished.
     const findings = gateFindings(parent('all-of', ['a', 'b']), [node('a', 'out-of-scope'), node('b', 'corroborated')]);
-    expect(findings.map((f) => f.kind)).toEqual(['required-part-defeated']);
+    expect(findings.map((f) => f.kind)).toEqual(['required-part-untested']);
+    expect(findings[0].nodeIds).toEqual(['a']);
+    expect(findings[0].message).not.toMatch(/cannot hold|no longer stands|refut/i);
+  });
+
+  it('reports a refuted part and a part set aside on their own terms', () => {
+    const findings = gateFindings(
+      parent('all-of', ['a', 'b', 'c']),
+      [node('a', 'eliminated'), node('b', 'out-of-scope'), node('c', 'corroborated')],
+    );
+    expect(findings.map((f) => f.kind).sort())
+      .toEqual(['required-part-defeated', 'required-part-untested']);
+    expect(findings.find((f) => f.kind === 'required-part-defeated')!.nodeIds).toEqual(['a']);
+    expect(findings.find((f) => f.kind === 'required-part-untested')!.nodeIds).toEqual(['b']);
   });
 
   it('reports every alternative ruled out under a one-of or any-of gate', () => {
@@ -83,6 +99,30 @@ describe('gateFindings', () => {
       expect(findings.map((f) => f.kind)).toEqual(['alternatives-exhausted']);
       expect(findings[0].nodeIds).toEqual(['a', 'b']);
     }
+  });
+
+  it('does not say alternatives were ruled out when they were only set aside', () => {
+    // 'Every alternative has been ruled out ... the claim itself is refuted'
+    // asserts an elimination that never happened. Nothing was tested here.
+    for (const gate of ['one-of', 'any-of'] as const) {
+      const children = [node('a', 'out-of-scope'), node('b', 'out-of-scope')];
+      const findings = gateFindings(parent(gate, ['a', 'b']), children);
+      expect(findings.map((f) => f.kind)).toEqual(['alternatives-abandoned']);
+      // The message has to say what did happen (branches set aside) and deny what
+      // did not (any refutation of the claim above).
+      expect(findings[0].message).toMatch(/set aside|not investigat|untested/i);
+      expect(findings[0].message).toMatch(/nothing here refutes/i);
+      expect(findings[0].message).not.toMatch(/claim itself is refuted|has been ruled out/i);
+    }
+  });
+
+  it('does not claim exhaustion when only some alternatives were ruled out', () => {
+    // A mixed close is not an elimination of the space: one branch was refuted,
+    // the other was never tested.
+    const children = [node('a', 'eliminated'), node('b', 'out-of-scope')];
+    const findings = gateFindings(parent('any-of', ['a', 'b']), children);
+    expect(findings.map((f) => f.kind)).toEqual(['alternatives-abandoned']);
+    expect(findings[0].message).toMatch(/set aside|not investigat|untested/i);
   });
 
   it('does not report exhausted alternatives while one is still open', () => {

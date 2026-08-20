@@ -1,9 +1,10 @@
-import type { ArtifactRef } from '../types';
+import { ARTIFACT_ROUTE_PREFIX } from '../types';
+import type { ArtifactIntegrity, ArtifactLineWindow, ArtifactRef } from '../types';
 
 /**
  * Pure projections for reading a captured artifact, kept out of the component so
- * the addressing, the opening line window, and the integrity wording are
- * testable without a browser.
+ * the addressing, the line windowing, and the integrity wording are testable
+ * without a browser.
  */
 
 /** Lines shown either side of a cited excerpt, so a reader sees what surrounds it. */
@@ -21,7 +22,7 @@ export interface ArtifactUrls {
 /** Read endpoints for one artifact. Relative, so the dashboard talks to whichever
  *  port its own session server bound. */
 export function artifactUrls(ref: Pick<ArtifactRef, 'id' | 'sessionId'>): ArtifactUrls {
-  const base = `/api/artifacts/${ref.sessionId}/${ref.id}`;
+  const base = `${ARTIFACT_ROUTE_PREFIX}/${ref.sessionId}/${ref.id}`;
   return {
     meta: `${base}/meta`,
     raw: `${base}/raw`,
@@ -38,57 +39,69 @@ export interface LineRange {
  * The window to open on.
  *
  * A cited excerpt is what the record is about, so the reader lands there with
- * surrounding context rather than at the top of a long log.
+ * surrounding context rather than at the top of a long log. The range is kept
+ * inside the artifact: a citation past the end, or a file with no lines at all,
+ * would otherwise address a range the read endpoint refuses, and the reader
+ * would be told the bytes could not be read when they are intact.
  */
 export function initialWindow(ref: Pick<ArtifactRef, 'excerpt' | 'lineCount'>): LineRange {
   const last = ref.lineCount;
+  // An empty artifact still has a line 1 to ask for; it comes back empty.
+  const clamp = (n: number) => (last === undefined ? n : Math.min(n, Math.max(1, last)));
   if (!ref.excerpt) {
-    return { from: 1, to: last !== undefined ? Math.min(last, WINDOW_DEFAULT_LINES) : WINDOW_DEFAULT_LINES };
+    return { from: 1, to: clamp(WINDOW_DEFAULT_LINES) };
   }
-  const from = Math.max(1, ref.excerpt.startLine - WINDOW_CONTEXT_LINES);
-  const wanted = ref.excerpt.endLine + WINDOW_CONTEXT_LINES;
-  return { from, to: last !== undefined ? Math.min(last, wanted) : wanted };
-}
-
-/** One page of an artifact's lines, as the line-window endpoint returns it. */
-export interface ArtifactPage {
-  lines: string[];
-  from: number;
-  to: number;
-  totalLines: number;
-  /** True when the requested range was cut to the server's window cap. */
-  truncated: boolean;
+  const from = clamp(Math.max(1, ref.excerpt.startLine - WINDOW_CONTEXT_LINES));
+  return { from, to: clamp(Math.max(from, ref.excerpt.endLine + WINDOW_CONTEXT_LINES)) };
 }
 
 /**
- * Whether this artifact is shown as numbered lines rather than offered as a
- * download.
+ * The next window when the reader pages.
  *
- * Reads the line count the capture recorded, which is present exactly when the
- * bytes were treated as text there — restating that judgement here would let the
- * two drift, and a viewer would then page a file the store never counted.
+ * Anchored to what the last read actually served, not to what was asked for: the
+ * endpoint caps a window, so advancing by the requested span would step over the
+ * lines the cap withheld and leave them unreachable.
  */
-export function rendersAsLines(ref: Pick<ArtifactRef, 'lineCount'>): boolean {
-  return ref.lineCount !== undefined;
+export function shiftWindow(
+  current: LineRange,
+  direction: -1 | 1,
+  served?: Pick<ArtifactLineWindow, 'from' | 'to'>,
+): LineRange {
+  const anchor = served ?? current;
+  const span = Math.max(1, anchor.to - anchor.from + 1);
+  if (direction === 1) {
+    const from = anchor.to + 1;
+    return { from, to: from + span - 1 };
+  }
+  const to = anchor.from - 1;
+  if (to < 1) return { from: 1, to: span };
+  return { from: Math.max(1, to - span + 1), to };
 }
 
 export interface IntegrityNotice {
-  tone: 'error';
+  tone: 'error' | 'warning';
   message: string;
 }
 
 /**
  * What to tell a reader about the stored bytes, or null when they match the
  * digest recorded at capture — the ordinary case, which needs no notice.
+ *
+ * 'unknown' is its own case rather than a silent pass: a check that could not be
+ * run says nothing about the bytes, and rendering it as a clean result would
+ * claim a verification that never happened.
  */
-export function integrityNotice(verdict: 'verified' | 'mismatch' | 'missing'): IntegrityNotice | null {
-  if (verdict === 'verified') return null;
-  return {
-    tone: 'error',
-    message: verdict === 'mismatch'
-      ? 'The stored bytes no longer match the digest recorded when they were captured.'
-      : 'The stored bytes are gone, so this record can no longer be checked against them.',
-  };
+export function integrityNotice(verdict: ArtifactIntegrity | 'unknown'): IntegrityNotice | null {
+  switch (verdict) {
+    case 'verified':
+      return null;
+    case 'mismatch':
+      return { tone: 'error', message: 'The stored bytes no longer match the digest recorded when they were captured.' };
+    case 'missing':
+      return { tone: 'error', message: 'The stored bytes are gone, so this record can no longer be checked against them.' };
+    case 'unknown':
+      return { tone: 'warning', message: 'The stored bytes could not be checked against their digest.' };
+  }
 }
 
 /** One line describing the capture: what it is, how big, and how the command it

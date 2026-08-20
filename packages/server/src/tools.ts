@@ -25,8 +25,14 @@ export interface ToolSchema {
 const nonBlank = (max: number) =>
   z.string().min(1).max(max).refine((s) => s.trim().length > 0, 'must not be empty or whitespace-only');
 
-/** An opaque identifier supplied by a previous tool response. */
-const identifier = () => z.string().min(1);
+/**
+ * An opaque identifier supplied by a previous tool response.
+ *
+ * Blank-rejecting like every other required text field: a whitespace-only id
+ * cannot name anything, and refusing it here says so, rather than letting the
+ * lookup report the id as merely absent.
+ */
+const identifier = () => nonBlank(200);
 
 /**
  * A hypothesis label. `max` is expressed as a zod constraint (not a refinement)
@@ -185,9 +191,10 @@ export function getToolHandlers(
   getDataDir: () => string,
   onPersistenceError?: (err: Error) => void,
   getDashboardUrl?: () => string | null,
-  getArtifactsDirOpt?: () => string,
 ): ToolHandlers {
-  const getArtifactsDir = getArtifactsDirOpt ?? (() => artifactsDirFor(getDataDir()));
+  // Bytes live beside the journals that cite them, so the store follows the data
+  // directory rather than being pointed at separately.
+  const getArtifactsDir = () => artifactsDirFor(getDataDir());
   const persistenceMap = new Map<string, Persistence>();
 
   function getPersistence(sessionId: string): Persistence {
@@ -308,13 +315,26 @@ export function getToolHandlers(
     // Capturing bytes is file I/O, so it runs here — before the mutation, and
     // outside it, so the engine's emit and the journal drain stay adjacent.
     prepare: async (input) => {
-      if (input.artifactPath === undefined) return undefined;
+      // Every field below describes captured bytes. Accepting one with nothing to
+      // attach it to would drop it and still report the record as stored, so the
+      // absent artifact is named rather than inferred. Checked here because the
+      // advertised schema must stay a plain object shape.
+      const { excerptStartLine: startLine, excerptEndLine: endLine } = input;
+      if (input.artifactPath === undefined) {
+        const orphaned = (['excerptStartLine', 'excerptEndLine', 'command', 'exitCode'] as const)
+          .filter((field) => input[field] !== undefined);
+        if (orphaned.length > 0) {
+          throw new ArtifactError(
+            `${orphaned.join(', ')} describe${orphaned.length === 1 ? 's' : ''} a capture, so ` +
+            'artifactPath is needed to say which bytes. Drop the field, or point at the bytes it describes.',
+          );
+        }
+        return undefined;
+      }
       const hypothesis = tm.getHypothesis(input.hypothesisId);
       if (!hypothesis) throw new TreeError(`Hypothesis not found: ${input.hypothesisId}`);
       // A start alone cites one line; an end alone cites nothing, and a
-      // descending range describes no lines at all. Checked here because the
-      // advertised schema must stay a plain object shape.
-      const { excerptStartLine: startLine, excerptEndLine: endLine } = input;
+      // descending range describes no lines at all.
       if (startLine === undefined && endLine !== undefined) {
         throw new ArtifactError('excerptEndLine needs an excerptStartLine to count from');
       }
@@ -428,9 +448,9 @@ export function registerTools(
   server: McpServer,
   tm: TreeManager,
   getDataDir: () => string,
-  opts: { getDashboardUrl?: () => string | null; onPersistenceError?: (err: Error) => void; getArtifactsDir?: () => string } = {},
+  opts: { getDashboardUrl?: () => string | null; onPersistenceError?: (err: Error) => void } = {},
 ): { drainAll: () => Promise<void> } {
-  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl, opts.getArtifactsDir);
+  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl);
 
   for (const [name, schema] of Object.entries(TOOL_SCHEMAS)) {
     const handler = handlers.get(name)!;

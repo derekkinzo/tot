@@ -12,21 +12,32 @@ export interface SplitBadge {
   /** Short gate label, or null when the relation was left undeclared. */
   label: string | null;
   axis: string;
-  /** Hover text explaining what the declaration commits to. */
+  /** What the declared relation commits to — or, undeclared, that nobody said. */
+  meaning: string;
+  /** Hover text: the whole declaration on one line. */
   title: string;
 }
 
-/** What a parent's node face shows about how it was split, or null when it has
- *  no children or no recorded split. */
+/**
+ * What a display shows about how a node was split, or null when it has no
+ * children or no recorded split.
+ *
+ * Carries the parts as well as the joined line, so a panel with room for prose
+ * and a node face with room for a badge render one composition rather than each
+ * assembling its own.
+ */
 export function splitBadge(h: Hypothesis): SplitBadge | null {
   const split = h.decomposition;
   if (!split || h.children.length === 0) return null;
+  const label = split.gate ? gateLabel(split.gate) : null;
+  const meaning = split.gate
+    ? gateMeaning(split.gate)
+    : 'How these children relate was not declared.';
   return {
-    label: split.gate ? gateLabel(split.gate) : null,
+    label,
     axis: split.axis,
-    title: split.gate
-      ? `${gateLabel(split.gate)} — ${gateMeaning(split.gate)}`
-      : `Split ${split.axis}. How these children relate was not declared.`,
+    meaning,
+    title: label ? `${label} — ${meaning}` : `Split ${split.axis}. ${meaning}`,
   };
 }
 

@@ -48,7 +48,7 @@ export default function StatusSummary({ hypotheses, session }: Props) {
       </span>
       {grounding.total > 0 && (
         <span
-          title="Settled leaves whose verdict rests on a verbatim record rather than a paraphrase"
+          title="Settled leaves carrying a verbatim record rather than only a paraphrase"
           style={{
             borderLeft: '1px solid #30363d', paddingLeft: 12,
             color: grounding.grounded === grounding.total ? '#3fb950' : '#d29922',

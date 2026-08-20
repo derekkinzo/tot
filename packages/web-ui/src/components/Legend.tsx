@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LEGEND_MAX_WIDTH } from '../geometry';
 import { STATUS_COLORS, STATUS_LABELS, STATUS_NODE_STYLES } from '../theme';
 
 export default function Legend() {
@@ -8,7 +9,7 @@ export default function Legend() {
 
   return (
     <div className="overlay-widget" style={{
-      fontSize: 12, maxWidth: 220,
+      fontSize: 12, maxWidth: LEGEND_MAX_WIDTH,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontWeight: 600, color: '#8b949e' }}>Legend</span>

@@ -242,9 +242,10 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     result += `Could a confounding variable explain these observations without this hypothesis being true?\n`;
   }
 
-  // A retyped log cannot be re-read; the file it came from can be.
+  // Text that lives only inside a record cannot be re-read; a file it came from
+  // can be. What was observed is the shape of the record, not where it came from.
   if (readsAsRetypedOutput(hypothesis)) {
-    result += `\nThis record carries output that was retyped into it. If it came from a file or a command, pass artifactPath so the bytes themselves are stored and can be read back verbatim.\n`;
+    result += `\nThis record spans several lines and cites no captured bytes. If that text came from a file or a command, pass artifactPath so the bytes themselves are stored and can be read back verbatim.\n`;
   }
 
   // Source independence (Heuer 1999)
@@ -388,7 +389,6 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
       }
     }
     result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
-    result += formatGateConflicts(hypothesis, tm);
   } else {
     // List only the open nodes that actually block resolution, matching the
     // engine's closure walk: nodes under an eliminated/out-of-scope ancestor
@@ -404,6 +404,11 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
     }
     result += `\nEach must be eliminated (with refuting evidence), corroborated, or set_out_of_scope before the session resolves.\n`;
   }
+
+  // A verdict that contradicts the declared relation is a property of the
+  // verdicts, not of closure: it reaches the agent while the split is still open
+  // and something can be done about it.
+  result += formatGateConflicts(hypothesis, tm);
 
   result += `\n── Verification ──\n`;
   result += `1. Does this account for ALL the relevant observations?\n`;

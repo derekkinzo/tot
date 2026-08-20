@@ -3,7 +3,7 @@ import { mkdirSync, statSync } from 'node:fs';
 import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { v4 as uuid } from 'uuid';
-import type { ArtifactRef } from './types.js';
+import type { ArtifactIntegrity, ArtifactLineWindow, ArtifactRef } from './types.js';
 
 /**
  * Capture and retrieval of verbatim evidence.
@@ -45,14 +45,35 @@ export function sniffMediaType(filename: string): string {
 }
 
 /**
+ * The shape an id has to have to be used as a path component.
+ *
+ * A shape test admits only names that cannot traverse, whatever encoding they
+ * arrived in, which is why the ids are checked rather than the joined path.
+ */
+const ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Whether `value` is an id that can safely name a directory or a file. */
+export function isAddressableId(value: string): boolean {
+  return ID_SHAPE.test(value);
+}
+
+/**
  * Where an artifact's bytes live: the session directory, then the artifact id.
  *
- * The caller-supplied filename is never a path component — it could contain a
- * traversal, and a copy already written outside the state root cannot be undone
- * by any check on the read side. Exported so production and tests resolve the
- * layout through one definition.
+ * Both components are checked here, where the path is actually joined, so the
+ * guarantee holds however the reference arrived — validated by the router, or
+ * read back from a journal an earlier build wrote. The caller-supplied filename
+ * is never a path component at all: it could contain a traversal, and a copy
+ * already written outside the state root cannot be undone by any check on the
+ * read side. Exported so production and tests resolve the layout through one
+ * definition.
+ *
+ * @throws ArtifactError when either id could name something other than itself.
  */
 export function resolveArtifactPath(artifactsDir: string, ref: Pick<ArtifactRef, 'id' | 'sessionId'>): string {
+  if (!isAddressableId(ref.sessionId) || !isAddressableId(ref.id)) {
+    throw new ArtifactError('artifact reference does not address a stored capture');
+  }
   return join(artifactsDir, ref.sessionId, ref.id);
 }
 
@@ -118,6 +139,10 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
     );
   }
 
+  if (!isAddressableId(sessionId)) {
+    throw new ArtifactError('Capture needs a session id that can name a directory');
+  }
+
   const id = uuid();
   const filename = req.filename ?? (sourcePath ? basename(sourcePath) : 'capture.txt');
   const sessionDir = join(artifactsDir, sessionId);
@@ -136,6 +161,13 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
     const lineCount = mediaType.startsWith('text/') || mediaType === 'application/json'
       ? countLines(stored.toString('utf-8'))
       : undefined;
+
+    if (req.excerpt !== undefined && lineCount !== undefined && req.excerpt.startLine > lineCount) {
+      throw new ArtifactError(
+        `The excerpt starts at line ${req.excerpt.startLine}, past the end of a ${lineCount}-line capture. ` +
+        'Cite a line the artifact contains.',
+      );
+    }
 
     await rename(tempPath, finalPath);
 
@@ -173,7 +205,7 @@ export async function discardArtifact(artifactsDir: string, ref: Pick<ArtifactRe
 export async function checkIntegrity(
   artifactsDir: string,
   ref: Pick<ArtifactRef, 'id' | 'sessionId' | 'digest'>,
-): Promise<'verified' | 'mismatch' | 'missing'> {
+): Promise<ArtifactIntegrity> {
   let bytes: Buffer;
   try {
     bytes = await readFile(resolveArtifactPath(artifactsDir, ref));
@@ -183,15 +215,6 @@ export async function checkIntegrity(
   const alg = ref.digest.alg === 'sha-512' ? 'sha512' : 'sha256';
   const actual = createHash(alg).update(bytes).digest('hex');
   return actual === ref.digest.value ? 'verified' : 'mismatch';
-}
-
-export interface LineWindow {
-  lines: string[];
-  from: number;
-  to: number;
-  totalLines: number;
-  /** True when the requested range was cut to the window cap. */
-  truncated: boolean;
 }
 
 /**
@@ -206,7 +229,7 @@ export async function readLineWindow(req: {
   from: number;
   to: number;
   maxLines?: number;
-}): Promise<LineWindow> {
+}): Promise<ArtifactLineWindow> {
   const text = await req.read();
   const all = text === '' ? [] : text.replace(/\n$/, '').split('\n');
   const maxLines = req.maxLines ?? ARTIFACT_MAX_WINDOW_LINES;

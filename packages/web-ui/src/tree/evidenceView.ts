@@ -40,19 +40,29 @@ export function orderEvidenceRows(h: Hypothesis): EvidenceRows {
   return rows;
 }
 
-/** The marks a node face shows for its evidence. Colours are named as theme
- *  tokens rather than values so the palette stays defined in one place. */
+/** The marks a node face shows for its evidence. */
 export interface EvidenceLedger {
   refuting: number;
   supporting: number;
   neutral: number;
-  refutingToken: 'refutes';
-  supportingToken: 'supports';
   hasDecisive: boolean;
-  /** A settled verdict resting only on paraphrase. Suppressed in a session that
-   *  captured no artifacts at all, where the mark would fire on every node and
-   *  so distinguish none of them. */
+  /** A verdict of this node's own resting only on paraphrase. Suppressed in a
+   *  session that captured no artifacts at all, where the mark would fire on
+   *  every node and so distinguish none of them. */
   ungrounded: boolean;
+}
+
+/**
+ * Whether a node makes a claim of its own that a verbatim record could ground.
+ *
+ * A node still open has no verdict yet. A settled parent's verdict rests on its
+ * children's, so its own records are not what grounds it. A branch set aside
+ * asserts no refutation at all, so there is nothing there to ground. The node
+ * face and the session meter both ask this, so a face can never mark a node the
+ * meter beside it does not count.
+ */
+function claimsAGroundableVerdict(h: Hypothesis): boolean {
+  return isTerminal(h.status) && h.status !== 'out-of-scope' && h.children.length === 0;
 }
 
 export function evidenceLedger(h: Hypothesis, ctx: { sessionGrounded: boolean }): EvidenceLedger {
@@ -60,24 +70,23 @@ export function evidenceLedger(h: Hypothesis, ctx: { sessionGrounded: boolean })
     refuting: refutingWeight(h),
     supporting: supportingWeight(h),
     neutral: h.evidence.filter((e) => e.type === 'neutral').length,
-    refutingToken: 'refutes',
-    supportingToken: 'supports',
     hasDecisive: h.evidence.some((e) => e.decisive),
-    ungrounded: ctx.sessionGrounded && hasUngroundedVerdict(h),
+    ungrounded: ctx.sessionGrounded && claimsAGroundableVerdict(h) && hasUngroundedVerdict(h),
   };
 }
 
 /**
- * How many of a session's settled leaves rest on a verbatim record.
+ * How many of a session's settled leaves carry a verbatim record.
  *
- * Only leaves count: a settled parent's verdict rests on its children's, so
- * asking it for its own artifacts would double-count theirs.
+ * Counts what is measurable: whether a captured artifact is attached, not whether
+ * the verdict was bound to it. Scoped to the nodes that claim a verdict of their
+ * own — see {@link claimsAGroundableVerdict}.
  */
 export function groundingMeter(hypotheses: Iterable<Hypothesis>): { grounded: number; total: number } {
   let grounded = 0;
   let total = 0;
   for (const h of hypotheses) {
-    if (!isTerminal(h.status) || h.children.length > 0) continue;
+    if (!claimsAGroundableVerdict(h)) continue;
     total += 1;
     if (!hasUngroundedVerdict(h)) grounded += 1;
   }

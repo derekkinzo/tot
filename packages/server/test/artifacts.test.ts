@@ -12,6 +12,38 @@ import {
   ArtifactError,
 } from '../src/artifacts.js';
 
+describe('resolveArtifactPath', () => {
+  // A reference reaches this function from a request the router already checked,
+  // but also from a journal written by an earlier build. The path is joined here,
+  // so this is where the components have to be answerable for.
+  const DIR = '/state/artifacts';
+  const GOOD = '11111111-1111-4111-8111-111111111111';
+
+  it('keeps every resolved path inside the artifacts directory', () => {
+    const hostile = [
+      '..', '../..', '../../etc', '.', '', '/etc/passwd', 'a/../../b',
+      '%2e%2e%2f', '..\\..', `${GOOD}/../..`, 'null', 'x'.repeat(300),
+    ];
+    for (const bad of hostile) {
+      for (const ref of [{ sessionId: bad, id: GOOD }, { sessionId: GOOD, id: bad }]) {
+        let resolved: string | null = null;
+        try {
+          resolved = resolveArtifactPath(DIR, ref);
+        } catch {
+          continue; // Refusing is the other acceptable outcome.
+        }
+        expect(resolved.startsWith(`${DIR}/`), `${bad} resolved to ${resolved}`).toBe(true);
+        expect(resolved.includes('..'), `${bad} resolved to ${resolved}`).toBe(false);
+      }
+    }
+  });
+
+  it('resolves a minted reference to the session directory, then the id', () => {
+    const id = '22222222-2222-4222-8222-222222222222';
+    expect(resolveArtifactPath(DIR, { sessionId: GOOD, id })).toBe(`${DIR}/${GOOD}/${id}`);
+  });
+});
+
 describe('artifact capture', () => {
   let artifactsDir: string;
   let sourceDir: string;

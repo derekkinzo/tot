@@ -1,5 +1,5 @@
 import { subtreeContainsCorroborated } from './closure.js';
-import { normalizeHypothesisPayload } from '@tot-mcp/shared';
+import { normalizeEvidenceRecord, normalizeHypothesisPayload } from '@tot-mcp/shared';
 import type { Evidence, Hypothesis, Session } from './types.js';
 
 /**
@@ -45,10 +45,16 @@ export interface ReplayState {
    *  flushed onto the node when it first appears, so order-tolerance extends to
    *  evidence and nothing is silently dropped. */
   pendingEvidence: Map<string, Evidence[]>;
+  /** Whether any entry was stamped by a build newer than this one, so a reader
+   *  can say that fields it does not know about were dropped on the way in. */
+  sawNewerWriter: boolean;
 }
 
 export function emptyReplayState(): ReplayState {
-  return { sessions: [], hypotheses: [], hypothesisIndex: new Map(), pendingEvidence: new Map() };
+  return {
+    sessions: [], hypotheses: [], hypothesisIndex: new Map(),
+    pendingEvidence: new Map(), sawNewerWriter: false,
+  };
 }
 
 /**
@@ -65,6 +71,7 @@ export function emptyReplayState(): ReplayState {
  */
 export function applyEntry(state: ReplayState, entry: JournalEntry): void {
   const { sessions, hypotheses, hypothesisIndex, pendingEvidence } = state;
+  if (isFromNewerWriter(entry)) state.sawNewerWriter = true;
   // Upsert a hypothesis by id in O(1): replace in place if known, else append
   // and record its index. Shared by add (writer never re-adds an id, but upsert
   // is safe) and update (order-tolerant: an update with no prior add lands it).
@@ -100,7 +107,10 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
       // does not fire on journals this writer produces. It is retained so a
       // legacy or hand-authored journal that does carry the event still replays
       // correctly.
-      const { hypothesisId, evidence } = entry.payload as { hypothesisId: string; evidence: Evidence };
+      const { hypothesisId, evidence: raw } = entry.payload as { hypothesisId: string; evidence: unknown };
+      // Normalized on the same terms as a snapshot's records, so a required
+      // field does not depend on which event carried it.
+      const evidence = normalizeEvidenceRecord(raw);
       const idx = hypothesisIndex.get(hypothesisId);
       if (idx !== undefined) {
         hypotheses[idx].evidence.push(evidence);

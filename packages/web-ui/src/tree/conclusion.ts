@@ -5,8 +5,8 @@ import type { Hypothesis } from '../types';
  *
  * A reopen-on-refute leaves the conclusion on the hypothesis but demotes its
  * live status, so the banner must be marked historical. `supersededBy` is the
- * explicit signal; the status/verdict mismatch is the legacy fallback for
- * journals written before that field existed.
+ * explicit signal; a status that disagrees with the recorded verdict is the
+ * fallback wherever that field is absent.
  *
  * Returns the raw `verdict` (callers apply their own label) plus the derived
  * flags — it deliberately does NOT format a label, so DetailPanel and

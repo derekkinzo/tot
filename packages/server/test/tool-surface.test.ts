@@ -44,27 +44,46 @@ describe('tool surface', () => {
     }
   });
 
-  it('advertises the same constraints the handler enforces for free-text fields', () => {
+  it('advertises the same constraints the handler enforces for text fields', () => {
     // The advertised schema is the contract a caller reads; if it is more
     // permissive than the schema the handler parses with, a caller can satisfy
-    // the published contract and still be rejected. Every free-text field the
-    // engine requires to be non-blank must therefore reject blank input here too.
-    const freeText: Array<[string, string]> = [
-      ['create_tree', 'problem'],
-      ['add_hypothesis', 'title'],
-      ['add_evidence', 'content'],
-      ['eliminate_hypothesis', 'reason'],
-      ['corroborate_hypothesis', 'reason'],
-      ['set_out_of_scope', 'reason'],
-    ];
-    for (const [tool, field] of freeText) {
-      const schema = TOOL_SCHEMAS[tool].schema[field] as z.ZodTypeAny;
-      expect(schema.safeParse('   ').success, `${tool}.${field} must reject blank`).toBe(false);
-      expect(schema.safeParse('a real value').success, `${tool}.${field} accepts text`).toBe(true);
+    // the published contract and still be rejected.
+    //
+    // The set is derived from the schemas rather than listed, so a field added
+    // later is covered without anyone remembering to add it here: any required
+    // field that accepts text at all must refuse text that is only whitespace,
+    // directly or inside an array. An optional field is exempt — omitting it is
+    // how a caller says nothing.
+    const PROSE = 'a real value';
+    const BLANK = '   ';
+    const offenders: string[] = [];
+    let checked = 0;
+
+    for (const [name, def] of Object.entries(TOOL_SCHEMAS)) {
+      for (const [field, raw] of Object.entries(def.schema)) {
+        const schema = raw as z.ZodTypeAny;
+        if (schema.isOptional()) continue;
+        const takesText = schema.safeParse(PROSE).success;
+        const takesTextList = schema.safeParse([PROSE]).success;
+        if (!takesText && !takesTextList) continue;
+        checked++;
+        const blank = takesText ? BLANK : [BLANK];
+        if (schema.safeParse(blank).success) offenders.push(`${name}.${field}`);
+      }
     }
-    // decompose advertises an array of non-blank child titles.
-    const children = TOOL_SCHEMAS['decompose'].schema['children'] as z.ZodTypeAny;
-    expect(children.safeParse(['ok', '   ']).success, 'decompose.children must reject blank').toBe(false);
-    expect(children.safeParse(['ok', 'also ok']).success).toBe(true);
+
+    // A rule that matched nothing would pass vacuously.
+    expect(checked).toBeGreaterThan(5);
+    expect(offenders, `these advertised fields accept whitespace-only input:\n${offenders.join('\n')}`)
+      .toEqual([]);
   });
+
+  it('covers the axis a decomposition declares, which the engine requires non-blank', () => {
+    // Named because it is the field most recently added to the surface and the
+    // one a caller is most likely to pass as an empty placeholder.
+    const axis = TOOL_SCHEMAS['decompose'].schema['axis'] as z.ZodTypeAny;
+    expect(axis.safeParse('   ').success).toBe(false);
+    expect(axis.safeParse('by subsystem').success).toBe(true);
+  });
+
 });

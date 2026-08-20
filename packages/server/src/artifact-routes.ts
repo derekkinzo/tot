@@ -5,12 +5,11 @@
  * that both path components are ids, and that only bytes the tree actually cites
  * are servable — are testable without a socket.
  */
-import { ARTIFACT_MAX_WINDOW_LINES } from './artifacts.js';
+import { ARTIFACT_MAX_WINDOW_LINES, isAddressableId } from './artifacts.js';
+import { ARTIFACT_ROUTE_PREFIX } from './types.js';
 import type { ArtifactRef, Hypothesis } from './types.js';
 
-export const ARTIFACT_ROUTE_PREFIX = '/api/artifacts';
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export { ARTIFACT_ROUTE_PREFIX };
 
 export type ArtifactRoute =
   | { kind: 'meta'; sessionId: string; artifactId: string }
@@ -36,10 +35,9 @@ export function parseArtifactRoute(pathname: string, params: URLSearchParams): A
   if (parts.length !== 3) return { kind: 'invalid' };
   const [sessionId, artifactId, sub] = parts as [string, string, string];
 
-  // Both ids become path components on disk, so they are checked here rather
-  // than by inspecting the joined path afterwards: a shape test admits only
-  // names that cannot traverse, whatever the encoding they arrived in.
-  if (!UUID.test(sessionId) || !UUID.test(artifactId)) return { kind: 'invalid' };
+  // Both ids become path components on disk. Answering that here lets a
+  // malformed request be a 400 rather than a refusal raised deeper in.
+  if (!isAddressableId(sessionId) || !isAddressableId(artifactId)) return { kind: 'invalid' };
 
   if (sub === 'meta' || sub === 'raw') return { kind: sub, sessionId, artifactId };
   if (sub !== 'lines') return { kind: 'invalid' };

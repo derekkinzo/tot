@@ -61,12 +61,15 @@ export function lacksSourceDiversity(hypothesis: Hypothesis): boolean {
 }
 
 /**
- * The latest record is a retelling of output that exists somewhere as bytes: a
- * transcription whose content spans several lines, which a human summary of an
- * observation does not. Structural rather than a guess at what output looks like.
+ * Whether the latest record spans several lines while citing no captured bytes.
  *
- * Worth surfacing because a retyped log cannot be re-read or checked, while the
- * file it came from can be captured and cited instead.
+ * That shape is what output pasted into a record looks like, and it is all this
+ * observes: a note somebody typed across two lines satisfies it too, so the
+ * origin of the text is not established here.
+ *
+ * Worth surfacing because text that only exists inside a record cannot be
+ * re-read or checked against a source, while a file it may have come from can be
+ * captured and cited instead.
  */
 export function readsAsRetypedOutput(hypothesis: Hypothesis): boolean {
   const last = hypothesis.evidence[hypothesis.evidence.length - 1];

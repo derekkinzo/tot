@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { rendersAsLines, ARTIFACT_ROUTE_PREFIX } from '../types';
 import {
-  rendersAsLines,
   artifactUrls,
   artifactSummary,
   initialWindow,
   integrityNotice,
   formatBytes,
+  shiftWindow,
   WINDOW_CONTEXT_LINES,
 } from './artifactView';
 import type { ArtifactRef } from '../types';
@@ -24,9 +27,99 @@ function ref(over: Partial<ArtifactRef> = {}): ArtifactRef {
 describe('artifactUrls', () => {
   it('addresses an artifact by session and id', () => {
     const u = artifactUrls(ref());
-    expect(u.meta).toBe(`/api/artifacts/${SESSION}/${ID}/meta`);
-    expect(u.raw).toBe(`/api/artifacts/${SESSION}/${ID}/raw`);
-    expect(u.lines(3, 9)).toBe(`/api/artifacts/${SESSION}/${ID}/lines?from=3&to=9`);
+    expect(u.meta).toBe(`${ARTIFACT_ROUTE_PREFIX}/${SESSION}/${ID}/meta`);
+    expect(u.raw).toBe(`${ARTIFACT_ROUTE_PREFIX}/${SESSION}/${ID}/raw`);
+    expect(u.lines(3, 9)).toBe(`${ARTIFACT_ROUTE_PREFIX}/${SESSION}/${ID}/lines?from=3&to=9`);
+  });
+
+  it('composes the prefix the server routes rather than restating it', () => {
+    // Two independent spellings of one route drift silently: the viewer keeps
+    // compiling and only fails when it asks for bytes.
+    expect(artifactUrls(ref()).meta.startsWith(`${ARTIFACT_ROUTE_PREFIX}/`)).toBe(true);
+  });
+});
+
+describe('initialWindow addresses a range the read endpoint accepts', () => {
+  // parseArtifactRoute refuses a range that ends before it starts, and answers
+  // 400; the viewer reports that as "could not read the stored bytes", which is
+  // a lie about bytes that verify against their digest.
+  const valid = (r: { from: number; to: number }) => r.from >= 1 && r.to >= r.from;
+
+  it('opens on a readable range for an artifact with no lines at all', () => {
+    expect(valid(initialWindow(ref({ lineCount: 0 })))).toBe(true);
+  });
+
+  it('opens on a readable range when the citation lies past the end', () => {
+    // Nothing validates a cited line against the length at capture time, so the
+    // viewer has to survive one.
+    const w = initialWindow(ref({ lineCount: 10, excerpt: { startLine: 31, endLine: 31 } }));
+    expect(valid(w)).toBe(true);
+    expect(w.to).toBeLessThanOrEqual(10);
+  });
+
+  it('never addresses a line beyond the recorded length', () => {
+    for (const lineCount of [0, 1, 5, 500]) {
+      for (const startLine of [1, 3, 40, 600]) {
+        const w = initialWindow(ref({ lineCount, excerpt: { startLine, endLine: startLine } }));
+        expect(valid(w), `lineCount ${lineCount}, startLine ${startLine}`).toBe(true);
+        expect(w.to, `lineCount ${lineCount}, startLine ${startLine}`).toBeLessThanOrEqual(Math.max(1, lineCount));
+      }
+    }
+  });
+});
+
+describe('shiftWindow', () => {
+  it('resumes at the line after the last one served', () => {
+    // The endpoint caps a window. Advancing by the span that was *asked* for
+    // steps over the lines the cap withheld, and nothing can reach them again.
+    const asked = { from: 1, to: 2000 };
+    const served = { from: 1, to: 500 };
+    expect(shiftWindow(asked, 1, served)).toEqual({ from: 501, to: 1000 });
+  });
+
+  it('leaves no gap over a run of forward pages', () => {
+    // Walk forward the way a reader does, with the server capping every read.
+    const CAP = 500;
+    let range = { from: 1, to: 2000 };
+    let expectedNext = 1;
+    for (let i = 0; i < 5; i++) {
+      const served = { from: range.from, to: Math.min(range.to, range.from + CAP - 1) };
+      expect(served.from).toBe(expectedNext);
+      expectedNext = served.to + 1;
+      range = shiftWindow(range, 1, served);
+    }
+  });
+
+  it('steps back to the lines just before the ones served', () => {
+    expect(shiftWindow({ from: 501, to: 1000 }, -1, { from: 501, to: 1000 }))
+      .toEqual({ from: 1, to: 500 });
+  });
+
+  it('stops at the first line rather than addressing line zero', () => {
+    const back = shiftWindow({ from: 1, to: 200 }, -1, { from: 1, to: 200 });
+    expect(back.from).toBe(1);
+    expect(back.to).toBeGreaterThanOrEqual(back.from);
+  });
+
+  it('falls back to the requested range before anything has been served', () => {
+    expect(shiftWindow({ from: 1, to: 100 }, 1)).toEqual({ from: 101, to: 200 });
+  });
+});
+
+describe('the viewer never depends on a value rebuilt every render', () => {
+  // An effect that lists a freshly-built object refires on every render, and its
+  // own setState causes that render: one open viewer then fetches without bound.
+  const SRC = readFileSync(resolve(__dirname, '../components/ArtifactViewer.tsx'), 'utf-8');
+
+  it('lists only stable values in its effect dependencies', () => {
+    const deps = [...SRC.matchAll(/\}, \[([^\]]*)\]\);/g)].map((m) => m[1]);
+    expect(deps.length).toBeGreaterThan(0);
+    for (const list of deps) {
+      // `urls` is an object literal returned fresh by artifactUrls; naming it
+      // whole is the defect, while reading a string off it is fine.
+      const names = list.split(',').map((d) => d.trim()).filter(Boolean);
+      expect(names, list).not.toContain('urls');
+    }
   });
 });
 
@@ -75,6 +168,15 @@ describe('integrityNotice', () => {
     const n = integrityNotice('missing');
     expect(n?.tone).toBe('error');
     expect(n?.message).not.toBe(integrityNotice('mismatch')?.message);
+  });
+
+  it('distinguishes a check that could not be run from one that passed', () => {
+    // Rendering an unrun check as a pass claims a verification that never
+    // happened, which is the one thing a verbatim record must not do.
+    const unknown = integrityNotice('unknown');
+    expect(unknown).not.toBeNull();
+    expect(unknown?.tone).toBe('warning');
+    expect(unknown?.message).not.toBe(integrityNotice('mismatch')?.message);
   });
 });
 

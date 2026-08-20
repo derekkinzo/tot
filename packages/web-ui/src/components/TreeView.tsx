@@ -22,7 +22,7 @@ import { STATUS_COLORS } from '../theme';
 import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
 import { nextNavTarget } from '../hooks/navTarget';
 import { canvasOwnsKey, type KeyTarget } from '../hooks/keyboardOwnership';
-import { HEADER_TEXT_MAX_WIDTH } from '../geometry';
+import { HEADER_STACK_MAX_WIDTH, HEADER_TEXT_MAX_WIDTH } from '../geometry';
 
 const FIT_MAX_ZOOM = 1.5;
 const FIT_PADDING_FOCUSED = 0.3;
@@ -269,8 +269,8 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
 
         {/* Info overlays cluster in the top corners, each corner a vertical
             stack so widgets flow instead of overlapping. */}
-        <Panel position="top-left">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <Panel position="top-left" style={{ maxWidth: HEADER_STACK_MAX_WIDTH }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
             <div className="overlay-widget" style={{ fontSize: 13 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ color: connected ? '#3fb950' : '#f85149' }}>●</span>

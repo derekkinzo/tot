@@ -43,6 +43,19 @@ describe('computeLayout', () => {
   const NO_PATH = new Set<string>();
   const NO_COLLAPSE = new Set<string>();
 
+  it('declares the box the layout reserved, so overview widgets can place a node', () => {
+    // The layout spaces siblings by NODE_WIDTH/NODE_HEIGHT plus a gap, so the
+    // reserved box is known before the DOM measures anything. A node that keeps
+    // it to itself leaves every consumer that reads dimensions off the node —
+    // the minimap among them — with nothing to draw.
+    const m = tree(hyp('root', null, ['a']), hyp('a', 'root', []));
+    const { nodes } = computeLayout(m, 'root', null, NO_PATH, NO_COLLAPSE);
+    for (const n of nodes) {
+      expect(n.width).toBe(NODE_WIDTH);
+      expect(n.height).toBe(NODE_HEIGHT);
+    }
+  });
+
   it('lays out a simple tree: every node becomes a positioned node', () => {
     const m = tree(hyp('root', null, ['a', 'b']), hyp('a', 'root', []), hyp('b', 'root', []));
     const { nodes, edges } = computeLayout(m, 'root', null, NO_PATH, NO_COLLAPSE);

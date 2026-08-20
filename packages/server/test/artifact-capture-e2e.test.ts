@@ -195,7 +195,61 @@ describe('verbatim evidence capture, end to end', () => {
     });
     expect(res.isError).toBe(true);
     expect(storedIds()).toEqual([]);
-    expect(s.port).toBeGreaterThan(0);
+  });
+
+  it('refuses an excerpt that starts past the end of the captured bytes', async () => {
+    // The capture measures the file, so it can tell that the cited line does not
+    // exist. Journaling the citation anyway leaves a record whose own viewer
+    // cannot open it.
+    const { client } = await start();
+    const rootId = await rootOf(client);
+    const res: any = await client.callTool({
+      name: 'add_evidence',
+      arguments: {
+        hypothesisId: rootId, type: 'supports', content: 'x',
+        artifactPath: log('short.log', LOG_BODY), excerptStartLine: 99,
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(storedIds()).toEqual([]);
+  });
+
+  describe('fields that only describe a capture', () => {
+    // Each of these says something about bytes. Accepting one with no artifact to
+    // attach it to drops it silently, and the caller is told the record was
+    // stored as asked.
+    const DESCRIBES_A_CAPTURE = [
+      { excerptStartLine: 3 },
+      { excerptEndLine: 9 },
+      { excerptStartLine: 3, excerptEndLine: 9 },
+      { command: 'npm run build' },
+      { exitCode: 1 },
+    ];
+
+    for (const extra of DESCRIBES_A_CAPTURE) {
+      it(`refuses ${Object.keys(extra).join(' + ')} with no artifact to attach it to`, async () => {
+        const { client } = await start();
+        const rootId = await rootOf(client);
+        const res: any = await client.callTool({
+          name: 'add_evidence',
+          arguments: { hypothesisId: rootId, type: 'supports', content: 'transcribed by hand', ...extra },
+        });
+        expect(res.isError).toBe(true);
+        expect(String(res.content?.[0]?.text)).toMatch(/artifactPath/);
+      });
+    }
+
+    it('still accepts a record that describes no capture at all', async () => {
+      const { s, client } = await start();
+      const rootId = await rootOf(client);
+      const res: any = await client.callTool({
+        name: 'add_evidence',
+        arguments: { hypothesisId: rootId, type: 'supports', content: 'observed in the dashboard' },
+      });
+      expect(res.isError).toBeFalsy();
+      const { hypotheses } = await state(s);
+      expect(hypotheses.find((h: any) => h.id === rootId).evidence[0].kind).toBe('transcription');
+    });
   });
 
   it('refuses a descending line range instead of storing one nothing can render', async () => {
@@ -298,7 +352,7 @@ describe('verbatim evidence capture, end to end', () => {
   it('leaves no stored bytes behind when the mutation is refused', async () => {
     // A capture whose record was rejected would otherwise leave bytes nothing
     // references — and no read path could ever reach them again.
-    const { s, client } = await start();
+    const { client } = await start();
     await rootOf(client);
     const res: any = await client.callTool({
       name: 'add_evidence',
@@ -306,6 +360,5 @@ describe('verbatim evidence capture, end to end', () => {
     });
     expect(res.isError).toBe(true);
     expect(storedIds()).toEqual([]);
-    expect(s.port).toBeGreaterThan(0);
   });
 });

@@ -25,7 +25,32 @@ describe('splitBadge', () => {
       children: ['a', 'b'],
       decomposition: { axis: 'by subsystem', gate: 'one-of' },
     }));
-    expect(badge).toEqual({ label: 'one of', axis: 'by subsystem', title: expect.stringMatching(/at most one/i) });
+    expect(badge).toEqual({
+      label: 'one of',
+      axis: 'by subsystem',
+      meaning: expect.stringMatching(/at most one/i),
+      title: expect.stringMatching(/at most one/i),
+    });
+  });
+
+  it('carries the parts as well as the joined line, so no consumer recomposes them', () => {
+    // A panel renders the label and its meaning as separate elements while a node
+    // face renders one hover line. Both read this, so the sentence a reader sees
+    // is written once.
+    const declared = splitBadge(node('p', 'exploring', {
+      children: ['a', 'b'],
+      decomposition: { axis: 'by subsystem', gate: 'all-of' },
+    }))!;
+    expect(declared.title).toContain(declared.label!);
+    expect(declared.title).toContain(declared.meaning);
+
+    const undeclared = splitBadge(node('p', 'exploring', {
+      children: ['a', 'b'],
+      decomposition: { axis: 'by timing' },
+    }))!;
+    expect(undeclared.label).toBeNull();
+    expect(undeclared.meaning).toMatch(/not declared/i);
+    expect(undeclared.title).toContain(undeclared.meaning);
   });
 
   it('shows the axis alone when no relation was declared, rather than assuming one', () => {

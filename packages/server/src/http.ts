@@ -8,6 +8,7 @@ import type { Session, TreeEvent } from './types.js';
 import type { ProjectState } from './project-state.js';
 import { pickActiveSession } from './persistence.js';
 import { checkIntegrity, readLineWindow, resolveArtifactPath } from './artifacts.js';
+import { rendersAsLines } from './types.js';
 import { findArtifactRef, parseArtifactRoute, type ArtifactRoute } from './artifact-routes.js';
 import { SseHub } from './sse-hub.js';
 
@@ -344,7 +345,7 @@ async function handleArtifactAPI(
     // it never took part in resolving the path. Bytes a viewer cannot render
     // are offered as a download rather than dropped into a tab.
     const bytes = await readFile(path);
-    const shown = ref.lineCount !== undefined;
+    const shown = rendersAsLines(ref);
     res.writeHead(200, {
       'Content-Type': ref.mediaType,
       'Content-Disposition':

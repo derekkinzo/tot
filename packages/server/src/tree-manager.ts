@@ -94,8 +94,11 @@ export class TreeManager extends EventEmitter {
    * Auto-transitions the parent from 'pending' to 'exploring'.
    *
    * The split records the axis it divides and, when declared, how the children
-   * relate to the parent; a re-decomposition of the same node replaces both,
-   * since they describe the children that now exist.
+   * relate to the parent. Both describe the children created here, so a node
+   * carries at most one: splitting again would append to the same child list
+   * while replacing the declaration, leaving the new axis describing children it
+   * never divided. A missing sibling belongs to {@link addHypothesis}, and a new
+   * axis belongs one level down.
    * @param parentId - ID of the hypothesis to decompose
    * @param children_ - Labels (optionally with statements) for the sub-hypotheses (2+)
    * @param split - The dimension the children divide, and how they relate to the parent
@@ -111,6 +114,13 @@ export class TreeManager extends EventEmitter {
     }
     if (children_.length < 2) {
       throw new TreeError('Decomposition requires at least 2 sub-hypotheses');
+    }
+    if (parent.decomposition !== undefined) {
+      throw new TreeError(
+        `This hypothesis is already split ${parent.decomposition.axis}. ` +
+        'Use add_hypothesis to add a sibling to that split, or decompose one of its children ' +
+        'to divide a different axis below it.',
+      );
     }
     for (const draft of children_) this.assertTitle(draft.title);
     const axis = split.axis.trim();

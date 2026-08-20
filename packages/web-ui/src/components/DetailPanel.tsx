@@ -1,7 +1,7 @@
-import { gateLabel, gateMeaning, nodeLabel, type ArtifactRef, type Evidence, type Hypothesis } from '../types';
+import { nodeLabel, type ArtifactRef, type Evidence, type Hypothesis } from '../types';
 import { orderEvidenceRows } from '../tree/evidenceView';
 import { artifactSummary } from '../tree/artifactView';
-import { splitConflicts } from '../tree/splitView';
+import { splitBadge, splitConflicts } from '../tree/splitView';
 import { DETAIL_PANEL_WIDTH } from '../geometry';
 import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
 import { conclusionStatus } from '../tree/conclusion';
@@ -17,7 +17,7 @@ interface Props {
 }
 
 export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArtifact }: Props) {
-  const split = hypothesis.decomposition;
+  const split = splitBadge(hypothesis);
   const conflicts = splitConflicts(hypothesis, hypotheses);
   const statusColor = STATUS_COLORS[hypothesis.status] ?? STATUS_COLORS.pending;
   const statusLabel = STATUS_LABELS[hypothesis.status] ?? STATUS_LABELS.pending;
@@ -76,7 +76,7 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
       {/* How this node was split: the dimension its children divide and what
           the declared relation commits to, followed by any verdict recorded
           under it that contradicts that declaration. */}
-      {split && hypothesis.children.length > 0 && (
+      {split && (
         <div style={{ background: '#1c1f26', borderRadius: 8, padding: '12px 14px' }}>
           <div style={{
             fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
@@ -86,9 +86,9 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
           </div>
           <div style={{ fontSize: 14, color: '#e1e4e8' }}>{split.axis}</div>
           <div style={{ fontSize: 12, color: '#8b949e', marginTop: 6 }}>
-            {split.gate
-              ? <><strong style={{ color: '#c9d1d9' }}>{gateLabel(split.gate)}</strong> — {gateMeaning(split.gate)}</>
-              : 'How these children relate was not declared.'}
+            {split.label
+              ? <><strong style={{ color: '#c9d1d9' }}>{split.label}</strong> — {split.meaning}</>
+              : split.meaning}
           </div>
           {conflicts.map((conflict, i) => (
             <div key={i} style={{

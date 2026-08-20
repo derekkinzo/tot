@@ -96,13 +96,13 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
             no refutation is the bias the method exists to counter. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
           {d.ledger.refuting > 0 && (
-            <span title={`${d.ledger.refuting} independent refutation(s)`}
+            <span title={`Counts as ${d.ledger.refuting} refutation(s); records declared as one observation count once`}
               style={{ fontSize: 11, fontWeight: 700, color: EVIDENCE_TYPE_COLORS.refutes }}>
               ✗{d.ledger.refuting}
             </span>
           )}
           {d.ledger.supporting > 0 && (
-            <span title={`${d.ledger.supporting} independent supporting observation(s)`}
+            <span title={`Counts as ${d.ledger.supporting} supporting observation(s); records declared as one observation count once`}
               style={{ fontSize: 11, color: '#8b949e' }}>
               ✓{d.ledger.supporting}
             </span>

@@ -10,6 +10,8 @@ export type {
   EvidenceKind,
   ArtifactRef,
   ArtifactDigest,
+  ArtifactIntegrity,
+  ArtifactLineWindow,
   Evidence,
   Conclusion,
   HypothesisMetadata,
@@ -23,6 +25,7 @@ export {
   deriveTitle, nodeLabel, splitProse, TITLE_MAX_LENGTH,
   supportingWeight, refutingWeight, hasUngroundedVerdict, sessionIsGrounded,
   gateLabel, gateMeaning, gateFindings, GATES,
+  rendersAsLines, ARTIFACT_ROUTE_PREFIX,
 } from '@tot-mcp/shared';
 
 import type { HypothesisStatus } from '@tot-mcp/shared';
@@ -41,7 +44,6 @@ export type HypothesisData = {
   /** How this node was split, or null when it has no children or no recorded split. */
   split: SplitFace | null;
   status: HypothesisStatus;
-  evidenceCount: number;
   selected: boolean;
   childCount: number;
   onPath: boolean;
