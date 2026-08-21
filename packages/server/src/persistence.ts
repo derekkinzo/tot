@@ -91,18 +91,9 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       if (lines.length === 0) continue;
 
       const state = emptyReplayState();
-      // Whether any session-completed entry carried an explicit terminalStatus;
-      // when it did, deriveScanStatus trusts it instead of re-deriving via the
-      // spine walk (a legacy/hand-authored terminal session has none).
-      let sawExplicitTerminal = false;
       for (const line of lines) {
         try {
-          const entry: JournalEntry = JSON.parse(line);
-          if (entry.type === 'session-completed'
-            && (entry.payload as { terminalStatus?: string }).terminalStatus) {
-            sawExplicitTerminal = true;
-          }
-          applyEntry(state, entry);
+          applyEntry(state, JSON.parse(line) as JournalEntry);
         } catch {
           // skip corrupt line, keep folding the rest
         }
@@ -115,7 +106,7 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       index.push({
         id: session.id,
         problem: session.problem,
-        status: deriveScanStatus(session, state.hypotheses, sawExplicitTerminal),
+        status: deriveScanStatus(session, state.hypotheses, state.sawExplicitTerminal),
         createdAt: session.createdAt,
         filePath,
         nodeCount: state.hypotheses.length,
@@ -149,7 +140,17 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
 
     if (state.sessions.length === 0) return null;
     warnIfFromNewerWriter(state, filePath);
-    return { session: state.sessions[0], hypotheses: state.hypotheses };
+    // Derived the same way the index derives it. Handing back the folded status
+    // would have the session list and the loaded session state different terminal
+    // verdicts for the same bytes.
+    const session = state.sessions[0];
+    return {
+      session: {
+        ...session,
+        status: deriveScanStatus(session, state.hypotheses, state.sawExplicitTerminal),
+      },
+      hypotheses: state.hypotheses,
+    };
   } catch {
     return null;
   }

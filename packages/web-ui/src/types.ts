@@ -7,6 +7,7 @@ export type {
   Decomposition,
   DecompositionGate,
   GateFinding,
+  GateFindingKind,
   EvidenceKind,
   ArtifactRef,
   ArtifactDigest,
@@ -30,11 +31,11 @@ export {
 
 import type { HypothesisStatus } from '@tot-mcp/shared';
 import type { EvidenceLedger } from './tree/evidenceView';
-import type { SplitBadge } from './tree/splitView';
+import type { SplitAttention, SplitBadge } from './tree/splitView';
 
-/** What a node face shows about how it was split. A face states that the
- *  declared relation and the recorded verdicts disagree; the panel says how. */
-export type SplitFace = SplitBadge & { conflicted: boolean };
+/** What a node face shows about how it was split. A face states only that the
+ *  split needs attention and of which kind; the panel says how. */
+export type SplitFace = SplitBadge & { attention: SplitAttention | null };
 
 /** React Flow node payload for a hypothesis. Shared by the layout module and the node renderer. */
 export type HypothesisData = {

@@ -326,7 +326,16 @@ export function deriveTitle(prose: string): string {
   const flat = prose.replace(/\s+/g, ' ').trim();
   if (flat === '') return '';
 
-  const firstClause = flat.split(CLAUSE_BOUNDARY)[0].replace(/\.+$/, '').trim();
+  // A clause carries at least two words. Anything shorter before a period is a
+  // list marker, a version, a date, or an initial — 'Step 1.', 'v1.', '2026-08-19.',
+  // 'Q.' — and keeping it would discard the claim it introduces, so the whole prose
+  // is used instead. Counted in words rather than tokens, so 'Step 1' is a marker
+  // while 'Disk full' is a clause. Leading punctuation is dropped so the label
+  // starts on a word.
+  const candidate = flat.split(CLAUSE_BOUNDARY)[0].replace(/\.+$/, '').trim();
+  const isClause = (text: string) => (text.match(/\p{L}[\p{L}\p{N}'’-]*/gu) ?? []).length >= 2;
+  const chosen = isClause(candidate) ? candidate : flat;
+  const firstClause = chosen.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\.+$/, '').trim();
   if (firstClause === '') return '';
   if (firstClause.length <= TITLE_MAX_LENGTH) return firstClause;
 
@@ -491,6 +500,80 @@ export function gateFindings(parent: Hypothesis, children: Hypothesis[]): GateFi
 // ─── Payload normalization ───
 
 /**
+ * Names an earlier build wrote for statuses this one spells differently.
+ *
+ * Every closure and display rule switches on the status, so a value outside the
+ * union does not read as "unknown" — it reads as none of the cases, and the node
+ * quietly stops counting as terminal, pruned, or open.
+ */
+const LEGACY_STATUS = new Map<string, HypothesisStatus>([
+  ['confirmed', 'corroborated'],
+  ['corroborated', 'corroborated'],
+  ['refuted', 'eliminated'],
+  ['rejected', 'eliminated'],
+  ['eliminated', 'eliminated'],
+  ['out-of-scope', 'out-of-scope'],
+  ['pending', 'pending'],
+  ['exploring', 'exploring'],
+]);
+
+/**
+ * Projects a persisted status onto the declared union.
+ *
+ * An unrecognised value becomes 'exploring': live and undecided. Guessing a
+ * verdict would assert one nobody recorded, and leaving the value as written
+ * would drop the node out of closure altogether.
+ */
+export function normalizeStatus(raw: unknown): HypothesisStatus {
+  // A Map, not an object literal: a persisted value is arbitrary text, and an
+  // object lookup on 'toString' or 'constructor' returns an inherited member, so
+  // the fallback would never fire and a function would land in this field.
+  return LEGACY_STATUS.get(String(raw)) ?? 'exploring';
+}
+
+/**
+ * Projects a persisted conclusion verdict onto the declared union.
+ *
+ * A verdict names a disposition that was reached, so an unreadable one falls back
+ * to the pruning disposition that claims no refutation and no survival.
+ */
+export function normalizeVerdict(raw: unknown): Conclusion['verdict'] {
+  const mapped = LEGACY_STATUS.get(String(raw));
+  return mapped === 'eliminated' || mapped === 'corroborated' || mapped === 'out-of-scope'
+    ? mapped
+    : 'out-of-scope';
+}
+
+/** Names an earlier build wrote for session states this one spells differently. */
+const LEGACY_SESSION_STATUS = new Map<string, Session['status']>([
+  ['active', 'open'],
+  ['open', 'open'],
+  ['resolved', 'resolved'],
+  ['complete', 'resolved'],
+  ['completed', 'resolved'],
+  ['abandoned', 'abandoned'],
+]);
+
+/**
+ * Projects a persisted session payload onto the declared contract.
+ *
+ * An unrecognised state becomes 'open', the state that permits mutation: a
+ * session wrongly read as terminal can never be worked on again, while one
+ * wrongly read as open is corrected by the next closure check.
+ */
+export function normalizeSessionPayload(raw: unknown): Session {
+  const session = (raw ?? {}) as Session;
+  return { ...session, status: LEGACY_SESSION_STATUS.get(String(session.status)) ?? 'open' };
+}
+
+/** Whether `raw` names a terminal session state this build understands. */
+export function terminalSessionStatus(raw: unknown): 'resolved' | 'abandoned' | null {
+  const mapped = LEGACY_SESSION_STATUS.get(String(raw));
+  return mapped === 'resolved' || mapped === 'abandoned' ? mapped : null;
+}
+
+
+/**
  * Projects a persisted hypothesis payload onto the current contract.
  *
  * Every field is defaulted from *its own absence* rather than from the entry's
@@ -519,7 +602,18 @@ export function normalizeHypothesisPayload(raw: unknown): Hypothesis {
   const statement = node.statement ?? (prose !== title ? prose : undefined);
   const evidence = (node.evidence ?? []).map(normalizeEvidenceRecord);
 
-  return { ...node, title, evidence, ...(statement === undefined ? {} : { statement }) };
+  // The verdict shares the status vocabulary and is compared against it to decide
+  // whether a conclusion was superseded, so translating one without the other
+  // makes every legacy terminal node read as reopened.
+  const conclusion = node.conclusion === undefined
+    ? undefined
+    : { ...node.conclusion, verdict: normalizeVerdict(node.conclusion.verdict) };
+
+  return {
+    ...node, title, evidence, status: normalizeStatus(node.status),
+    ...(conclusion === undefined ? {} : { conclusion }),
+    ...(statement === undefined ? {} : { statement }),
+  };
 }
 
 /**

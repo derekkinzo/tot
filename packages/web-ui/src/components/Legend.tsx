@@ -5,7 +5,22 @@ import { STATUS_COLORS, STATUS_LABELS, STATUS_NODE_STYLES } from '../theme';
 export default function Legend() {
   const [dismissed, setDismissed] = useState(false);
 
-  if (dismissed) return null;
+  // Dismissed, the legend leaves a way back: it carries the only statement of the
+  // canvas shortcuts, so removing it with no affordance would strand a reader who
+  // closed it to see the tree underneath.
+  if (dismissed) {
+    return (
+      <button
+        onClick={() => setDismissed(false)}
+        aria-label="Show legend"
+        title="Show the legend and canvas shortcuts"
+        style={{
+          background: '#1c1f26', border: '1px solid #30363d', borderRadius: 6,
+          color: '#8b949e', cursor: 'pointer', fontSize: 12, padding: '4px 9px',
+        }}
+      >?</button>
+    );
+  }
 
   return (
     <div className="overlay-widget" style={{

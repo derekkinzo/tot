@@ -7,10 +7,80 @@ import {
   resolveArtifactPath,
   readLineWindow,
   checkIntegrity,
+  discardArtifact,
   sniffMediaType,
   ARTIFACT_MAX_BYTES,
   ArtifactError,
 } from '../src/artifacts.js';
+
+describe('text is recognised by its bytes, not only by its name', () => {
+  // Command output is captured under whatever name the agent chose. Deciding
+  // text-ness from a short extension table means an excerpt cited against
+  // 'ci-run.out' can never be rendered as lines, and the capture-time bound check
+  // on that excerpt is skipped along with it.
+  let artifactsDir: string;
+  let sourceDir: string;
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+
+  beforeEach(() => {
+    artifactsDir = mkdtempSync(join(tmpdir(), 'tot-sniff-art-'));
+    sourceDir = mkdtempSync(join(tmpdir(), 'tot-sniff-src-'));
+  });
+  afterEach(() => {
+    rmSync(artifactsDir, { recursive: true, force: true });
+    rmSync(sourceDir, { recursive: true, force: true });
+  });
+
+  const capture = (name: string, body: string | Buffer) => {
+    const p = join(sourceDir, name);
+    writeFileSync(p, body);
+    return captureArtifact({ artifactsDir, sessionId, sourcePath: p });
+  };
+
+  it('counts the lines of text captured under an unlisted extension', async () => {
+    const ref = await capture('ci-run.out', 'first\nsecond\nthird\n');
+    expect(ref.lineCount).toBe(3);
+    expect(ref.mediaType.startsWith('text/')).toBe(true);
+  });
+
+  it('counts the lines of text captured with no extension at all', async () => {
+    const ref = await capture('build-output', 'one\ntwo\n');
+    expect(ref.lineCount).toBe(2);
+  });
+
+  it('refuses an excerpt cited against bytes that have no lines', async () => {
+    // Citing 'lines 3-5' of something the store never counted as lines describes
+    // nothing a reader can be shown, and the viewer offers it as a download.
+    const p = join(sourceDir, 'heap.dump');
+    writeFileSync(p, Buffer.from([0x00, 0x01, 0x02]));
+    await expect(captureArtifact({
+      artifactsDir, sessionId, sourcePath: p, excerpt: { startLine: 1, endLine: 2 },
+    })).rejects.toThrow(ArtifactError);
+  });
+
+  it('reads valid UTF-8 as text even where it contains a replacement character', async () => {
+    // U+FFFD is a legal character that logs genuinely carry, often because some
+    // upstream tool already substituted it. Treating its presence as proof the
+    // bytes are not text makes the capture undisplayable and refuses its excerpt.
+    const ref = await capture('unicode.out', 'first line\nsecond \uFFFD line\nthird\n');
+    expect(ref.lineCount).toBe(3);
+    expect(ref.mediaType.startsWith('text/')).toBe(true);
+  });
+
+  it('still offers genuinely binary bytes as a download', async () => {
+    const ref = await capture('heap.dump', Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
+    expect(ref.lineCount).toBeUndefined();
+    expect(ref.mediaType).toBe('application/octet-stream');
+  });
+
+  it('bounds an excerpt against bytes it now knows the length of', async () => {
+    const p = join(sourceDir, 'ci-run.out');
+    writeFileSync(p, 'a\nb\n');
+    await expect(captureArtifact({
+      artifactsDir, sessionId, sourcePath: p, excerpt: { startLine: 9, endLine: 9 },
+    })).rejects.toThrow(ArtifactError);
+  });
+});
 
 describe('resolveArtifactPath', () => {
   // A reference reaches this function from a request the router already checked,
@@ -41,6 +111,23 @@ describe('resolveArtifactPath', () => {
   it('resolves a minted reference to the session directory, then the id', () => {
     const id = '22222222-2222-4222-8222-222222222222';
     expect(resolveArtifactPath(DIR, { sessionId: GOOD, id })).toBe(`${DIR}/${GOOD}/${id}`);
+  });
+});
+
+describe('an unaddressable reference is reported as itself', () => {
+  // resolveArtifactPath refuses a reference whose ids cannot name a path. Callers
+  // that fold that refusal into a verdict about the bytes tell the reader the
+  // wrong thing: nothing was read, so nothing is known about the bytes.
+  const BAD = { id: '..', sessionId: '..', digest: { alg: 'sha-256' as const, value: 'd' } };
+
+  it('does not report a malformed reference as bytes that went missing', async () => {
+    await expect(checkIntegrity('/state/artifacts', BAD)).rejects.toThrow(ArtifactError);
+  });
+
+  it('leaves discarding a malformed reference a no-op rather than a rejection', async () => {
+    // Compensation runs on a path that is already failing; throwing there would
+    // replace the original error with this one.
+    await expect(discardArtifact('/state/artifacts', BAD)).resolves.toBeUndefined();
   });
 });
 

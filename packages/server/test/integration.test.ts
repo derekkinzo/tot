@@ -908,7 +908,10 @@ describe('MCP Integration', () => {
       expect(text).toContain('overlap-advisory');
     });
 
-    it('detects abstraction mismatch and emits level-mismatch-advisory', async () => {
+    it('makes no claim about the level of abstraction siblings sit at', async () => {
+      // The structural report speaks only to what it examined. Asserting an
+      // abstraction verdict from label lengths, in either direction, claims more
+      // than the check establishes.
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
       );
@@ -924,7 +927,10 @@ describe('MCP Integration', () => {
         arguments: { parentId: rootId },
       });
       const text = getText(result);
-      expect(text).toContain('level-mismatch-advisory');
+      expect(text).not.toContain('level-mismatch-advisory');
+      expect(text).not.toMatch(/uneven abstraction|word-count/i);
+      // The question is still asked, unconditionally.
+      expect(text.toLowerCase()).toMatch(/level|abstraction/);
     });
 
     it('error: non-existent parent', async () => {

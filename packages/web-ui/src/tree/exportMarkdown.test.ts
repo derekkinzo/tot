@@ -20,6 +20,49 @@ const session = (over: Partial<Session> = {}): Session => ({
   id: 's1', problem: 'P', rootNodeId: 'root', status: 'open', createdAt: '2024-01-01T00:00:00.000Z', ...over,
 });
 
+describe('generateMarkdown carries the whole claim', () => {
+  // The export is the portable record of the reasoning. A label is what a canvas
+  // has room for; the statement is the claim itself, so an export that keeps only
+  // the label loses what was actually argued.
+  const STATEMENT = 'Callers block in getConnection once the writer pool is saturated by retries.';
+
+  it('includes the long-form statement of a node that has one', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('root', hyp('root', { title: 'Writer pool saturation', status: 'exploring', statement: STATEMENT }));
+    const md = generateMarkdown(session(), map);
+    expect(md).toContain('Writer pool saturation');
+    expect(md).toContain(STATEMENT);
+  });
+
+  it('keeps a multi-line statement inside its own list item', () => {
+    // Interpolated raw, a newline ends the list item and a leading '-' becomes a
+    // sibling node, so the exported tree misrepresents its own shape.
+    const map = new Map<string, Hypothesis>();
+    map.set('root', hyp('root', {
+      title: 'Writer pool saturation', status: 'exploring', children: ['a'],
+    }));
+    map.set('a', hyp('a', {
+      title: 'Child', status: 'pending', parentId: 'root', depth: 1,
+      statement: 'First line of the claim\n- second line that looks like a bullet\n\nthird',
+    }));
+    const md = generateMarkdown(session(), map);
+    const lines = md.split('\n');
+    // No exported line may begin a list item that the statement invented.
+    const invented = lines.filter((l) => /^\s*-\s+second line/.test(l));
+    expect(invented, `statement leaked a list item:\n${md}`).toEqual([]);
+    // The text is still present, and still attributed to that node.
+    expect(md).toMatch(/second line that looks like a bullet/);
+  });
+
+  it('does not repeat the label as a statement when none was authored', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('root', hyp('root', { title: 'Writer pool saturation', status: 'exploring' }));
+    const md = generateMarkdown(session(), map);
+    const occurrences = md.split('Writer pool saturation').length - 1;
+    expect(occurrences).toBe(1);
+  });
+});
+
 describe('generateMarkdown', () => {
   it('renders the tree with status icons, evidence counts, and nested children', () => {
     const map = new Map<string, Hypothesis>();

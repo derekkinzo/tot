@@ -98,7 +98,16 @@ describe('evidenceLedger', () => {
     // not notice if it stopped being right.
     const l = evidenceLedger(hyp([ev({ type: 'refutes' })]), { sessionGrounded: false });
     expect(Object.keys(l).sort())
-      .toEqual(['hasDecisive', 'neutral', 'refuting', 'supporting', 'ungrounded']);
+      .toEqual(['hasDecisive', 'neutral', 'refuting', 'setAside', 'supporting', 'ungrounded']);
+  });
+
+  it('does not call a set-aside record decisive', () => {
+    // A record declared not to discriminate weighs nothing, so the verdict cannot
+    // turn on it. Marking the face otherwise is the same inconsistency the neutral
+    // count had: one flag meaning different things by field.
+    const l = evidenceLedger(hyp([ev({ type: 'refutes', decisive: true, nonDiagnostic: true })]), { sessionGrounded: false });
+    expect(l.hasDecisive).toBe(false);
+    expect(l.setAside).toBe(1);
   });
 
   it('flags a decisive record on the node', () => {
@@ -130,6 +139,38 @@ describe('evidenceLedger', () => {
   it('does not mark a branch set aside, which claims no verdict to ground', () => {
     const setAside = hyp([ev({ type: 'neutral' })], { status: 'out-of-scope' });
     expect(evidenceLedger(setAside, { sessionGrounded: true }).ungrounded).toBe(false);
+  });
+
+  it('shows that a node holds records even when none of them weigh anything', () => {
+    // Every record here was declared not to discriminate. The weights are zero,
+    // so with only weights on the face the node is indistinguishable from one
+    // that has no evidence at all — and a reader cannot tell that the question
+    // was investigated and set aside.
+    const h = hyp([
+      ev({ type: 'refutes', nonDiagnostic: true }),
+      ev({ type: 'supports', nonDiagnostic: true }),
+    ]);
+    const l = evidenceLedger(h, { sessionGrounded: false });
+    expect(l.refuting).toBe(0);
+    expect(l.supporting).toBe(0);
+    expect(l.setAside).toBe(2);
+  });
+
+  it('leaves a node with no records showing nothing at all', () => {
+    const l = evidenceLedger(hyp([]), { sessionGrounded: false });
+    expect(l.setAside).toBe(0);
+    expect(l.refuting + l.supporting + l.neutral).toBe(0);
+  });
+
+  it('keeps a set-aside neutral record out of the neutral count it does not weigh', () => {
+    // refuting and supporting are weights; neutral must be measured the same way
+    // or the same flag has opposite effects depending on record type.
+    const l = evidenceLedger(hyp([
+      ev({ type: 'neutral' }),
+      ev({ type: 'neutral', nonDiagnostic: true }),
+    ]), { sessionGrounded: false });
+    expect(l.neutral).toBe(1);
+    expect(l.setAside).toBe(1);
   });
 
   it('counts neutral records for display without weighing them', () => {

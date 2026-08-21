@@ -50,10 +50,11 @@ describe('tool surface', () => {
     // the published contract and still be rejected.
     //
     // The set is derived from the schemas rather than listed, so a field added
-    // later is covered without anyone remembering to add it here: any required
-    // field that accepts text at all must refuse text that is only whitespace,
-    // directly or inside an array. An optional field is exempt — omitting it is
-    // how a caller says nothing.
+    // later is covered without anyone remembering to add it here: any field that
+    // accepts text at all must refuse text that is only whitespace, directly or
+    // inside an array. Optional fields included — omitting one is how a caller
+    // says nothing, so an explicit blank is never the way to say it, and
+    // exempting them is what let an identifier-shaped field keep accepting it.
     const PROSE = 'a real value';
     const BLANK = '   ';
     const offenders: string[] = [];
@@ -62,7 +63,6 @@ describe('tool surface', () => {
     for (const [name, def] of Object.entries(TOOL_SCHEMAS)) {
       for (const [field, raw] of Object.entries(def.schema)) {
         const schema = raw as z.ZodTypeAny;
-        if (schema.isOptional()) continue;
         const takesText = schema.safeParse(PROSE).success;
         const takesTextList = schema.safeParse([PROSE]).success;
         if (!takesText && !takesTextList) continue;

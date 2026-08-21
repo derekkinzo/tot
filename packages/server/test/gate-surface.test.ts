@@ -50,12 +50,48 @@ describe('declared splits at the tool surface', () => {
     return (await call('eliminate_hypothesis', { hypothesisId: id, reason: 'refuted by the traces' })).text;
   }
 
+  it('summarises the tree that was just changed, not whichever is active', async () => {
+    // Eliminating does not promote its session. If the summary reads the active
+    // session instead of the mutated one, it prints another tree's tally.
+    const smallRoot = await tree();                                   // 3 nodes
+    const [smallA] = await split(smallRoot, ['the database', 'the network'], 'by subsystem');
+    const bigRoot = await tree();                                     // 5 nodes
+    const [bigA] = await split(bigRoot, ['w', 'x', 'y', 'z'], 'by stage');
+
+    // File the refutation on the big tree, then touch the small one last so the
+    // small tree is the active session while the big one is the one eliminated.
+    await call('add_evidence', { hypothesisId: bigA, type: 'refutes', content: 'the traces rule it out' });
+    await call('add_evidence', { hypothesisId: smallA, type: 'neutral', content: 'noted' });
+
+    const { text } = await call('eliminate_hypothesis', { hypothesisId: bigA, reason: 'refuted by the traces' });
+    const progress = /Progress: (\d+)\/(\d+) resolved/.exec(text);
+    expect(progress, `no tree summary in:\n${text}`).not.toBeNull();
+    // The big tree has 5 nodes; the active small one has 3.
+    expect(progress![2]).toBe('5');
+  });
+
   it('refuses a decomposition that does not state the axis its children divide', async () => {
     // Siblings cannot be judged for overlap or coverage without the dimension
     // they are meant to divide, so the axis is not optional.
     const rootId = await tree();
     const res = await call('decompose', { parentId: rootId, children: ['the database', 'the network'] });
     expect(res.isError).toBe(true);
+  });
+
+  it('never reports a clean structural bill it cannot support', async () => {
+    // Removing a check must not upgrade its silence into an all-clear. A set this
+    // report says nothing about — two labels at plainly different levels, with no
+    // string overlap between them — must not come back as "no structural issues".
+    const rootId = await tree();
+    const { text } = await call('decompose', {
+      parentId: rootId, axis: 'by cause',
+      children: ['Infection', 'Klebsiella pneumoniae bacteremia from a line'],
+    });
+    expect(text).not.toMatch(/No structural issues detected/i);
+    // What it did examine, it may say.
+    expect(text).toMatch(/No substring overlaps or duplicate labels detected/i);
+    // And the question it cannot answer is still put to the agent.
+    expect(text.toLowerCase()).toMatch(/level|abstraction/);
   });
 
   it('restates the axis and what the declared relation means', async () => {

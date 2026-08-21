@@ -25,8 +25,16 @@ const STATIC_DIR = resolve(__dirname, '..', 'static');
 
 let sirvHandler: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
 
-function setCorsHeaders(res: ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+/**
+ * Methods this server answers.
+ *
+ * Deliberately without an `Access-Control-Allow-Origin`: the dashboard is served
+ * by this same server, so it reads these routes same-origin and needs no grant.
+ * Granting every origin would let any page open in the same browser read
+ * /api/state, take the artifact ids out of it, and then read the bytes of
+ * whatever files were captured from the developer's disk.
+ */
+function setAllowedMethods(res: ServerResponse): void {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 }
 
@@ -74,32 +82,32 @@ export async function startHttpServer(
 
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
-      setCorsHeaders(res);
+      setAllowedMethods(res);
       res.writeHead(204);
       res.end();
       return;
     }
 
     if (url.pathname === '/sse') {
-      setCorsHeaders(res);
+      setAllowedMethods(res);
       handleSSE(req, res, project, hub, url.searchParams.get('sessionId'));
       return;
     }
 
     if (url.pathname === '/api/state') {
-      setCorsHeaders(res);
+      setAllowedMethods(res);
       await handleStateAPI(res, url, project, lock);
       return;
     }
 
     if (url.pathname === '/api/sessions') {
-      setCorsHeaders(res);
+      setAllowedMethods(res);
       handleSessionsAPI(res, project);
       return;
     }
 
     if (url.pathname === '/api/info') {
-      setCorsHeaders(res);
+      setAllowedMethods(res);
       handleInfoAPI(res, project);
       return;
     }
@@ -107,7 +115,7 @@ export async function startHttpServer(
     // Before the /api/ catch-all below, which would otherwise answer 404.
     const artifactRoute = parseArtifactRoute(url.pathname, url.searchParams);
     if (artifactRoute) {
-      setCorsHeaders(res);
+      setAllowedMethods(res);
       await handleArtifactAPI(res, artifactRoute, project, lock);
       return;
     }
@@ -116,7 +124,7 @@ export async function startHttpServer(
     // fallback (which would serve index.html with a 200 and make a client's
     // JSON.parse throw, masking the bad route).
     if (url.pathname.startsWith('/api/')) {
-      setCorsHeaders(res);
+      setAllowedMethods(res);
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'not-found' }));
       return;

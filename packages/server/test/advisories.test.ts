@@ -147,6 +147,32 @@ describe('lacksDiagnosticity (Heuer ACH)', () => {
   });
 });
 
+describe('suggestsElimination counts only what discriminates', () => {
+  // The nudge says the balance of evidence points to elimination. Records the
+  // agent has declared non-diagnostic, or declared to be one joint observation,
+  // do not move that balance, so counting them asserts support the agent
+  // explicitly withdrew.
+
+  it('does not nudge when every refuting record was declared non-diagnostic', () => {
+    const h = hyp([
+      ev('refutes', 'the dashboard was red', undefined),
+      ev('refutes', 'the dashboard was still red', undefined),
+    ]);
+    for (const e of h.evidence) e.nonDiagnostic = true;
+    expect(suggestsElimination(h)).toBe(false);
+  });
+
+  it('does not nudge on two records declared to be one observation', () => {
+    const h = hyp([ev('refutes'), ev('refutes')]);
+    for (const e of h.evidence) e.linkedGroupId = 'g';
+    expect(suggestsElimination(h)).toBe(false);
+  });
+
+  it('still nudges on two records that do discriminate', () => {
+    expect(suggestsElimination(hyp([ev('refutes'), ev('refutes')]))).toBe(true);
+  });
+});
+
 describe('readsAsRetypedOutput', () => {
   // Bytes that were retyped into a record cannot be re-read or checked against
   // their source; the file they came from can be captured and cited instead.

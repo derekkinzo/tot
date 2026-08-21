@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -15,10 +18,18 @@ import { registerTools } from '../src/tools.js';
  */
 describe('advisory wording stays inside what was observed', () => {
   let client: Client;
+  let dataDir: string;
+
+  afterEach(() => {
+    // The artifact store is derived from this directory, so a fixed path would
+    // accumulate journals and captured bytes across every run.
+    rmSync(dataDir, { recursive: true, force: true });
+  });
 
   beforeEach(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'tot-advisory-'));
     const server = new McpServer({ name: 'test', version: '1.0.0' });
-    registerTools(server, new TreeManager({}), () => '/tmp/tot-advisory-test');
+    registerTools(server, new TreeManager({}), () => dataDir);
     client = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     await Promise.all([client.connect(ct), server.connect(st)]);

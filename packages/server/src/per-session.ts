@@ -54,10 +54,13 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   const dataDir = getCentralSessionsDir(projectDir);
   const artifactsDir = getCentralArtifactsDir(projectDir);
 
-  const stagnationThreshold = parseInt(
-    process.env['TOT_STAGNATION_THRESHOLD'] || String(STAGNATION_THRESHOLD_DEFAULT),
-    10,
-  );
+  // A non-numeric override parses to NaN, which is not nullish and so survives a
+  // `??` default — every later comparison against it is false, silently turning
+  // stagnation detection off for the process. An unusable value falls back.
+  const configuredThreshold = Number.parseInt(process.env['TOT_STAGNATION_THRESHOLD'] ?? '', 10);
+  const stagnationThreshold = Number.isInteger(configuredThreshold) && configuredThreshold > 0
+    ? configuredThreshold
+    : STAGNATION_THRESHOLD_DEFAULT;
   const tm = new TreeManager({ stagnationThreshold });
 
   // Lazy index; eager-load only the most-recent-open (else most-recent) session.

@@ -1,5 +1,5 @@
 import { isLive, isOpen } from './closure.js';
-import { countSupporting, countRefuting } from '@tot-mcp/shared';
+import { countSupporting, countRefuting, refutingWeight, supportingWeight } from '@tot-mcp/shared';
 import type { Hypothesis } from './types.js';
 
 /**
@@ -77,9 +77,16 @@ export function readsAsRetypedOutput(hypothesis: Hypothesis): boolean {
   return last.content.trim().includes('\n');
 }
 
-/** Elimination nudge (Bacon/Mill eliminative induction): ≥2 refuting, zero supporting. */
+/**
+ * Elimination nudge (Bacon/Mill eliminative induction): two or more independent
+ * refutations and nothing supporting.
+ *
+ * Weighed rather than counted, so a record the agent has declared
+ * non-diagnostic — or declared to be one joint observation with another — does
+ * not push toward a verdict it was explicitly withdrawn from.
+ */
 export function suggestsElimination(hypothesis: Hypothesis): boolean {
-  return countRefuting(hypothesis) >= 2 && countSupporting(hypothesis) === 0;
+  return refutingWeight(hypothesis) >= 2 && supportingWeight(hypothesis) === 0;
 }
 
 /**

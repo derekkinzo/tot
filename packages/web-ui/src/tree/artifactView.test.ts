@@ -73,7 +73,7 @@ describe('shiftWindow', () => {
     // The endpoint caps a window. Advancing by the span that was *asked* for
     // steps over the lines the cap withheld, and nothing can reach them again.
     const asked = { from: 1, to: 2000 };
-    const served = { from: 1, to: 500 };
+    const served = { from: 1, to: 500, truncated: true };
     expect(shiftWindow(asked, 1, served)).toEqual({ from: 501, to: 1000 });
   });
 
@@ -83,7 +83,7 @@ describe('shiftWindow', () => {
     let range = { from: 1, to: 2000 };
     let expectedNext = 1;
     for (let i = 0; i < 5; i++) {
-      const served = { from: range.from, to: Math.min(range.to, range.from + CAP - 1) };
+      const served = { from: range.from, to: Math.min(range.to, range.from + CAP - 1), truncated: true };
       expect(served.from).toBe(expectedNext);
       expectedNext = served.to + 1;
       range = shiftWindow(range, 1, served);
@@ -91,14 +91,52 @@ describe('shiftWindow', () => {
   });
 
   it('steps back to the lines just before the ones served', () => {
-    expect(shiftWindow({ from: 501, to: 1000 }, -1, { from: 501, to: 1000 }))
+    expect(shiftWindow({ from: 501, to: 1000 }, -1, { from: 501, to: 1000, truncated: false }))
       .toEqual({ from: 1, to: 500 });
   });
 
   it('stops at the first line rather than addressing line zero', () => {
-    const back = shiftWindow({ from: 1, to: 200 }, -1, { from: 1, to: 200 });
+    const back = shiftWindow({ from: 1, to: 200 }, -1, { from: 1, to: 200, truncated: false });
     expect(back.from).toBe(1);
     expect(back.to).toBeGreaterThanOrEqual(back.from);
+  });
+
+  it('keeps the page size when the file runs out before the page does', () => {
+    // Paging back toward the top leaves fewer lines than a page. Taking the page
+    // size from that short window shrinks every later page too, so a reader who
+    // walks to the start is left reading two lines at a time.
+    const span = 43;
+    const served = { from: 3, to: 45, truncated: false };
+    const back = shiftWindow({ from: 3, to: 45 }, -1, served);
+    expect(back.from).toBe(1);
+    expect(back.to - back.from + 1).toBe(span);
+  });
+
+  it('holds the page size over a walk to the top and back', () => {
+    const SPAN = 43;
+    const TOTAL = 860;
+    let range = { from: 400, to: 400 + SPAN - 1 };
+    for (let i = 0; i < 15; i++) {
+      const served = {
+        from: Math.max(1, range.from),
+        to: Math.min(TOTAL, range.to),
+        truncated: false,
+      };
+      range = shiftWindow(range, -1, served);
+      expect(range.to - range.from + 1, `page ${i} lost its size`).toBe(SPAN);
+      expect(range.from).toBeGreaterThanOrEqual(1);
+    }
+    // And forward again, still a full page.
+    const served = { from: 1, to: SPAN, truncated: false };
+    const fwd = shiftWindow(range, 1, served);
+    expect(fwd.to - fwd.from + 1).toBe(SPAN);
+  });
+
+  it('adopts the served size only when the endpoint capped the window', () => {
+    // A cut window sets the page size from then on, so later requests match what
+    // the endpoint will actually serve.
+    const capped = shiftWindow({ from: 1, to: 5000 }, 1, { from: 1, to: 2000, truncated: true });
+    expect(capped).toEqual({ from: 2001, to: 4000 });
   });
 
   it('falls back to the requested range before anything has been served', () => {
@@ -109,17 +147,65 @@ describe('shiftWindow', () => {
 describe('the viewer never depends on a value rebuilt every render', () => {
   // An effect that lists a freshly-built object refires on every render, and its
   // own setState causes that render: one open viewer then fetches without bound.
+  //
+  // Checked as the property rather than by naming the identifier that once caused
+  // it, so the same defect under a different name is still caught.
   const SRC = readFileSync(resolve(__dirname, '../components/ArtifactViewer.tsx'), 'utf-8');
 
-  it('lists only stable values in its effect dependencies', () => {
-    const deps = [...SRC.matchAll(/\}, \[([^\]]*)\]\);/g)].map((m) => m[1]);
-    expect(deps.length).toBeGreaterThan(0);
-    for (const list of deps) {
-      // `urls` is an object literal returned fresh by artifactUrls; naming it
-      // whole is the defect, while reading a string off it is fine.
-      const names = list.split(',').map((d) => d.trim()).filter(Boolean);
-      expect(names, list).not.toContain('urls');
+  /**
+   * Component-scope bindings rebuilt on every render AND compared by identity:
+   * assigned straight from a call that is not a memoising hook, and used
+   * somewhere as an object (a property read or an invocation).
+   *
+   * A call returning a primitive is excluded — a string or a boolean is compared
+   * by value, so listing it is stable and correct.
+   */
+  const unstableBindings = (src: string): string[] => {
+    const found: string[] = [];
+    const decl = /^  const (\w+) = (?:await\s+)?(\w+)\s*\(/gm;
+    for (const m of src.matchAll(decl)) {
+      const [, name, callee] = m;
+      if (/^(useMemo|useCallback|useState|useRef|useReducer|useContext)$/.test(callee)) continue;
+      const usedAsObject = new RegExp(`\\b${name}(\\.|\\()`).test(src);
+      if (usedAsObject) found.push(name);
     }
+    return found;
+  };
+
+  /** Every dependency array in the file, as lists of identifiers. */
+  const dependencyLists = (src: string): string[][] =>
+    [...src.matchAll(/\}, \[([^\]]*)\]\);/g)]
+      .map((m) => m[1].split(',').map((d) => d.trim()).filter(Boolean));
+
+  it('lists no render-built binding among its effect dependencies', () => {
+    const unstable = unstableBindings(SRC);
+    const lists = dependencyLists(SRC);
+    expect(lists.length, 'no dependency arrays found — the check would pass vacuously').toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const list of lists) {
+      for (const dep of list) {
+        // A member read off a binding is a value, not the binding itself.
+        if (dep.includes('.')) continue;
+        if (unstable.includes(dep)) offenders.push(`${dep} in [${list.join(', ')}]`);
+      }
+    }
+    expect(offenders, `these dependencies are rebuilt every render:\n${offenders.join('\n')}`).toEqual([]);
+  });
+
+  it('recognises the shape it is guarding against', () => {
+    // Guards the guard: the detector must flag a binding assigned from a plain
+    // call and ignore one wrapped in a memoising hook.
+    const sample = [
+      '  const built = makeThing(a, b);',
+      '  const flag = isThing(a);',
+      '  const held = useMemo(() => makeThing(a, b), [a, b]);',
+      '  fetch(built.url);',
+      '  if (flag) return null;',
+      '  }, [built, held]);',
+    ].join('\n');
+    // `built` is read as an object; `flag` is a primitive; `held` is memoised.
+    expect(unstableBindings(sample)).toEqual(['built']);
+    expect(dependencyLists(sample)).toEqual([['built', 'held']]);
   });
 });
 

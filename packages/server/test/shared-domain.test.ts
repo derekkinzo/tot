@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isPruned, isLive, isTerminal, isOpen,
   countSupporting, countRefuting,
-  deriveTitle, TITLE_MAX_LENGTH, nodeLabel, splitProse,
+  deriveTitle, TITLE_MAX_LENGTH, nodeLabel, splitProse, titleProblem,
   type Hypothesis, type HypothesisStatus,
 } from '@tot-mcp/shared';
 
@@ -82,6 +82,52 @@ describe('splitProse', () => {
   it('produces a title within the length bound for any prose', () => {
     const { title } = splitProse('word '.repeat(200));
     expect(title.length).toBeLessThanOrEqual(TITLE_MAX_LENGTH);
+  });
+});
+
+describe('deriveTitle projects prose onto a label that is always usable', () => {
+  // Every node the canvas draws shows this label and nothing else, and the
+  // engine persists it, so a projection that yields a fragment or nothing at all
+  // leaves a node no reader can identify.
+
+  const PROSE = [
+    'Writer pool exhausts under retry storms',
+    '1. Dashboard freezes when many nodes are added',
+    'Step 1. Investigate the writer pool',
+    'v1. Deploy fails on the second attempt',
+    '2026-08-19. Deploys fail after the rollout',
+    'Q. Why does the build hang?',
+    '. Leading punctuation and then a real sentence',
+    'e.g. the planner picks a sequential scan',
+    'Disk full. Writes fail downstream.',
+    'The writer pool is exhausted. Callers block in getConnection.',
+    'Cache stampede on price lookups; reads pile up behind it',
+    'A single-word problem',
+    'x',
+    'A'.repeat(400),
+  ];
+
+  it('never yields a label the engine would reject', () => {
+    for (const prose of PROSE) {
+      const title = deriveTitle(prose);
+      expect(titleProblem(title), `deriveTitle(${JSON.stringify(prose)}) = ${JSON.stringify(title)}`).toBeNull();
+    }
+  });
+
+  it('does not mistake an enumerator, a version, or a date for a whole clause', () => {
+    // '1. Dashboard freezes...' is one sentence with a list marker, not a clause
+    // followed by another; keeping only the marker discards the entire claim.
+    expect(deriveTitle('1. Dashboard freezes when many nodes are added')).toContain('Dashboard freezes');
+    expect(deriveTitle('Step 1. Investigate the writer pool')).toContain('Investigate');
+    expect(deriveTitle('v1. Deploy fails on the second attempt')).toContain('Deploy fails');
+    expect(deriveTitle('2026-08-19. Deploys fail after the rollout')).toContain('Deploys fail');
+    expect(deriveTitle('Q. Why does the build hang?')).toContain('build hang');
+  });
+
+  it('still keeps the first clause when it is a clause', () => {
+    expect(deriveTitle('The writer pool is exhausted. Callers block in getConnection.'))
+      .toBe('The writer pool is exhausted');
+    expect(deriveTitle('Disk full. Writes fail downstream.')).toBe('Disk full');
   });
 });
 

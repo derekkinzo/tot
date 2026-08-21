@@ -38,10 +38,40 @@ const MEDIA_TYPES: Record<string, string> = {
   '.patch': 'text/x-diff',
 };
 
-/** Media type for a name, defaulting to a byte stream so an unrecognized
- *  capture is offered as a download rather than rendered as text. */
+/**
+ * Media type for a name, defaulting to a byte stream when the extension is not one
+ * this store knows.
+ *
+ * That default is not the final answer: {@link captureArtifact} consults
+ * {@link readsAsText} on the stored bytes before accepting it, so output captured
+ * under an arbitrary name is still read as lines.
+ */
 export function sniffMediaType(filename: string): string {
   return MEDIA_TYPES[extname(basename(filename)).toLowerCase()] ?? 'application/octet-stream';
+}
+
+/**
+ * Whether these bytes read as text.
+ *
+ * Consulted when the name says nothing, because command output is captured under
+ * whatever name the agent chose: deciding from the extension alone leaves an
+ * excerpt cited against 'ci-run.out' unrenderable, and skips the capture-time
+ * check that the cited lines exist.
+ *
+ * Decoded strictly rather than by looking for replacement characters afterwards:
+ * U+FFFD is a legal character that logs carry, usually because something upstream
+ * already substituted it, and treating its presence as proof of binary would
+ * refuse a perfectly readable capture. A NUL byte is the remaining signal.
+ */
+export function readsAsText(bytes: Buffer): boolean {
+  if (bytes.length === 0) return true;
+  if (bytes.includes(0)) return false;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -157,16 +187,35 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
     // Digest and measure the stored copy, not the source.
     const stored = await readFile(tempPath);
     const digest = { alg: 'sha-256' as const, value: createHash('sha256').update(stored).digest('hex') };
-    const mediaType = sniffMediaType(filename);
+    // The extension decides when it is one this store knows; otherwise the bytes
+    // themselves do, so output captured under an arbitrary name is still readable
+    // as lines.
+    const named = sniffMediaType(filename);
+    const mediaType = named === 'application/octet-stream' && readsAsText(stored)
+      ? 'text/plain'
+      : named;
     const lineCount = mediaType.startsWith('text/') || mediaType === 'application/json'
       ? countLines(stored.toString('utf-8'))
       : undefined;
 
-    if (req.excerpt !== undefined && lineCount !== undefined && req.excerpt.startLine > lineCount) {
+    if (req.excerpt !== undefined && lineCount === undefined) {
       throw new ArtifactError(
-        `The excerpt starts at line ${req.excerpt.startLine}, past the end of a ${lineCount}-line capture. ` +
-        'Cite a line the artifact contains.',
+        `These bytes are ${mediaType}, which has no lines, so an excerpt cannot cite them. ` +
+        'Capture the text the excerpt refers to, or drop the excerpt.',
       );
+    }
+    if (req.excerpt !== undefined && lineCount !== undefined) {
+      // Both ends, because a range that starts inside the bytes and ends past
+      // them still cites lines the capture does not contain.
+      const past = req.excerpt.startLine > lineCount
+        ? req.excerpt.startLine
+        : req.excerpt.endLine > lineCount ? req.excerpt.endLine : undefined;
+      if (past !== undefined) {
+        throw new ArtifactError(
+          `The excerpt cites line ${past}, past the end of a ${lineCount}-line capture. ` +
+          'Cite lines the artifact contains.',
+        );
+      }
     }
 
     await rename(tempPath, finalPath);
@@ -193,7 +242,12 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
 /** Removes a captured artifact. Used to compensate a capture whose mutation was
  *  not durably recorded, so a refused call leaves no unreferenced bytes. */
 export async function discardArtifact(artifactsDir: string, ref: Pick<ArtifactRef, 'id' | 'sessionId'>): Promise<void> {
-  await unlink(resolveArtifactPath(artifactsDir, ref)).catch(() => {});
+  // Best-effort by contract: this runs on a path that is already failing, so an
+  // unaddressable reference or an absent file must not raise over the original
+  // error. Resolving is inside the guard because it refuses such a reference.
+  try {
+    await unlink(resolveArtifactPath(artifactsDir, ref));
+  } catch { /* nothing to undo */ }
 }
 
 /**
@@ -206,9 +260,12 @@ export async function checkIntegrity(
   artifactsDir: string,
   ref: Pick<ArtifactRef, 'id' | 'sessionId' | 'digest'>,
 ): Promise<ArtifactIntegrity> {
+  // Resolved before the guard: a reference that cannot name a path was never
+  // read, so folding that into 'missing' would report on bytes nobody looked for.
+  const path = resolveArtifactPath(artifactsDir, ref);
   let bytes: Buffer;
   try {
-    bytes = await readFile(resolveArtifactPath(artifactsDir, ref));
+    bytes = await readFile(path);
   } catch {
     return 'missing';
   }
