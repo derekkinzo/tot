@@ -40,13 +40,6 @@ export interface StructuralCheck {
   substringOverlaps: [string, string][];
   duplicateLabels: string[];
   hasCatchAll: boolean;
-  // True when sibling labels span uneven word-count ranges, surfacing the
-  // possibility of mixed abstraction levels.
-  abstractionMismatch: boolean;
-  // Word-count span of the sibling labels (present when childCount >= 2), so
-  // formatters reuse the engine's counts instead of recomputing the split.
-  minWords?: number;
-  maxWords?: number;
 }
 
 export interface TreeState {

@@ -65,17 +65,23 @@ export function initialWindow(ref: Pick<ArtifactRef, 'excerpt' | 'lineCount'>): 
 export function shiftWindow(
   current: LineRange,
   direction: -1 | 1,
-  served?: Pick<ArtifactLineWindow, 'from' | 'to'>,
+  served?: Pick<ArtifactLineWindow, 'from' | 'to' | 'truncated'>,
 ): LineRange {
+  // The page size is the range the reader asked for. A window the endpoint CUT to
+  // its cap resets that size, so later pages match what it will actually serve; a
+  // window merely short because the file ran out does not, or walking to the top
+  // of a log would shrink the page and leave every later page shrunk with it.
+  const requested = Math.max(1, current.to - current.from + 1);
+  const span = served?.truncated
+    ? Math.max(1, served.to - served.from + 1)
+    : requested;
   const anchor = served ?? current;
-  const span = Math.max(1, anchor.to - anchor.from + 1);
   if (direction === 1) {
     const from = anchor.to + 1;
     return { from, to: from + span - 1 };
   }
-  const to = anchor.from - 1;
-  if (to < 1) return { from: 1, to: span };
-  return { from: Math.max(1, to - span + 1), to };
+  const from = Math.max(1, anchor.from - span);
+  return { from, to: from + span - 1 };
 }
 
 export interface IntegrityNotice {

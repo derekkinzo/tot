@@ -21,15 +21,18 @@ const NOTICE_TONES = {
 
 /** The pill states that the record is a capture; its colour states whether the
  *  stored bytes were checked against the digest taken at capture. */
-const VERBATIM_PILL: Record<'verified' | 'unchecked' | 'broken', { border: string; color: string; title: string }> = {
+const VERBATIM_PILL: Record<'verified' | 'unchecked' | 'mismatch' | 'gone', { border: string; color: string; title: string }> = {
   verified: { border: '#238636', color: '#3fb950', title: 'The stored bytes match the digest recorded at capture' },
   unchecked: { border: '#9e6a03', color: '#d29922', title: 'The stored bytes have not been checked against their digest' },
-  broken: { border: '#da3633', color: '#f85149', title: 'The stored bytes do not match the digest recorded at capture' },
+  mismatch: { border: '#da3633', color: '#f85149', title: 'The stored bytes do not match the digest recorded at capture' },
+  // Nothing was compared here, so the pill must not claim a comparison failed.
+  gone: { border: '#da3633', color: '#f85149', title: 'The stored bytes are gone, so nothing could be checked against the digest' },
 };
 
 function pillState(integrity: IntegrityState): keyof typeof VERBATIM_PILL {
   if (integrity === 'verified') return 'verified';
-  if (integrity === 'mismatch' || integrity === 'missing') return 'broken';
+  if (integrity === 'mismatch') return 'mismatch';
+  if (integrity === 'missing') return 'gone';
   return 'unchecked';
 }
 
@@ -55,6 +58,7 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
   const [page, setPage] = useState<ArtifactLineWindow | null>(null);
   const [integrity, setIntegrity] = useState<IntegrityState>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
   const excerptRef = useRef<HTMLDivElement | null>(null);
   const isText = rendersAsLines(artifact);
 
@@ -80,10 +84,19 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
     if (!isText) return;
     let live = true;
     setError(null);
+    setReading(true);
     fetch(linesUrl)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((p: ArtifactLineWindow) => { if (live) setPage(p); })
-      .catch(() => { if (live) setError('Could not read the stored bytes.'); });
+      .catch(() => {
+        if (!live) return;
+        // The window on screen no longer describes what was asked for, so the
+        // pager must not anchor on it: another turn would recompute the range
+        // already requested and the click would go nowhere.
+        setPage(null);
+        setError('Could not read the stored bytes.');
+      })
+      .finally(() => { if (live) setReading(false); });
     return () => { live = false; };
   }, [linesUrl, isText]);
 
@@ -105,17 +118,23 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
     excerptRef.current?.scrollIntoView({ block: 'center' });
   }, [page]);
 
-  const servedRef = useRef<ArtifactLineWindow | null>(null);
-  servedRef.current = page;
+  // Anchored on the window that is actually on screen. A turn taken while the
+  // next window is still in flight would otherwise recompute the range already
+  // displayed, and the effect — seeing the same URL — would never refire, so the
+  // click would be silently swallowed; the pager stands down until the read lands.
   const turnPage = useCallback((direction: -1 | 1) => {
-    setRange((r) => shiftWindow(r, direction, servedRef.current ?? undefined));
-  }, []);
+    setRange((r) => shiftWindow(r, direction, page ?? undefined));
+  }, [page]);
 
   const notice = integrity ? integrityNotice(integrity) : null;
   const pill = VERBATIM_PILL[pillState(integrity)];
   const total = page?.totalLines ?? artifact.lineCount;
-  const atStart = range.from <= 1;
-  const atEnd = total !== undefined && (page?.to ?? range.to) >= total;
+  // Paging is unavailable while a read is in flight and after one failed: in both
+  // cases the served window does not match the range, so a turn taken from it
+  // would resolve to a range already requested.
+  const pagerIdle = !reading && error === null;
+  const atStart = !pagerIdle || range.from <= 1;
+  const atEnd = !pagerIdle || (total !== undefined && (page?.to ?? range.to) >= total);
 
   return (
     <div

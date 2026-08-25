@@ -35,7 +35,7 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 - **Evidence tracking** — typed evidence (supports/refutes/neutral) attached to each hypothesis
 - **Systematic elimination** — mark dead ends with documented reasoning
 - **Live visualization** — watch the tree build in real-time in your browser (the URL is reported by `get_status`)
-- **Decomposition guidance** — structural checks flag sibling overlap, missing coverage, and uneven abstraction levels
+- **Decomposition guidance** — structural checks flag sibling overlap and missing coverage
 - **Adaptive signals** — tool responses prompt agents to seek refuting evidence and avoid confirmation bias
 
 ## Quick Start

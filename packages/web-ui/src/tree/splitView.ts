@@ -1,4 +1,4 @@
-import { gateFindings, gateLabel, gateMeaning, nodeLabel, type Hypothesis } from '../types';
+import { gateFindings, gateLabel, gateMeaning, nodeLabel, type GateFindingKind, type Hypothesis } from '../types';
 
 /**
  * Pure projections of a recorded split for display.
@@ -65,4 +65,33 @@ export function splitConflicts(h: Hypothesis, hypotheses: Map<string, Hypothesis
       return { id, label: child ? nodeLabel(child) : id };
     }),
   }));
+}
+
+/**
+ * What a node face should draw attention to about its split, or null when the
+ * recorded verdicts sit comfortably under the declaration.
+ *
+ * - `contradiction`: a verdict is incompatible with what the split declared.
+ * - `gap`: nothing contradicts it, but part of the space was set aside untested.
+ *
+ * Kept apart because they call for opposite things. Naming a set-aside branch a
+ * contradiction would assert a refutation nobody recorded; naming a real
+ * contradiction a gap would understate it. A face carrying both reports the
+ * contradiction, which is the stronger claim.
+ */
+export type SplitAttention = 'contradiction' | 'gap';
+
+/** Findings that report untested space rather than an incompatible verdict. */
+const GAP_KINDS: ReadonlySet<GateFindingKind> = new Set<GateFindingKind>([
+  'required-part-untested',
+  'alternatives-abandoned',
+]);
+
+export function splitAttention(h: Hypothesis, hypotheses: Map<string, Hypothesis>): SplitAttention | null {
+  const children = h.children
+    .map((id) => hypotheses.get(id))
+    .filter((c): c is Hypothesis => c !== undefined);
+  const kinds = gateFindings(h, children).map((f) => f.kind);
+  if (kinds.length === 0) return null;
+  return kinds.some((k) => !GAP_KINDS.has(k)) ? 'contradiction' : 'gap';
 }

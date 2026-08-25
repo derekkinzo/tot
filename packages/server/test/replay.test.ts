@@ -25,6 +25,121 @@ function fold(...entries: JournalEntry[]) {
   return state;
 }
 
+describe('legacy payloads are projected onto the declared unions', () => {
+  // Every predicate in the engine switches on these values. A value outside the
+  // union makes each one false, so a node is neither terminal, nor pruned, nor
+  // open — it simply stops participating in closure, silently.
+
+  it('translates a pre-corroboration hypothesis status', () => {
+    const s = fold(entry('hypothesis-added', { ...hyp('h1'), status: 'confirmed' }));
+    expect(s.hypotheses[0].status).toBe('corroborated');
+  });
+
+  it('lands an unrecognised hypothesis status on a live, undecided value', () => {
+    // Guessing a verdict would assert one nobody recorded; 'exploring' claims
+    // nothing and keeps the node inside closure rather than invisible to it.
+    const s = fold(entry('hypothesis-added', { ...hyp('h1'), status: 'quantum' }));
+    expect(['pending', 'exploring']).toContain(s.hypotheses[0].status);
+  });
+
+  it('translates the verdict a legacy conclusion carries, not only the status', () => {
+    // status and conclusion.verdict share one vocabulary and are compared against
+    // each other to decide whether a verdict was superseded. Translating one and
+    // not the other makes every legacy terminal node read as reopened.
+    const s = fold(entry('hypothesis-added', {
+      ...hyp('h1'),
+      status: 'confirmed',
+      conclusion: { verdict: 'confirmed', reason: 'survived', timestamp: ts },
+    }));
+    expect(s.hypotheses[0].status).toBe('corroborated');
+    expect(s.hypotheses[0].conclusion?.verdict).toBe('corroborated');
+  });
+
+  it('does not let an inherited object key pass for a known status', () => {
+    // A persisted value is arbitrary text. Looking it up in a plain object means
+    // 'toString' or 'constructor' resolves to an inherited member, so the fallback
+    // never fires and a function lands in a field every reader switches on.
+    for (const hostile of ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      const s = fold(entry('hypothesis-added', { ...hyp('h1'), status: hostile }));
+      expect(typeof s.hypotheses[0].status, `status ${hostile}`).toBe('string');
+      expect(['pending', 'exploring'], `status ${hostile}`).toContain(s.hypotheses[0].status);
+      const t = fold(entry('session-created', { ...session(), status: hostile }));
+      expect(['open', 'resolved', 'abandoned'], `session ${hostile}`).toContain(t.sessions[0].status);
+    }
+  });
+
+  it('translates a legacy session status', () => {
+    const s = fold(entry('session-created', { ...session(), status: 'active' }));
+    expect(s.sessions[0].status).toBe('open');
+  });
+
+  it('never leaves a session status outside its union', () => {
+    for (const status of ['active', 'complete', 'done', undefined, null, 42]) {
+      const s = fold(entry('session-created', { ...session(), status }));
+      expect(['open', 'resolved', 'abandoned'], `status ${String(status)}`)
+        .toContain(s.sessions[0].status);
+    }
+  });
+
+  it('never leaves a completed session without a status', () => {
+    // The codebase's own comment says a journal can carry a completion with no
+    // terminalStatus; assigning it unconditionally writes undefined into a field
+    // every reader switches on.
+    const s = fold(
+      entry('session-created', session()),
+      entry('session-completed', { sessionId: 's' }),
+    );
+    expect(['open', 'resolved', 'abandoned']).toContain(s.sessions[0].status);
+    expect(s.sessions[0].status).not.toBe('open');
+  });
+
+  it('keeps an explicit terminal status as written', () => {
+    const s = fold(
+      entry('session-created', session()),
+      entry('session-completed', { sessionId: 's', terminalStatus: 'resolved' }),
+    );
+    expect(s.sessions[0].status).toBe('resolved');
+  });
+});
+
+describe('a terminal status this build cannot read falls through to the spine', () => {
+  // The fold onto the declared union must not be mistaken for knowledge. A value
+  // this build does not recognise carries no verdict, so the closure walk decides
+  // — reporting 'abandoned' would assert that nothing survived when a corroborated
+  // hypothesis may sit on a live lineage.
+
+  const journalOf = (terminalStatus) => [
+    entry('session-created', session()),
+    entry('hypothesis-added', hyp('root', { status: 'corroborated' })),
+    ...(terminalStatus === undefined
+      ? [entry('session-completed', { sessionId: 's' })]
+      : [entry('session-completed', { sessionId: 's', terminalStatus })]),
+  ];
+
+  it('does not treat an unrecognised terminal status as authoritative', () => {
+    const state = fold(...journalOf('closed'));
+    expect(state.sawExplicitTerminal).toBe(false);
+    expect(deriveScanStatus(state.sessions[0], state.hypotheses, state.sawExplicitTerminal))
+      .toBe('resolved');
+  });
+
+  it('does not treat an absent terminal status as authoritative', () => {
+    const state = fold(...journalOf(undefined));
+    expect(state.sawExplicitTerminal).toBe(false);
+    expect(deriveScanStatus(state.sessions[0], state.hypotheses, state.sawExplicitTerminal))
+      .toBe('resolved');
+  });
+
+  it('trusts a terminal status it does recognise', () => {
+    for (const [written, expected] of [['resolved', 'resolved'], ['abandoned', 'abandoned'], ['complete', 'resolved']]) {
+      const state = fold(...journalOf(written));
+      expect(state.sawExplicitTerminal, `written ${written}`).toBe(true);
+      expect(deriveScanStatus(state.sessions[0], state.hypotheses, state.sawExplicitTerminal), `written ${written}`)
+        .toBe(expected);
+    }
+  });
+});
+
 describe('a journal written by a newer build', () => {
   // Folding one silently would leave a reader believing it had the whole tree
   // when fields this build does not know about were dropped on the way in.

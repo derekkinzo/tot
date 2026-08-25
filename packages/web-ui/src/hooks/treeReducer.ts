@@ -10,6 +10,10 @@ export interface TreeState {
   connected: boolean;
   recentlyChanged: Set<string>;
   lastAddedId: string | null;
+  /** A session the agent started while another was on screen. Held so the
+   *  dashboard can say the work has moved on, rather than showing a stale tree
+   *  as though it were current. Null once the view moves. */
+  newerSession: Session | null;
 }
 
 export type Action =
@@ -31,6 +35,7 @@ export function initialTreeState(): TreeState {
     connected: false,
     recentlyChanged: new Set<string>(),
     lastAddedId: null,
+    newerSession: null,
   };
 }
 
@@ -43,15 +48,26 @@ export function reducer(state: TreeState, action: Action): TreeState {
     case 'snapshot': {
       const map = new Map<string, Hypothesis>();
       for (const h of action.hypotheses) map.set(h.id, h);
-      return { ...state, session: action.session, hypotheses: map, connected: state.connected, recentlyChanged: new Set(), lastAddedId: null };
+      // An announcement is spent when the view MOVES, not on every snapshot: each
+      // (re)connect re-delivers the displayed session, so clearing it here would
+      // let a dropped connection erase the only sign that the agent moved on.
+      const moved = state.session?.id !== action.session?.id;
+      const newerSession = moved ? null : state.newerSession;
+      return {
+        ...state, session: action.session, hypotheses: map, connected: state.connected,
+        recentlyChanged: new Set(), lastAddedId: null, newerSession,
+      };
     }
     case 'session-created':
       // The SSE stream is project-wide; a session announced while another is
       // already displayed must not switch the view (which would then let the
       // new session's hypothesis events past the displayed-session guard).
-      // Adopt it only during bootstrap, before any session is shown.
-      if (state.session) return state;
-      return { ...state, session: action.session };
+      // Adopt it only during bootstrap, before any session is shown; otherwise
+      // hold the announcement so the dashboard can offer the move instead of
+      // showing a stale tree in silence.
+      if (!state.session) return { ...state, session: action.session, newerSession: null };
+      if (state.session.id === action.session.id) return state;
+      return { ...state, newerSession: action.session };
     case 'hypothesis-added': {
       // The SSE stream is project-wide; ignore a node belonging to a session
       // other than the one on display so it cannot inject an orphan into the
@@ -83,6 +99,15 @@ export function reducer(state: TreeState, action: Action): TreeState {
       return { ...state, hypotheses: next };
     }
     case 'session-completed': {
+      // A completion for the announced session retires the announcement: it
+      // offers to open a tree "being built", and that tree is no longer being
+      // built. The offer to open it is withdrawn rather than left overstating.
+      if (state.newerSession?.id === action.sessionId) {
+        const settled = { ...state, newerSession: null };
+        return state.session?.id === action.sessionId
+          ? { ...settled, session: { ...state.session, status: action.terminalStatus } }
+          : settled;
+      }
       if (!state.session || state.session.id !== action.sessionId) return state;
       return { ...state, session: { ...state.session, status: action.terminalStatus } };
     }

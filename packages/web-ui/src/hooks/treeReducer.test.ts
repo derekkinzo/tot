@@ -158,24 +158,89 @@ describe('treeReducer', () => {
       expect(next.hypotheses.has('x')).toBe(true);
     });
 
+    /** A session on screen, with one node in it. */
+    const displaying = (id = 's1'): TreeState => ({
+      ...initialTreeState(),
+      session: session({ id }),
+      hypotheses: new Map([['a', hyp('a', { sessionId: id })]]),
+    });
+
     it('session-created for a different session does not switch the displayed session', () => {
       // A newly created session announced over the project-wide stream must not
       // yank the view off the session the user is looking at; otherwise the
       // hypothesis-event guard (which keys off the displayed session id) would
       // then admit the new session's nodes into the displayed tree.
-      const s: TreeState = {
-        ...initialTreeState(),
-        session: session({ id: 's1' }),
-        hypotheses: new Map([['a', hyp('a', { sessionId: 's1' })]]),
-      };
+      const s = displaying();
       const next = reducer(s, { type: 'session-created', session: session({ id: 's2', problem: 'Other' }) });
-      expect(next).toBe(s); // identity unchanged
       expect(next.session?.id).toBe('s1');
+      expect(next.hypotheses).toBe(s.hypotheses);
+    });
+
+    it('records the announcement rather than discarding it', () => {
+      // Dropping it leaves the dashboard showing a stale session with no sign
+      // that the agent has moved on, while the follow indicator still reads as
+      // though it were keeping up.
+      const next = reducer(displaying(), { type: 'session-created', session: session({ id: 's2', problem: 'Other' }) });
+      expect(next.newerSession?.id).toBe('s2');
+      expect(next.newerSession?.problem).toBe('Other');
+    });
+
+    it('still refuses nodes from the announced session until the view moves', () => {
+      const announced = reducer(displaying(), { type: 'session-created', session: session({ id: 's2' }) });
+      const next = reducer(announced, { type: 'hypothesis-added', hypothesis: hyp('foreign', { sessionId: 's2' }) });
+      expect(next.hypotheses.has('foreign')).toBe(false);
+      expect(next.hypotheses.size).toBe(1);
+    });
+
+    it('spends the announcement once the view moves', () => {
+      const announced = reducer(displaying(), { type: 'session-created', session: session({ id: 's2' }) });
+      const moved = reducer(announced, {
+        type: 'snapshot', session: session({ id: 's2' }), hypotheses: [hyp('b', { sessionId: 's2' })],
+      });
+      expect(moved.session?.id).toBe('s2');
+      expect(moved.newerSession).toBeNull();
+    });
+
+    it('keeps the announcement across a reconnect of the session on screen', () => {
+      // Every (re)connect delivers a fresh snapshot of whatever session is being
+      // displayed. Treating any snapshot as "the view moved" throws the
+      // announcement away on a dropped connection, so the reader never learns the
+      // agent has started something else.
+      const announced = reducer(displaying('s1'), { type: 'session-created', session: session({ id: 's2' }) });
+      const reconnected = reducer(announced, {
+        type: 'snapshot', session: session({ id: 's1' }), hypotheses: [hyp('a', { sessionId: 's1' })],
+      });
+      expect(reconnected.session?.id).toBe('s1');
+      expect(reconnected.newerSession?.id).toBe('s2');
+    });
+
+    it('stops announcing a tree once that tree is finished', () => {
+      // The announcement claims work is under way. A completion for the announced
+      // session arrives on the same project-wide stream, so keeping the claim
+      // after it is asserting activity that has ended.
+      const announced = reducer(displaying('s1'), { type: 'session-created', session: session({ id: 's2' }) });
+      expect(announced.newerSession?.id).toBe('s2');
+      const finished = reducer(announced, { type: 'session-completed', sessionId: 's2', terminalStatus: 'resolved' });
+      expect(finished.newerSession).toBeNull();
+      // The displayed session is untouched.
+      expect(finished.session?.id).toBe('s1');
+    });
+
+    it('keeps announcing when a different session finishes', () => {
+      const announced = reducer(displaying('s1'), { type: 'session-created', session: session({ id: 's2' }) });
+      const other = reducer(announced, { type: 'session-completed', sessionId: 's9', terminalStatus: 'abandoned' });
+      expect(other.newerSession?.id).toBe('s2');
+    });
+
+    it('does not announce the session already on screen', () => {
+      const next = reducer(displaying('s1'), { type: 'session-created', session: session({ id: 's1' }) });
+      expect(next.newerSession).toBeNull();
     });
 
     it('session-created is adopted when no session is displayed yet (bootstrap)', () => {
       const next = reducer(initialTreeState(), { type: 'session-created', session: session({ id: 's1' }) });
       expect(next.session?.id).toBe('s1');
+      expect(next.newerSession).toBeNull();
     });
   });
 });

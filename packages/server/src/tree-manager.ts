@@ -115,11 +115,20 @@ export class TreeManager extends EventEmitter {
     if (children_.length < 2) {
       throw new TreeError('Decomposition requires at least 2 sub-hypotheses');
     }
-    if (parent.decomposition !== undefined) {
+    // A split declares the children it creates, so it can only be declared over a
+    // node that has none yet. Children that arrived any other way — an earlier
+    // split, or add_hypothesis under no declaration — would be swept under an axis
+    // that never described them, and the gate check would then report them as
+    // parts of a split nobody put them in.
+    if (parent.children.length > 0) {
       throw new TreeError(
-        `This hypothesis is already split ${parent.decomposition.axis}. ` +
-        'Use add_hypothesis to add a sibling to that split, or decompose one of its children ' +
-        'to divide a different axis below it.',
+        parent.decomposition === undefined
+          ? `This hypothesis already has ${parent.children.length} child${parent.children.length === 1 ? '' : 'ren'} ` +
+            'that no split declared, so an axis recorded now would describe children it did not divide. ' +
+            'Use add_hypothesis to keep adding siblings, or decompose one of the children to divide an axis below it.'
+          : `This hypothesis is already split ${parent.decomposition.axis}. ` +
+            'Use add_hypothesis to add a sibling to that split, or decompose one of its children ' +
+            'to divide a different axis below it.',
       );
     }
     for (const draft of children_) this.assertTitle(draft.title);
@@ -363,6 +372,21 @@ export class TreeManager extends EventEmitter {
       throw new TreeError(`No evidence record ${evidenceId} on this hypothesis`);
     }
 
+    // Setting a record aside is refused where a settled verdict rests on it and
+    // nothing else does: the node would then read 'eliminated' beside a refutation
+    // count of zero, which is the state elimination itself refuses to create.
+    if (qualifiers.nonDiagnostic === true && record.type === 'refutes' && hypothesis.status === 'eliminated') {
+      const othersStillGround = hypothesis.evidence.some(
+        (e) => e.id !== record.id && e.type === 'refutes' && !e.nonDiagnostic,
+      );
+      if (!othersStillGround) {
+        throw new TreeError(
+          'This is the only refuting record the elimination rests on, so setting it aside would leave a verdict with no counter-instance. '
+          + 'File a refutation that does discriminate first, or reopen the branch with add_evidence before qualifying this one.',
+        );
+      }
+    }
+
     if (qualifiers.decisive !== undefined) record.decisive = qualifiers.decisive;
     if (qualifiers.nonDiagnostic !== undefined) record.nonDiagnostic = qualifiers.nonDiagnostic;
     if (qualifiers.linkedGroupId !== undefined) record.linkedGroupId = qualifiers.linkedGroupId;
@@ -400,22 +424,31 @@ export class TreeManager extends EventEmitter {
       throw new TreeError(message);
     }
 
-    const refutesOnTarget = hypothesis.evidence.filter((e) => e.type === 'refutes');
+    // A record the agent declared non-diagnostic carries no weight toward a
+    // verdict, so it cannot be the counter-instance elimination rests on: the node
+    // would otherwise read 'eliminated' beside a refutation count of zero.
+    const allRefutes = hypothesis.evidence.filter((e) => e.type === 'refutes');
+    const refutesOnTarget = allRefutes.filter((e) => !e.nonDiagnostic);
     let groundedIds: string[];
     if (refutingEvidenceIds && refutingEvidenceIds.length > 0) {
-      const refutesIds = new Set(refutesOnTarget.map((e) => e.id));
+      const diagnostic = new Set(refutesOnTarget.map((e) => e.id));
+      const setAside = new Set(allRefutes.filter((e) => e.nonDiagnostic).map((e) => e.id));
       for (const id of refutingEvidenceIds) {
-        if (!refutesIds.has(id)) {
-          throw new TreeError(`Evidence id ${id} is not a refutes-typed record on this hypothesis`);
-        }
+        if (diagnostic.has(id)) continue;
+        // Saying a record is not refutes-typed when it is contradicts the ledger
+        // the caller just read, and gives it nothing to act on.
+        throw new TreeError(setAside.has(id)
+          ? `Evidence id ${id} is refutes-typed but was declared non-diagnostic, so it carries no weight toward a verdict. Call qualify_evidence to withdraw that qualification if it does discriminate, or cite a record that does.`
+          : `Evidence id ${id} is not a refutes-typed record on this hypothesis`);
       }
       groundedIds = refutingEvidenceIds;
+    } else if (refutesOnTarget.length === 0) {
+      // Which of the two situations this is changes what the agent should do, so
+      // they are not reported in the same words.
+      throw new TreeError(allRefutes.length === 0
+        ? 'Cannot eliminate without recorded refuting evidence — call add_evidence(type=refutes) first, or use set_out_of_scope to mark this branch uninvestigated'
+        : `All ${allRefutes.length} refuting record(s) here were declared non-diagnostic, so none of them can be the counter-instance this verdict would rest on. Call qualify_evidence to withdraw that qualification where a record does discriminate, file one that does, or use set_out_of_scope to mark this branch uninvestigated.`);
     } else {
-      if (refutesOnTarget.length === 0) {
-        throw new TreeError(
-          'Cannot eliminate without recorded refuting evidence — call add_evidence(type=refutes) first, or use set_out_of_scope to mark this branch uninvestigated',
-        );
-      }
       groundedIds = refutesOnTarget.map((e) => e.id);
     }
 
@@ -573,24 +606,18 @@ export class TreeManager extends EventEmitter {
       catchAllPatterns.some((p) => l.includes(p)),
     );
 
-    let abstractionMismatch = false;
-    let minWords: number | undefined;
-    let maxWords: number | undefined;
-    if (children.length >= 2) {
-      const wordCounts = children.map((c) => nodeLabel(c).trim().split(/\s+/).filter(Boolean).length);
-      minWords = Math.min(...wordCounts);
-      maxWords = Math.max(...wordCounts);
-      abstractionMismatch = maxWords > minWords * 3;
-    }
-
+    // Whether siblings sit at one level of abstraction is deliberately NOT
+    // reported here. That is a property of what the labels denote, not of their
+    // length, and no lexical statistic can establish it (ANSI/NISO Z39.19-2005
+    // §8.3 states the test in kind terms; §6.3.1 notes a single concept is
+    // sometimes one word and sometimes several). The tool asks the question in
+    // words on every decomposition instead, and the decomposition-evaluator
+    // judges it semantically against the declared axis.
     return {
       childCount: children.length,
       substringOverlaps,
       duplicateLabels,
       hasCatchAll,
-      abstractionMismatch,
-      minWords,
-      maxWords,
     };
   }
 

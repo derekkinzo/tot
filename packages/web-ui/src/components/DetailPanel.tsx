@@ -31,7 +31,7 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
   const createdLabel = Number.isNaN(createdAt.getTime()) ? '—' : createdAt.toLocaleTimeString();
 
   return (
-    <div style={{
+    <div className="detail-panel" style={{
       width: DETAIL_PANEL_WIDTH,
       flexShrink: 0,
       borderLeft: '1px solid #30363d',
@@ -113,7 +113,9 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
         const status = conclusionStatus(hypothesis)!;
         const verdict = status.verdict;
         const isHistorical = status.isHistorical;
-        const accent = STATUS_COLORS[verdict] ?? STATUS_COLORS.eliminated;
+        // An unrecognised verdict is unknown, not refuted: defaulting to the
+        // eliminated accent would paint a claim as falsified on no evidence.
+        const accent = STATUS_COLORS[verdict] ?? '#8b949e';
         const tint =
           verdict === 'corroborated' ? '#052e1620' :
           verdict === 'out-of-scope' ? '#1f1b3a20' :

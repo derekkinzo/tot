@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { TreeManager, TreeError } from '../src/tree-manager.js';
+import { titleProblem } from '@tot-mcp/shared';
 import type { TreeEvent } from '../src/types.js';
 import { TITLE_MAX_LENGTH } from '@tot-mcp/shared';
 
@@ -69,6 +70,32 @@ describe('TreeManager', () => {
       expect(root.children).toHaveLength(2);
     });
 
+    it('refuses to split a node whose children arrived without a declaration', () => {
+      // add_hypothesis creates a child under no declared axis. A later decompose
+      // records an axis over the whole child list, so those earlier children are
+      // swept under a declaration that never described them — and the gate check
+      // then reports them as parts of a split nobody put them in.
+      const { root } = tm.createSession('Problem');
+      tm.addHypothesis(root.id, { title: 'Network is slow' });
+      tm.addHypothesis(root.id, { title: 'Disk is slow' });
+      expect(() => tm.decompose(root.id, [{ title: 'Compiler regression' }, { title: 'Test suite growth' }], { axis: 'by build stage', gate: 'all-of' }))
+        .toThrow(TreeError);
+      expect(root.children).toHaveLength(2);
+      expect(root.decomposition).toBeUndefined();
+    });
+
+    it('leaves no declaration covering children it did not divide', () => {
+      // The property, over both orders a caller can reach the same node by.
+      const { root } = tm.createSession('Problem');
+      tm.addHypothesis(root.id, { title: 'Added first' });
+      try {
+        tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by stage' });
+      } catch { /* refusal is the point */ }
+      const declaredCount = root.decomposition === undefined ? 0 : root.children.length;
+      // Either nothing is declared, or every child is one the split created.
+      expect(declaredCount).toBe(0);
+    });
+
     it('names the way to add a sibling to an existing split', () => {
       const { root } = tm.createSession('Problem');
       tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
@@ -85,6 +112,26 @@ describe('TreeManager', () => {
       expect(root.decomposition?.axis).toBe('by cause');
     });
 
+    it('never persists a root label its own validator would reject', () => {
+      // The root label is derived from the problem when the caller supplies none.
+      // A derivation that yields a fragment or nothing at all stores a node the
+      // engine would have refused had a caller passed the same value.
+      const PROBLEMS = [
+        '1. Dashboard freezes when many nodes are added',
+        'Step 1. Investigate the writer pool',
+        '2026-08-19. Deploys fail after the rollout',
+        '. Leading punctuation then a real sentence',
+        'Q. Why does the build hang?',
+        'x',
+        'A'.repeat(500),
+      ];
+      for (const problem of PROBLEMS) {
+        const { root } = tm.createSession(problem);
+        expect(titleProblem(root.title), `problem ${JSON.stringify(problem)} -> ${JSON.stringify(root.title)}`)
+          .toBeNull();
+      }
+    });
+
     it('rejects fewer than 2 children', () => {
       const { root } = tm.createSession('Problem');
       expect(() => tm.decompose(root.id, [{ title: 'Only one' }], { axis: 'by cause' })).toThrow(TreeError);
@@ -93,7 +140,7 @@ describe('TreeManager', () => {
     it('rejects a whitespace-only child label', () => {
       // A blank-after-trim label is not a real hypothesis; it also degenerates
       // the validateDecomposition heuristics (substring includes('') matches
-      // every sibling; word-count 0 makes abstractionMismatch fire spuriously).
+      // every sibling).
       // Reject it at the engine boundary rather than storing it.
       const { root } = tm.createSession('Problem');
       expect(() => tm.decompose(root.id, [{ title: 'Real cause' }, { title: '   ' }], { axis: 'by cause' })).toThrow(/empty|blank|whitespace/i);
@@ -807,6 +854,78 @@ describe('TreeManager', () => {
       expect(() => tm.setOutOfScope(root.id, 'abandon entire investigation')).toThrow(TreeError);
     });
 
+    it('refuses elimination grounded only in records asserted non-diagnostic', () => {
+      // qualify_evidence lets an agent state that a record does not discriminate
+      // between the live alternatives. Such a record carries no weight toward a
+      // verdict, so it cannot be the counter-instance elimination requires — the
+      // node would otherwise read 'eliminated' beside a refutation count of zero.
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const ev = tm.addEvidence(a.id, 'refutes', 'the dashboard was red');
+      tm.qualifyEvidence(a.id, ev.evidence.id, { nonDiagnostic: true });
+      expect(() => tm.eliminateHypothesis(a.id, 'refuted')).toThrow(TreeError);
+      expect(a.status).not.toBe('eliminated');
+    });
+
+    it('names the real reason when every refutation was set aside', () => {
+      // Telling the agent no refuting evidence is recorded is false — the records
+      // are there — and sending it to add_evidence makes it file the same
+      // observation twice instead of revisiting the qualification.
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const ev = tm.addEvidence(a.id, 'refutes', 'the dashboard was red');
+      tm.qualifyEvidence(a.id, ev.evidence.id, { nonDiagnostic: true });
+      let message = '';
+      try { tm.eliminateHypothesis(a.id, 'refuted'); } catch (e) { message = (e as Error).message; }
+      expect(message).not.toMatch(/without recorded refuting evidence/i);
+      expect(message).toMatch(/non-?diagnostic|qualify_evidence/i);
+    });
+
+    it('says why a cited record cannot ground the verdict, rather than denying it exists', () => {
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const ev = tm.addEvidence(a.id, 'refutes', 'the dashboard was red');
+      tm.addEvidence(a.id, 'refutes', 'the counter is flat');
+      tm.qualifyEvidence(a.id, ev.evidence.id, { nonDiagnostic: true });
+      let message = '';
+      try { tm.eliminateHypothesis(a.id, 'refuted', [ev.evidence.id]); } catch (e) { message = (e as Error).message; }
+      // The record IS refutes-typed; saying otherwise contradicts what the caller reads.
+      expect(message).not.toMatch(/is not a refutes-typed record/i);
+      expect(message).toMatch(/non-?diagnostic/i);
+    });
+
+    it('refuses to set aside the last refutation an elimination rests on', () => {
+      // The guard at elimination time is worthless if the same state can be reached
+      // by qualifying afterwards: the node would read 'eliminated' beside a
+      // refutation count of zero, which is what the guard exists to forbid.
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const ev = tm.addEvidence(a.id, 'refutes', 'the counter is flat at zero');
+      tm.eliminateHypothesis(a.id, 'refuted by the counter');
+      expect(a.status).toBe('eliminated');
+      expect(() => tm.qualifyEvidence(a.id, ev.evidence.id, { nonDiagnostic: true })).toThrow(TreeError);
+      expect(a.evidence[0].nonDiagnostic).toBeFalsy();
+    });
+
+    it('allows setting one aside while another still grounds the verdict', () => {
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const first = tm.addEvidence(a.id, 'refutes', 'the counter is flat at zero');
+      tm.addEvidence(a.id, 'refutes', 'the trace shows no calls');
+      tm.eliminateHypothesis(a.id, 'refuted twice over');
+      expect(() => tm.qualifyEvidence(a.id, first.evidence.id, { nonDiagnostic: true })).not.toThrow();
+    });
+
+    it('admits elimination once a record that does discriminate is filed', () => {
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const ev = tm.addEvidence(a.id, 'refutes', 'the dashboard was red');
+      tm.qualifyEvidence(a.id, ev.evidence.id, { nonDiagnostic: true });
+      tm.addEvidence(a.id, 'refutes', 'the counter is flat at zero');
+      expect(() => tm.eliminateHypothesis(a.id, 'refuted')).not.toThrow();
+      expect(a.status).toBe('eliminated');
+    });
+
     it('rejects setting a terminal hypothesis out-of-scope', () => {
       const { root } = tm.createSession('Problem');
       const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
@@ -855,22 +974,16 @@ describe('TreeManager', () => {
       expect(() => tm.validateDecomposition('fake')).toThrow(TreeError);
     });
 
-    it('ignores incidental whitespace when counting words for abstraction mismatch', () => {
-      // 'database is slow' is 3 words; a leading space must not inflate it to
-      // 4 and trip the maxLen > minLen*3 heuristic against the 1-word sibling.
-      const { root } = tm.createSession('Problem');
-      tm.decompose(root.id, [{ title: ' database is slow' }, { title: 'cache' }], { axis: 'by cause' });
-      const check = tm.validateDecomposition(root.id);
-      expect(check.abstractionMismatch).toBe(false);
-      expect(check.minWords).toBe(1);
-      expect(check.maxWords).toBe(3);
-    });
-
-    it('flags a genuine abstraction mismatch (>3x word span)', () => {
+    it('reports nothing about the level of abstraction its siblings sit at', () => {
+      // Whether two labels name things at the same level is a property of what
+      // they denote. A label-length statistic cannot establish it, and one that
+      // claimed to fired on sets this project's own documentation recommends.
       const { root } = tm.createSession('Problem');
       tm.decompose(root.id, [{ title: 'the database query plan regressed badly' }, { title: 'cache' }], { axis: 'by cause' });
-      const check = tm.validateDecomposition(root.id);
-      expect(check.abstractionMismatch).toBe(true);
+      const check = tm.validateDecomposition(root.id) as Record<string, unknown>;
+      expect('abstractionMismatch' in check).toBe(false);
+      expect('minWords' in check).toBe(false);
+      expect('maxWords' in check).toBe(false);
     });
   });
 

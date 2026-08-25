@@ -119,14 +119,11 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   if (check.substringOverlaps.length > 0) result += `⚠ Overlap detected between ${check.substringOverlaps.length} pair(s)\n`;
   if (!check.hasCatchAll) result += `Note: No catch-all — is anything missing?\n`;
 
-  if (check.abstractionMismatch) {
-    // Reuse the engine's word counts so the printed range can never drift from
-    // the boolean that gated it.
-    result += `level-mismatch-advisory: labels range from ${check.minWords} to ${check.maxWords} words — uneven abstraction\n`;
-  }
-
-  if (check.substringOverlaps.length === 0 && check.childCount >= 2 && !check.abstractionMismatch) {
-    result += `No structural issues detected.\n`;
+  // Names what was actually examined. An unqualified "no structural issues"
+  // would assert a clean bill on sets this check cannot speak to — level of
+  // abstraction among them — which is the same overclaim in the other direction.
+  if (check.substringOverlaps.length === 0 && check.childCount >= 2) {
+    result += `No substring overlaps or duplicate labels detected.\n`;
   }
 
   // Premature decomposition guard: parent had no evidence
@@ -170,7 +167,7 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   result += `Crucial experiment: What SINGLE observation would yield DIFFERENT results depending on which sub-hypothesis is correct?\n`;
   result += `Prioritize this discriminating test before investigating each in isolation.\n`;
 
-  result += '\n' + formatTreeSummary(tm);
+  result += '\n' + formatTreeSummary(tm, children[0]?.sessionId);
   return result;
 }
 
@@ -197,7 +194,7 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
   result += `── Protocol ──\n`;
   result += `What is the fastest path to REFUTE this hypothesis? Define the test before investigating.\n`;
 
-  result += '\n' + formatTreeSummary(tm);
+  result += '\n' + formatTreeSummary(tm, hypothesis.sessionId);
   return result;
 }
 
@@ -259,9 +256,14 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     result += `\nUnexplored: ${unexplored.map((u) => nodeLabel(u)).join(', ')}\n`;
   }
 
-  // Elimination nudge (Bacon/Mill eliminative induction)
+  // Elimination nudge (Bacon/Mill eliminative induction). Reported in the weights
+  // that gated it: printing raw record counts would state a total the gate never
+  // established, and a hardcoded zero would deny supporting records the ledger
+  // holds but does not weigh.
   if (suggestsElimination(hypothesis)) {
-    result += `\n→ ${refuting} refuting, 0 supporting — consider elimination.\n`;
+    const refutingW = refutingWeight(hypothesis);
+    const supportingW = supportingWeight(hypothesis);
+    result += `\n→ weighed ${refutingW} refuting against ${supportingW} supporting — consider elimination.\n`;
   }
 
   // Diagnosticity: evidence that doesn't discriminate (Heuer 1999, Popper 1959)
@@ -294,7 +296,7 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
     result += `Seek REFUTING evidence: what test would prove this hypothesis WRONG?\n`;
   }
 
-  result += '\n' + formatTreeSummary(tm);
+  result += '\n' + formatTreeSummary(tm, hypothesis.sessionId);
   return result;
 }
 
@@ -361,7 +363,7 @@ export function formatEliminate(hypothesis: Hypothesis, tm: TreeManager): string
   }
 
   result += formatGateConflicts(hypothesis, tm);
-  result += '\n' + formatTreeSummary(tm);
+  result += '\n' + formatTreeSummary(tm, hypothesis.sessionId);
   return result;
 }
 
@@ -417,7 +419,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
   result += `4. TEMPORALITY: Did this cause precede the outcome in time?\n`;
   result += `5. SPECIFICITY: Does this explain THIS observed pattern specifically, not just outcomes of this kind in general?\n`;
 
-  result += '\n' + formatTreeSummary(tm);
+  result += '\n' + formatTreeSummary(tm, hypothesis.sessionId);
   return result;
 }
 
@@ -427,7 +429,7 @@ export function formatSetOutOfScope(hypothesis: Hypothesis, tm: TreeManager): st
     `  Reason: ${truncate(hypothesis.conclusion!.reason, 80)}\n\n`;
   result += `Branch set aside without investigation. The audit trail records the choice; closure treats this as pruning.\n`;
   result += formatGateConflicts(hypothesis, tm);
-  result += '\n' + formatTreeSummary(tm);
+  result += '\n' + formatTreeSummary(tm, hypothesis.sessionId);
   return result;
 }
 
@@ -443,8 +445,11 @@ export function formatValidateDecomposition(
   if (check.substringOverlaps.length > 0) advisories.push('overlap-advisory');
   if (check.duplicateLabels.length > 0) advisories.push('overlap-advisory');
   if (!check.hasCatchAll) advisories.push('coverage-gap-advisory');
-  if (check.abstractionMismatch) advisories.push('level-mismatch-advisory');
-  if (advisories.length === 0) advisories.push('no-issues-detected');
+  // Names what was examined rather than declaring the decomposition sound. This
+  // check speaks to overlap and coverage; whether siblings sit at one level of
+  // abstraction is not something it can establish, so an unqualified all-clear
+  // would assert more here than the prose beside it does.
+  if (advisories.length === 0) advisories.push('no-overlap-or-coverage-issues-detected');
 
   let result = JSON.stringify({
     parentId,
@@ -477,9 +482,6 @@ export function formatValidateDecomposition(
     ? `Has explicit catch-all branch.\n`
     : `coverage-gap-advisory: no explicit catch-all — closure of the cause space is being claimed by enumeration.\n`;
 
-  if (check.abstractionMismatch) {
-    result += `level-mismatch-advisory: child labels span uneven word-count ranges, suggesting mixed abstraction.\n`;
-  }
 
   result += `\n── Review Questions ──\n`;
   result += `\n(testability-advisory cases — unfalsifiable hypotheses — require semantic review of each child's refutability.)\n`;
@@ -503,7 +505,7 @@ export function formatQualifyEvidence(hypothesis: Hypothesis, evidenceId: string
     `Weight: ${supportingWeight(hypothesis)} supporting, ${refutingWeight(hypothesis)} refuting ` +
     `(${countSupporting(hypothesis)} and ${countRefuting(hypothesis)} records)\n` +
     `A record that does not discriminate is retained and still listed; it stops counting toward a verdict.\n\n` +
-    formatTreeSummary(tm);
+    formatTreeSummary(tm, hypothesis.sessionId);
 }
 
 export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null): string {
@@ -554,8 +556,12 @@ export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null
   return result;
 }
 
-function formatTreeSummary(tm: TreeManager): string {
-  const status = tm.getStatus();
+function formatTreeSummary(tm: TreeManager, sessionId?: string): string {
+  // Scoped to the session the caller just mutated. Eliminating or setting a
+  // branch out of scope deliberately does not promote its session, so reading
+  // the active one here would print a different tree's tally beside this
+  // response.
+  const status = tm.getStatus(sessionId);
   if (!status.session) return '';
 
   const { counts, stagnant } = status;

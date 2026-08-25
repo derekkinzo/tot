@@ -7,6 +7,7 @@ import {
   MiniMap,
   Panel,
   useReactFlow,
+  useStore,
   type Node,
   type NodeMouseHandler,
 } from '@xyflow/react';
@@ -19,10 +20,10 @@ import FollowIndicator from './FollowIndicator';
 import SessionSelector from './SessionSelector';
 import { nodeLabel, type Hypothesis, type Session } from '../types';
 import { STATUS_COLORS } from '../theme';
-import { getPathToRoot, computeLayout } from '../hooks/treeLayout';
+import { getPathToRoot, computeLayout, framableNodeIds } from '../hooks/treeLayout';
 import { nextNavTarget } from '../hooks/navTarget';
 import { canvasOwnsKey, type KeyTarget } from '../hooks/keyboardOwnership';
-import { HEADER_STACK_MAX_WIDTH, HEADER_TEXT_MAX_WIDTH } from '../geometry';
+import { HEADER_TEXT_MAX_WIDTH, MINIMAP_MAX_WIDTH, overlayFit } from '../geometry';
 
 const FIT_MAX_ZOOM = 1.5;
 const FIT_PADDING_FOCUSED = 0.3;
@@ -49,6 +50,8 @@ interface Props {
   followMode: 'following' | 'paused';
   onToggleFollow: () => void;
   onLoadSession: (id: string) => void;
+  /** A session the agent started while this one is on screen, or null. */
+  newerSession: Session | null;
   /** Layers stacked above the canvas that read keys; while any is open the
    *  canvas shortcuts stand down. */
   overlayCount: number;
@@ -60,10 +63,14 @@ interface ContextMenuState {
   y: number;
 }
 
-function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, overlayCount }: Props) {
+function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, recentlyChanged, lastAddedId, connected, session, followMode, onToggleFollow, onLoadSession, newerSession, overlayCount }: Props) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const { fitView } = useReactFlow();
+  // The overlays compete for the canvas, not for the window: a detail panel beside
+  // it can leave far less room than the viewport suggests.
+  const canvasWidth = useStore((s) => s.width);
+  const fit = overlayFit(canvasWidth);
 
   const hypothesesRef = useRef(hypotheses);
   hypothesesRef.current = hypotheses;
@@ -102,25 +109,30 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
   }, [hypotheses, rootId, selectedId, pathToRoot, collapsedIds, recentlyChanged]);
 
   // Zoom to selected node + its children, or fit all when deselected
-  const prevSelectedId = useRef<string | null>(null);
+  const renderedIds = useMemo(() => new Set(nodes.map((n) => n.id)), [nodes]);
+
+  // Tracks the selection the viewport was last framed on, not merely the last
+  // selection seen: a selection that could not be framed yet — one inside a
+  // collapsed subtree — must still be framed when it appears, so the guard only
+  // advances once the fit actually happened.
+  const framedSelection = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedId === prevSelectedId.current) return;
-    prevSelectedId.current = selectedId;
+    if (selectedId === framedSelection.current) return;
 
     if (selectedId) {
-      const h = hypotheses.get(selectedId);
-      const nodeIds = h
-        ? [{ id: selectedId }, ...h.children.filter(c => !collapsedIds.has(c)).map(id => ({ id }))]
-        : [{ id: selectedId }];
+      const nodeIds = framableNodeIds(selectedId, hypotheses, collapsedIds, renderedIds);
+      if (nodeIds.length === 0) return;
+      framedSelection.current = selectedId;
       requestAnimationFrame(() => {
         fitView({ nodes: nodeIds, duration: DURATION_STANDARD, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
       });
     } else {
+      framedSelection.current = null;
       requestAnimationFrame(() => {
         fitView({ duration: DURATION_QUICK, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
       });
     }
-  }, [selectedId, hypotheses, collapsedIds, fitView]);
+  }, [selectedId, hypotheses, collapsedIds, fitView, renderedIds]);
 
   // Fit when panel opens/closes (container resizes)
   const prevPanelOpen = useRef(panelOpen);
@@ -128,18 +140,19 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
     if (panelOpen !== prevPanelOpen.current) {
       prevPanelOpen.current = panelOpen;
       setTimeout(() => {
-        if (selectedId) {
-          const h = hypotheses.get(selectedId);
-          const nodeIds = h
-            ? [{ id: selectedId }, ...h.children.map(id => ({ id }))]
-            : [{ id: selectedId }];
+        // Same rule as the selection effect: never frame an id the canvas is not
+        // rendering, or the resize fit lands on the layout origin.
+        const nodeIds = selectedId
+          ? framableNodeIds(selectedId, hypotheses, collapsedIds, renderedIds)
+          : [];
+        if (nodeIds.length > 0) {
           fitView({ nodes: nodeIds, duration: DURATION_INSTANT, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
         } else {
           fitView({ duration: DURATION_INSTANT, padding: FIT_PADDING_OVERVIEW, maxZoom: FIT_MAX_ZOOM });
         }
       }, 50);
     }
-  }, [panelOpen, selectedId, hypotheses, fitView]);
+  }, [panelOpen, selectedId, hypotheses, collapsedIds, renderedIds, fitView]);
 
   // With no selection (follow paused and deselected), keep the whole tree
   // framed as nodes arrive. When following, the selection effect above
@@ -190,8 +203,16 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
       toggleCollapse(node.id);
       return;
     }
+    // The second click of a double-click also arrives here; letting it through
+    // would toggle the selection back off while the double-click collapses.
+    if (event.detail > 1) return;
     onSelect(node.id === selectedId ? null : node.id);
   }, [onSelect, selectedId, toggleCollapse]);
+
+  const onNodeDoubleClick: NodeMouseHandler = useCallback((_event, node) => {
+    setContextMenu(null);
+    toggleCollapse(node.id);
+  }, [toggleCollapse]);
 
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault();
@@ -215,9 +236,10 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
         break;
       }
       case 'zoom': {
-        const h = hypotheses.get(nodeId);
-        const nodeIds = h ? [{ id: nodeId }, ...h.children.map(id => ({ id }))] : [{ id: nodeId }];
-        fitView({ nodes: nodeIds, duration: DURATION_DELIBERATE, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
+        const nodeIds = framableNodeIds(nodeId, hypotheses, collapsedIds, renderedIds);
+        if (nodeIds.length > 0) {
+          fitView({ nodes: nodeIds, duration: DURATION_DELIBERATE, padding: FIT_PADDING_FOCUSED, maxZoom: FIT_MAX_ZOOM });
+        }
         break;
       }
       case 'parent': {
@@ -240,7 +262,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
       }
     }
     setContextMenu(null);
-  }, [hypotheses, fitView, onSelect]);
+  }, [hypotheses, collapsedIds, renderedIds, fitView, onSelect]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -249,6 +271,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
         edges={edges}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
+        onNodeDoubleClick={onNodeDoubleClick}
         onNodeContextMenu={onNodeContextMenu}
         onPaneClick={onPaneClick}
         fitView
@@ -261,19 +284,30 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
         {/* Controls and MiniMap each own a bottom corner; no Panel shares
             those corners, so the zoom/fit buttons stay clickable. */}
         <Controls position="bottom-left" />
-        <MiniMap
-          position="bottom-right"
-          nodeColor={(n) => STATUS_COLORS[(n.data as HypothesisData)?.status as keyof typeof STATUS_COLORS] ?? '#6b7280'}
-          style={{ background: '#1c1f26', border: '1px solid #30363d' }}
-        />
+        {fit.showMinimap && (
+          <MiniMap
+            position="bottom-right"
+            nodeColor={(n) => STATUS_COLORS[(n.data as HypothesisData)?.status as keyof typeof STATUS_COLORS] ?? '#6b7280'}
+            style={{ background: '#1c1f26', border: '1px solid #30363d', width: MINIMAP_MAX_WIDTH }}
+          />
+        )}
 
         {/* Info overlays cluster in the top corners, each corner a vertical
             stack so widgets flow instead of overlapping. */}
-        <Panel position="top-left" style={{ maxWidth: HEADER_STACK_MAX_WIDTH }}>
+        <Panel position="top-left" style={{ maxWidth: fit.headerMaxWidth }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
             <div className="overlay-widget" style={{ fontSize: 13 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ color: connected ? '#3fb950' : '#f85149' }}>●</span>
+                <span
+                  role="status"
+                  aria-label={connected ? 'Connected to the server' : 'Not connected to the server'}
+                  title={connected ? 'Connected to the server' : 'Not connected — retrying'}
+                  style={{ color: connected ? '#3fb950' : '#f85149' }}
+                >●</span>
+                {/* Colour alone cannot carry a state a reader has to act on. */}
+                {!connected && (
+                  <span style={{ color: '#f85149', fontSize: 11 }}>offline</span>
+                )}
                 {session ? (
                   <>
                     <span
@@ -292,6 +326,25 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
             </div>
             {selectedId && <Breadcrumb selectedId={selectedId} hypotheses={hypotheses} onNavigate={onSelect} />}
             <StatusSummary hypotheses={hypotheses} session={session} />
+            {newerSession && (
+              <button
+                onClick={() => { onLoadSession(newerSession.id); onSelect(null); }}
+                title={newerSession.problem}
+                className="overlay-widget"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                  border: '1px solid #9e6a03', color: '#d29922', cursor: 'pointer',
+                  fontSize: 12, minWidth: 0,
+                }}
+              >
+                <span aria-hidden>→</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {/* Only what the announcement establishes: a tree was started.
+                      Whether work is still going on in it is not known here. */}
+                  A newer tree was started — open it
+                </span>
+              </button>
+            )}
           </div>
         </Panel>
 
@@ -300,7 +353,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
             {session && (
               <FollowIndicator followMode={followMode} onToggle={onToggleFollow} />
             )}
-            <Legend />
+            {fit.showLegend && <Legend />}
           </div>
         </Panel>
       </ReactFlow>

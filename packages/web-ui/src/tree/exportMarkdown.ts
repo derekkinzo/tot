@@ -48,6 +48,15 @@ function renderNode(
 
   lines.push(`${indent}- ${icon} **${nodeLabel(node)}**${ev} [${node.status}]`);
 
+  // The label is what a canvas has room for; the statement is the claim itself.
+  // Only one of them is worth reading twice, so it is written when it says more.
+  //
+  // Folded onto one line: a newline would close this list item and a leading '-'
+  // would open a sibling, so the exported tree would show a shape nobody built.
+  if (node.statement && node.statement !== nodeLabel(node)) {
+    lines.push(`${indent}  ${node.statement.replace(/\s+/g, ' ').trim()}`);
+  }
+
   const concl = conclusionStatus(node);
   if (concl) {
     const prefix = !concl.isHistorical

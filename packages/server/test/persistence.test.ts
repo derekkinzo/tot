@@ -230,6 +230,37 @@ describe('Persistence Roundtrip', () => {
     expect(index[0].status).toBe('open');
   });
 
+  it('reports one terminal verdict for a journal, whichever reader asks', () => {
+    // The session list and an opened session are two views of the same bytes. A
+    // verdict derived in one and folded in the other means the same investigation
+    // reads as answered in one place and abandoned in the other.
+    const sessionId = '00000000-0000-4000-8000-aaaaaaaaaa21';
+    const rootId = '00000000-0000-4000-8000-aaaaaaaaaa22';
+    const ts = '2024-03-01T00:00:00.000Z';
+    // A completion naming a state this build cannot read, over a surviving
+    // corroborated hypothesis.
+    const lines = [
+      { timestamp: ts, type: 'session-created', payload: {
+        id: sessionId, problem: 'Unreadable terminal state', rootNodeId: rootId, status: 'open', createdAt: ts,
+      } },
+      { timestamp: ts, type: 'hypothesis-added', payload: {
+        id: rootId, parentId: null, sessionId, depth: 0, title: 'Root', status: 'corroborated',
+        evidence: [], metadata: { createdAt: ts, updatedAt: ts, source: 'agent' }, children: [],
+      } },
+      { timestamp: ts, type: 'session-completed', payload: { sessionId, terminalStatus: 'closed' } },
+    ];
+    const filePath = join(tempDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+
+    const index = scanSessions(tempDir).find((e) => e.id === sessionId);
+    const loaded = loadSession(filePath);
+    expect(index, 'session not indexed').toBeTruthy();
+    expect(loaded, 'session not loadable').toBeTruthy();
+    expect(loaded!.session.status).toBe(index!.status);
+    // And a corroborated hypothesis on a live lineage means an answer survived.
+    expect(index!.status).toBe('resolved');
+  });
+
   it('says so when a journal was written by a newer build, and still reads it', () => {
     // Silence would leave a reader believing they had the whole tree while
     // fields this build does not know about were dropped on the way in.

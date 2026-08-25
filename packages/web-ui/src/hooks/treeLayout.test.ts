@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getPathToRoot, computeLayout } from './treeLayout';
+import { getPathToRoot, computeLayout, framableNodeIds } from './treeLayout';
 import { HIGHLIGHT_COLORS } from '../theme';
 import { NODE_WIDTH, NODE_HEIGHT } from '../geometry';
 import type { Hypothesis, HypothesisStatus } from '../types';
@@ -158,5 +158,44 @@ describe('computeLayout', () => {
     const { edges } = computeLayout(m, 'root', null, NO_PATH, NO_COLLAPSE);
     const rootA = edges.find((e) => e.id === 'root-a')!;
     expect(rootA.style?.stroke).toBe(HIGHLIGHT_COLORS.prunedEdge);
+  });
+});
+
+describe('framableNodeIds', () => {
+  // Framing an id the canvas is not rendering computes empty bounds, and the
+  // viewport then jumps to the layout origin at full zoom instead of to the
+  // selection. Both fit effects consult this so they cannot disagree.
+  const m = tree(
+    hyp('root', null, ['a', 'b']),
+    hyp('a', 'root', ['a1']),
+    hyp('b', 'root', []),
+    hyp('a1', 'a', []),
+  );
+  const rendered = (...ids: string[]) => new Set(ids);
+  const noCollapse = new Set<string>();
+
+  it('frames the selection with its visible children', () => {
+    expect(framableNodeIds('root', m, noCollapse, rendered('root', 'a', 'b')))
+      .toEqual([{ id: 'root' }, { id: 'a' }, { id: 'b' }]);
+  });
+
+  it('omits a child hidden under a collapse', () => {
+    expect(framableNodeIds('a', m, new Set(['a1']), rendered('root', 'a', 'b')))
+      .toEqual([{ id: 'a' }]);
+  });
+
+  it('omits a child the canvas is not rendering', () => {
+    expect(framableNodeIds('root', m, noCollapse, rendered('root', 'a')))
+      .toEqual([{ id: 'root' }, { id: 'a' }]);
+  });
+
+  it('frames nothing when the selection itself is not on screen', () => {
+    // A selection inside a collapsed subtree. Returning its id anyway is what
+    // sent the viewport to the origin.
+    expect(framableNodeIds('a1', m, noCollapse, rendered('root', 'a', 'b'))).toEqual([]);
+  });
+
+  it('frames a selection whose node is absent from the tree but present on canvas', () => {
+    expect(framableNodeIds('ghost', m, noCollapse, rendered('ghost'))).toEqual([{ id: 'ghost' }]);
   });
 });

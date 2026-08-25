@@ -10,7 +10,7 @@ import type { ArtifactRef } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
-  const { session, hypotheses, connected, loadSession, recentlyChanged, lastAddedId, persistenceHealthy } = useTreeStream();
+  const { session, hypotheses, connected, newerSession, loadSession, recentlyChanged, lastAddedId, persistenceHealthy } = useTreeStream();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // The captured evidence being read, if any. Held here rather than in the
   // panel because it is a layer above the canvas: while it is open the canvas
@@ -56,7 +56,7 @@ export default function App() {
   }, [toggleFollow, overlayCount]);
 
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100%' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative' }}>
       {!persistenceHealthy && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2000,
@@ -82,6 +82,7 @@ export default function App() {
               followMode={followMode}
               onToggleFollow={toggleFollow}
               onLoadSession={loadSession}
+              newerSession={newerSession}
               overlayCount={overlayCount}
             />
           </ErrorBoundary>
@@ -92,10 +93,24 @@ export default function App() {
           }}>
             <div style={{ textAlign: 'center' }}>
               <h2 style={{ marginBottom: 8, fontWeight: 500 }}>tot-mcp</h2>
-              <p>Waiting for agent to create a tree...</p>
-              <p style={{ fontSize: 12, marginTop: 12, color: '#6b7280' }}>
-                Double-click nodes to collapse/expand subtrees
-              </p>
+              {connected ? (
+                <>
+                  <p>Waiting for agent to create a tree...</p>
+                  <p style={{ fontSize: 12, marginTop: 12, color: '#6b7280' }}>
+                    Double-click nodes to collapse/expand subtrees
+                  </p>
+                </>
+              ) : (
+                // An unreachable server looks exactly like an idle agent from
+                // here, so the one that is actually known is what gets said.
+                <>
+                  <p style={{ color: '#f85149' }}>Not connected to the server</p>
+                  <p style={{ fontSize: 12, marginTop: 12, color: '#6b7280' }}>
+                    Retrying. Whether a tree exists cannot be known until the
+                    connection is back.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -124,6 +139,10 @@ export default function App() {
       {openArtifact && (
         <ErrorBoundary>
           <ArtifactViewer
+            // Keyed by the capture: its window, page and integrity verdict are
+            // state seeded from this reference, so opening a different one must
+            // start over rather than show the previous bytes under a new header.
+            key={openArtifact.artifact.id}
             artifact={openArtifact.artifact}
             claim={openArtifact.claim}
             onClose={() => setOpenArtifact(null)}

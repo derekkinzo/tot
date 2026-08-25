@@ -97,13 +97,13 @@ const TOOL_DEFS = {
       hypothesisId: identifier().describe('ID of the hypothesis'),
       type: z.enum(['supports', 'refutes', 'neutral']).describe('How this evidence relates to the hypothesis'),
       content: nonBlank(10000).describe('Description of the evidence'),
-      source: z.string().max(10000).optional().describe('Where this evidence came from (logs, tests, docs, etc.)'),
+      source: nonBlank(10000).optional().describe('Where this evidence came from (logs, tests, docs, etc.)'),
       decisive: z.boolean().optional().describe('Set when the verdict turns on this record, so it is read first.'),
-      artifactPath: z.string().min(1).max(4096).optional().describe(
+      artifactPath: nonBlank(4096).optional().describe(
         'Path to a file holding the verbatim evidence — a log, a command capture, a diff. The file is snapshotted so the record cites the bytes themselves rather than a retelling of them. Prefer this over pasting output into `content`.'),
       excerptStartLine: z.number().int().min(1).optional().describe('First line of the artifact this record is about (1-based).'),
       excerptEndLine: z.number().int().min(1).optional().describe('Last line of the artifact this record is about (inclusive). Defaults to excerptStartLine, citing a single line.'),
-      command: z.string().max(2000).optional().describe('The invocation that produced the artifact.'),
+      command: nonBlank(2000).optional().describe('The invocation that produced the artifact.'),
       exitCode: z.number().int().optional().describe('Exit status of that invocation.'),
     }),
   },
@@ -136,7 +136,7 @@ const TOOL_DEFS = {
       evidenceId: identifier().describe('ID of the evidence record to re-label'),
       decisive: z.boolean().optional().describe('Set when the verdict turns on this record.'),
       nonDiagnostic: z.boolean().optional().describe('Set when the record does not discriminate between the live alternatives.'),
-      linkedGroupId: z.string().min(1).max(200).optional().describe('Shared id for records that only support or refute jointly; a group counts as one observation.'),
+      linkedGroupId: identifier().optional().describe('Shared id for records that only support or refute jointly; a group counts as one observation.'),
     }),
   },
   get_tree: {
@@ -220,7 +220,8 @@ export function getToolHandlers(
    * handler: Zod parse → run `fn` → (when `fn` reports a sessionId) await the
    * journal drain so the write lands before the result returns → toolResult.
    * The one error mapping (ZodError → validation message, TreeError → its
-   * message, anything else → "Unknown error") lives here once. `fn` supplies
+   * message, anything else → a message naming the fault, logged to stderr) lives
+   * here once. `fn` supplies
    * only the varying body and returns the response text plus, for mutators, the
    * sessionId whose journal must be flushed.
    */
@@ -236,18 +237,31 @@ export function getToolHandlers(
            *  between the engine emitting its events and the journal drain that
            *  acknowledges them. */
           run: (input: z.infer<S>, prepared: P) => { text: string; sessionId?: string };
-          /** Undoes `prepare` when the mutation is refused, so preparation
-           *  leaves nothing behind. */
+          /** Undoes a `prepare` the journal never accepted a record for, so a
+           *  call that filed nothing leaves nothing behind. Not run once the
+           *  engine has filed a record that cites what was prepared: undoing it
+           *  then would strand that record on bytes that no longer exist. */
           compensate?: (prepared: P) => Promise<void>;
         },
   ): ToolHandler {
     return async (args) => {
       let prepared: P | undefined;
       let didPrepare = false;
-      /** Undoes a completed preparation. Both failure paths run this, so a
-       *  refused call leaves nothing behind whichever way it was refused. */
+      // Sampled before the mutation so the two can be compared after it. What
+      // decides whether a preparation may be undone is not which failure path was
+      // taken, but whether the engine filed a record that can reach it.
+      let routedBefore = sink.recordsRouted;
+      /**
+       * Undoes a completed preparation, unless the engine filed a record for this
+       * call. Every failure path runs this, so a call that filed nothing leaves
+       * nothing behind — while a record that exists keeps the bytes it cites,
+       * whether or not the journal write for it succeeded. The alternative strands
+       * a live record on deleted bytes, and the integrity check then reports the
+       * loss as though the bytes had been tampered with.
+       */
       const undoPreparation = async (): Promise<void> => {
         if (!didPrepare || typeof body === 'function') return;
+        if (sink.recordsRouted !== routedBefore) return;
         try {
           await body.compensate?.(prepared as P);
         } catch (err) {
@@ -262,6 +276,9 @@ export function getToolHandlers(
         } else {
           prepared = await body.prepare(input);
           didPrepare = true;
+          // Re-sampled after preparation: capturing bytes routes nothing itself,
+          // and this is the last point before the engine can emit.
+          routedBefore = sink.recordsRouted;
           result = body.run(input, prepared);
         }
         const { text, sessionId } = result;
@@ -273,7 +290,9 @@ export function getToolHandlers(
           if (persistFailed) {
             await undoPreparation();
             return toolResult(
-              `Error: the change was applied in memory but could not be saved to disk; it will be lost on restart. Check the data directory is writable.`,
+              'Error: the change was applied in memory but could not be saved to disk; it will be lost on restart. '
+              + 'Check the data directory is writable, then repeat the call. '
+              + 'Any bytes captured for it were kept, so the record now on screen still resolves to them.',
               true,
             );
           }
@@ -287,7 +306,18 @@ export function getToolHandlers(
         if (e instanceof ArtifactError) {
           return toolResult(`Error: ${(e as ArtifactError).message}`, true);
         }
-        return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
+        if (e instanceof TreeError) {
+          return toolResult(`Error: ${e.message}`, true);
+        }
+        // Anything else is a fault this layer did not anticipate. Logging it is
+        // the only record: the message a caller gets cannot carry a stack, and a
+        // silent 'Unknown error' leaves nothing to diagnose from.
+        console.error('[tot-mcp] Unexpected tool failure:', e);
+        return toolResult(
+          `Error: the tool failed unexpectedly (${e instanceof Error ? e.message : String(e)}). ` +
+          'The server log carries the detail.',
+          true,
+        );
       }
     };
   }
@@ -419,7 +449,17 @@ export function getToolHandlers(
       if (e instanceof z.ZodError) {
         return toolResult(`Validation error: ${e.issues.map(i => i.message).join(', ')}`, true);
       }
-      return toolResult(`Error: ${e instanceof TreeError ? e.message : 'Unknown error'}`, true);
+      if (e instanceof TreeError) {
+        return toolResult(`Error: ${e.message}`, true);
+      }
+      // Reported and logged the same way every other handler reports an
+      // unanticipated fault, so one failure does not surface two ways.
+      console.error('[tot-mcp] Unexpected tool failure:', e);
+      return toolResult(
+        `Error: the tool failed unexpectedly (${e instanceof Error ? e.message : String(e)}). `
+        + 'The server log carries the detail.',
+        true,
+      );
     }
   });
 

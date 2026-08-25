@@ -73,13 +73,23 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
             recorded under it contradict that declaration. */}
         {d.split && (
           <div
-            title={d.split.conflicted ? `${d.split.title}\n\nThe verdicts recorded under this split contradict it — open the node for detail.` : d.split.title}
+            title={
+              d.split.attention === 'contradiction'
+                ? `${d.split.title}\n\nA verdict recorded under this split contradicts it — open the node for detail.`
+                : d.split.attention === 'gap'
+                  // Nothing here contradicts the declaration; part of the space
+                  // was set aside without being investigated.
+                  ? `${d.split.title}\n\nPart of this split was set aside without being investigated — open the node for detail.`
+                  : d.split.title
+            }
             style={{
               display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 4,
-              fontSize: 10, color: d.split.conflicted ? '#d29922' : '#6b7280',
+              fontSize: 10, color: d.split.attention ? '#d29922' : '#6b7280',
             }}
           >
-            {d.split.conflicted && <span aria-hidden>⚠</span>}
+            {d.split.attention && (
+              <span aria-hidden>{d.split.attention === 'contradiction' ? '⚠' : '◍'}</span>
+            )}
             {d.split.label && (
               <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>
                 {d.split.label}
@@ -111,6 +121,12 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
             <span title={`${d.ledger.neutral} neutral record(s)`} style={{ fontSize: 11, color: '#6b7280' }}>
               ·{d.ledger.neutral}
             </span>
+          )}
+          {d.ledger.setAside > 0 && (
+            <span
+              title={`${d.ledger.setAside} record(s) declared not to discriminate between the live alternatives`}
+              style={{ fontSize: 11, color: '#6b7280' }}
+            >⊘{d.ledger.setAside}</span>
           )}
           {d.ledger.hasDecisive && (
             <span title="Carries a record the verdict turns on" style={{ fontSize: 11, color: '#d29922' }}>▪</span>

@@ -155,11 +155,18 @@ async function handleCommand(input: string) {
       }
       case 'decompose': case 'd': {
         const id = resolveId(parts[1]);
-        if (!id) { console.log('  Usage: decompose <id|.|0|1...> <child1> | <child2> | ...'); break; }
+        if (!id) { console.log('  Usage: decompose <id|.|0|1...> <child1> | <child2> | ... [| axis: <axis>]'); break; }
         const childrenStr = parts.slice(2).join(' ');
         const children = childrenStr.split('|').map(s => s.trim()).filter(Boolean);
         if (children.length < 2) { console.log('  Need at least 2 children separated by |'); break; }
-        const result = await callTool('decompose', { parentId: id, children });
+        // The tool requires the axis these children divide; the REPL asks for it
+        // as a trailing 'axis: ...' segment, defaulting when omitted.
+        const axisSegment = children.findIndex((c) => /^axis\s*:/i.test(c));
+        const axis = axisSegment >= 0
+          ? children.splice(axisSegment, 1)[0].replace(/^axis\s*:/i, '').trim()
+          : 'unstated axis';
+        if (children.length < 2) { console.log('  Need at least 2 children separated by |'); break; }
+        const result = await callTool('decompose', { parentId: id, children, axis });
         if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         lastChildIds = result.data?.childIds || [];
         remember(...lastChildIds);
@@ -209,9 +216,17 @@ async function handleCommand(input: string) {
       }
       case 'add': {
         const parentId = resolveId(parts[1]);
-        if (!parentId) { console.log('  Usage: add <parentId|.|0|1...> <content>'); break; }
-        const content = parts.slice(2).join(' ');
-        const result = await callTool('add_hypothesis', { parentId, content });
+        if (!parentId) { console.log('  Usage: add <parentId|.|0|1...> <label> [-- <statement>]'); break; }
+        // The tool takes a short label and, optionally, the longer claim behind
+        // it; the REPL splits on the first ' -- ' so both can be typed in one line.
+        const typed = parts.slice(2).join(' ');
+        const [label, ...rest] = typed.split(' -- ');
+        const statement = rest.join(' -- ').trim();
+        const result = await callTool('add_hypothesis', {
+          parentId,
+          title: label.trim(),
+          ...(statement === '' ? {} : { statement }),
+        });
         if (result.isError) { console.log(`  Error: ${result.text}`); break; }
         remember(result.data?.hypothesisId);
         console.log(`  ✓ Added: ${result.data?.hypothesisId?.slice(0, 8)}`);

@@ -3,7 +3,7 @@ import { flextree } from 'd3-flextree';
 import { hierarchy } from 'd3-hierarchy';
 import { isPruned, nodeLabel, sessionIsGrounded, type Hypothesis, type HypothesisData, type SplitFace } from '../types';
 import { evidenceLedger } from '../tree/evidenceView';
-import { splitBadge, splitConflicts } from '../tree/splitView';
+import { splitAttention, splitBadge } from '../tree/splitView';
 import { HIGHLIGHT_COLORS } from '../theme';
 import { NODE_WIDTH, NODE_HEIGHT, NODE_GAP_X, NODE_GAP_Y } from '../geometry';
 import { walkToRoot } from '../tree/walk';
@@ -172,12 +172,34 @@ export function computeLayout(
 
 /**
  * What a node face shows about its split, or null when it has none. The badge
- * carries a conflict flag rather than the conflict text: a face states that the
- * declaration and the verdicts disagree, and the panel says how.
+ * carries which kind of attention the split needs rather than the finding text:
+ * a face states that much, and the panel says how.
  */
 function splitFace(h: Hypothesis, hypotheses: Map<string, Hypothesis>): SplitFace | null {
   const badge = splitBadge(h);
   if (!badge) return null;
-  const conflicts = splitConflicts(h, hypotheses);
-  return { ...badge, conflicted: conflicts.length > 0 };
+  return { ...badge, attention: splitAttention(h, hypotheses) };
+}
+
+/**
+ * The nodes a viewport may be framed on for a given selection: the selection
+ * itself plus its visible children, restricted to what the canvas is actually
+ * rendering.
+ *
+ * Empty when the selection is not on screen — a node inside a collapsed subtree
+ * has no box to frame, and framing an id the canvas does not hold computes empty
+ * bounds, which sends the viewport to the layout origin at full zoom. Both fit
+ * effects ask this, so neither can frame something the other would refuse.
+ */
+export function framableNodeIds(
+  selectedId: string,
+  hypotheses: Map<string, Hypothesis>,
+  collapsedIds: Set<string>,
+  renderedIds: Set<string>,
+): { id: string }[] {
+  const h = hypotheses.get(selectedId);
+  const wanted = h
+    ? [selectedId, ...h.children.filter((c) => !collapsedIds.has(c))]
+    : [selectedId];
+  return wanted.filter((id) => renderedIds.has(id)).map((id) => ({ id }));
 }

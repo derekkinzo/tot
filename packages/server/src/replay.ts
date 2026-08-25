@@ -1,5 +1,8 @@
 import { subtreeContainsCorroborated } from './closure.js';
-import { normalizeEvidenceRecord, normalizeHypothesisPayload } from '@tot-mcp/shared';
+import {
+  normalizeEvidenceRecord, normalizeHypothesisPayload, normalizeSessionPayload,
+  terminalSessionStatus,
+} from '@tot-mcp/shared';
 import type { Evidence, Hypothesis, Session } from './types.js';
 
 /**
@@ -48,12 +51,16 @@ export interface ReplayState {
   /** Whether any entry was stamped by a build newer than this one, so a reader
    *  can say that fields it does not know about were dropped on the way in. */
   sawNewerWriter: boolean;
+  /** Whether a completion named a terminal state this build recognises. A value
+   *  it cannot read carries no verdict, so the closure walk decides instead of
+   *  the fold — tracked here so every reader asks the same question. */
+  sawExplicitTerminal: boolean;
 }
 
 export function emptyReplayState(): ReplayState {
   return {
     sessions: [], hypotheses: [], hypothesisIndex: new Map(),
-    pendingEvidence: new Map(), sawNewerWriter: false,
+    pendingEvidence: new Map(), sawNewerWriter: false, sawExplicitTerminal: false,
   };
 }
 
@@ -93,7 +100,7 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
   };
   switch (entry.type) {
     case 'session-created': {
-      sessions.push(entry.payload as Session);
+      sessions.push(normalizeSessionPayload(entry.payload));
       break;
     }
     case 'hypothesis-added':
@@ -124,10 +131,17 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
       break;
     }
     case 'session-completed': {
-      const payload = entry.payload as { sessionId: string; terminalStatus: 'resolved' | 'abandoned' };
+      const payload = entry.payload as { sessionId: string; terminalStatus?: unknown };
       const s = sessions.find((sess) => sess.id === payload.sessionId);
       if (!s) break;
-      s.status = payload.terminalStatus;
+      // A journal can carry a completion with no terminalStatus, or one this build
+      // cannot read. Either way the entry names no verdict, so the fold marks the
+      // session terminal in the way that claims least — no survival — and records
+      // that it was not told which. {@link deriveScanStatus} then decides from the
+      // spine, which is the only thing that knows whether anything survived.
+      const named = terminalSessionStatus(payload.terminalStatus);
+      if (named !== null) state.sawExplicitTerminal = true;
+      s.status = named ?? 'abandoned';
       s.completedAt = entry.timestamp;
       break;
     }

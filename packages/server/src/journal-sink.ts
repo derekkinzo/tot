@@ -43,6 +43,8 @@ export class JournalSink {
     source.on('event', (event) => this.onEvent(event));
   }
 
+  private routed = 0;
+
   private lockFor(sessionId: string): Lock {
     let lock = this.locks.get(sessionId);
     if (!lock) {
@@ -52,9 +54,22 @@ export class JournalSink {
     return lock;
   }
 
+  /**
+   * How many records this sink has routed to a journal, ever.
+   *
+   * A caller samples it before a mutation and compares afterwards to learn
+   * whether the engine filed anything for that call. That is what decides
+   * whether a prepared side effect may still be undone: once a record exists
+   * that can reach it, undoing it would strand the record.
+   */
+  get recordsRouted(): number {
+    return this.routed;
+  }
+
   private onEvent(event: TreeEvent): void {
     const record = journalEventToEntry(event);
     if (!record) return;
+    this.routed += 1;
     const writer = this.getWriter(record.sessionId);
     const sessionId = record.sessionId;
     // Per-session serialization preserves emit order on disk. A rejected append

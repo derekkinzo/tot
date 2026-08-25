@@ -86,6 +86,20 @@
         fill: rgba(9, 11, 16, 0.72);
       }
 
+      /* A detail column and a usable canvas cannot share a narrow window: at
+         400px the column took 280 of it and left the canvas 120, with the
+         canvas controls unreachable inside what remained. Below that width the
+         panel covers the canvas instead, and closing it gives the canvas back. */
+      @media (max-width: 700px) {
+        .detail-panel {
+          position: absolute;
+          inset: 0;
+          width: 100% !important;
+          z-index: 1500;
+          border-left: none;
+        }
+      }
+
       /* Overlay widget base style */
       .overlay-widget {
         background: #1c1f26;

@@ -81,6 +81,37 @@ describe('verbatim evidence capture, end to end', () => {
     return (await fetch(`http://localhost:${s.port}/api/state`)).json();
   }
 
+  it('does not offer the tree or the captured bytes to other origins', async () => {
+    // The dashboard is served by this same server, so it needs no cross-origin
+    // grant. A wildcard one lets any page the developer happens to have open read
+    // /api/state, take the artifact ids out of it, and then read the bytes of
+    // whatever files were captured off their disk.
+    const { s, client } = await start();
+    const rootId = await rootOf(client);
+    await client.callTool({
+      name: 'add_evidence',
+      arguments: {
+        hypothesisId: rootId, type: 'refutes', content: 'x',
+        artifactPath: log('secret.log', LOG_BODY),
+      },
+    });
+    const { hypotheses } = await state(s);
+    const ref = hypotheses.find((h: any) => h.id === rootId).evidence[0].artifact;
+
+    const routes = [
+      '/api/state',
+      '/api/info',
+      `/api/artifacts/${ref.sessionId}/${ref.id}/meta`,
+      `/api/artifacts/${ref.sessionId}/${ref.id}/raw`,
+      `/api/artifacts/${ref.sessionId}/${ref.id}/lines?from=1&to=5`,
+    ];
+    for (const route of routes) {
+      const res = await fetch(`http://localhost:${s.port}${route}`);
+      expect(res.status, route).toBeLessThan(400);
+      expect(res.headers.get('access-control-allow-origin'), `${route} grants any origin`).toBeNull();
+    }
+  });
+
   it('stores the bytes and records them as verbatim, without the agent retyping them', async () => {
     const { s, client } = await start();
     const rootId = await rootOf(client);
@@ -329,24 +360,72 @@ describe('verbatim evidence capture, end to end', () => {
     expect(storedIds()).toEqual(before);
   });
 
-  it('leaves no stored bytes behind when the record could not be journaled', async () => {
-    // The record is not durable, so bytes kept for it could never be reached
-    // again after a restart — they would accumulate unreferenced.
+  it('keeps the bytes a filed record cites even when the journal write failed', async () => {
+    // The record exists in memory and is broadcast to the dashboard. Deleting the
+    // bytes it cites strands it: the integrity check then reports them gone, in
+    // the same words it uses for real loss or tampering, for the server's own
+    // housekeeping.
     const { s, client } = await start();
     const { sessionId, rootId } = await newTree(client);
-    const before = storedIds();
     const journal = join(s.dataDir, `${sessionId}.jsonl`);
     chmodSync(journal, 0o444);
+    let res: any;
     try {
-      const res: any = await client.callTool({
+      res = await client.callTool({
         name: 'add_evidence',
         arguments: { hypothesisId: rootId, type: 'refutes', content: 'x', artifactPath: log('b.log', LOG_BODY) },
       });
-      expect(res.isError).toBe(true);
-      expect(storedIds()).toEqual(before);
     } finally {
       chmodSync(journal, 0o644);
     }
+    // The caller is still told the change is not durable — that is the message
+    // that matters, because repeating the call is what makes it durable.
+    expect(res.isError).toBe(true);
+    expect(String(res.content?.[0]?.text)).toMatch(/lost on restart/i);
+
+    // And the record it left behind still resolves to its bytes.
+    const { hypotheses } = await state(s);
+    const ref = hypotheses.find((h: any) => h.id === rootId).evidence[0].artifact;
+    const meta = await (await fetch(
+      `http://localhost:${s.port}/api/artifacts/${ref.sessionId}/${ref.id}/meta`)).json();
+    expect(meta.integrity).toBe('verified');
+  });
+
+  it('still resolves the bytes after a failed write is followed by a successful one', async () => {
+    // The evidence array rides inside the whole-node snapshot, so the next
+    // successful mutation on that node makes the earlier record durable. Bytes
+    // discarded at the failed write would leave a replayed verdict citing
+    // evidence the server itself deleted — permanently.
+    const { s, client } = await start();
+    const { sessionId, rootId } = await newTree(client);
+    const journal = join(s.dataDir, `${sessionId}.jsonl`);
+    chmodSync(journal, 0o444);
+    try {
+      await client.callTool({
+        name: 'add_evidence',
+        arguments: { hypothesisId: rootId, type: 'refutes', content: 'refuted by the capture', artifactPath: log('c.log', LOG_BODY) },
+      });
+    } finally {
+      chmodSync(journal, 0o644);
+    }
+    // A later successful mutation on the same node journals the whole node,
+    // carrying the earlier record with it.
+    const done: any = await client.callTool({
+      name: 'eliminate_hypothesis',
+      arguments: { hypothesisId: rootId, reason: 'refuted by the capture' },
+    });
+    expect(done.isError).toBeFalsy();
+
+    // Reload the project from disk: the verdict's own evidence must still verify.
+    const reopened = await start();
+    const { hypotheses } = await state(reopened.s);
+    const node = hypotheses.find((h: any) => h.id === rootId);
+    expect(node.status).toBe('eliminated');
+    const ref = node.evidence.find((e: any) => e.artifact)?.artifact;
+    expect(ref, 'the replayed verdict cites no capture').toBeTruthy();
+    const meta = await (await fetch(
+      `http://localhost:${reopened.s.port}/api/artifacts/${ref.sessionId}/${ref.id}/meta`)).json();
+    expect(meta.integrity).toBe('verified');
   });
 
   it('leaves no stored bytes behind when the mutation is refused', async () => {

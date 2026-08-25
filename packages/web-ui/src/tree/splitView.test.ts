@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitBadge, splitConflicts } from './splitView';
+import { splitAttention, splitBadge, splitConflicts } from './splitView';
 import type { Hypothesis, HypothesisStatus } from '../types';
 
 const ts = '2024-01-01T00:00:00.000Z';
@@ -70,6 +70,53 @@ describe('splitBadge', () => {
       decomposition: { axis: 'by subsystem', gate: 'all-of' },
     }));
     expect(badge?.axis).toBe('by subsystem');
+  });
+});
+
+describe('splitAttention separates a contradiction from a gap', () => {
+  // Two of the five findings report a branch merely SET ASIDE. Painting those as
+  // "the verdicts contradict this split" asserts a refutation nobody recorded,
+  // which is the one thing this tool must not do.
+
+  it('calls a corroborated pair under one-of a contradiction', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('p', node('p', 'exploring', { children: ['a', 'b'], decomposition: { axis: 'by subsystem', gate: 'one-of' } }));
+    map.set('a', node('a', 'corroborated', { parentId: 'p' }));
+    map.set('b', node('b', 'corroborated', { parentId: 'p' }));
+    expect(splitAttention(map.get('p')!, map)).toBe('contradiction');
+  });
+
+  it('calls a required part set aside a gap, not a contradiction', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('p', node('p', 'exploring', { children: ['a', 'b'], decomposition: { axis: 'by part', gate: 'all-of' } }));
+    map.set('a', node('a', 'out-of-scope', { parentId: 'p' }));
+    map.set('b', node('b', 'corroborated', { parentId: 'p' }));
+    expect(splitAttention(map.get('p')!, map)).toBe('gap');
+  });
+
+  it('calls a space closed with a branch set aside a gap', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('p', node('p', 'exploring', { children: ['a', 'b'], decomposition: { axis: 'by cause', gate: 'any-of' } }));
+    map.set('a', node('a', 'eliminated', { parentId: 'p' }));
+    map.set('b', node('b', 'out-of-scope', { parentId: 'p' }));
+    expect(splitAttention(map.get('p')!, map)).toBe('gap');
+  });
+
+  it('reports a contradiction when both kinds are present, since that is the stronger claim', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('p', node('p', 'exploring', { children: ['a', 'b', 'c'], decomposition: { axis: 'by part', gate: 'all-of' } }));
+    map.set('a', node('a', 'eliminated', { parentId: 'p' }));
+    map.set('b', node('b', 'out-of-scope', { parentId: 'p' }));
+    map.set('c', node('c', 'corroborated', { parentId: 'p' }));
+    expect(splitAttention(map.get('p')!, map)).toBe('contradiction');
+  });
+
+  it('reports nothing when the verdicts agree with the declaration', () => {
+    const map = new Map<string, Hypothesis>();
+    map.set('p', node('p', 'exploring', { children: ['a', 'b'], decomposition: { axis: 'by cause', gate: 'one-of' } }));
+    map.set('a', node('a', 'corroborated', { parentId: 'p' }));
+    map.set('b', node('b', 'eliminated', { parentId: 'p' }));
+    expect(splitAttention(map.get('p')!, map)).toBeNull();
   });
 });
 

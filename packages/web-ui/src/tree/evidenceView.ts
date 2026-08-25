@@ -45,6 +45,10 @@ export interface EvidenceLedger {
   refuting: number;
   supporting: number;
   neutral: number;
+  /** Records the agent declared not to discriminate. They weigh nothing, so
+   *  without their own mark a node holding only these looks like a node holding
+   *  nothing — and a reader cannot tell the question was looked at. */
+  setAside: number;
   hasDecisive: boolean;
   /** A verdict of this node's own resting only on paraphrase. Suppressed in a
    *  session that captured no artifacts at all, where the mark would fire on
@@ -69,8 +73,12 @@ export function evidenceLedger(h: Hypothesis, ctx: { sessionGrounded: boolean })
   return {
     refuting: refutingWeight(h),
     supporting: supportingWeight(h),
-    neutral: h.evidence.filter((e) => e.type === 'neutral').length,
-    hasDecisive: h.evidence.some((e) => e.decisive),
+    // Measured like the weights beside it: a record that weighs nothing is
+    // reported as set aside rather than counted here.
+    neutral: h.evidence.filter((e) => e.type === 'neutral' && !e.nonDiagnostic).length,
+    setAside: h.evidence.filter((e) => e.nonDiagnostic).length,
+    // A record that weighs nothing cannot be the one a verdict turns on.
+    hasDecisive: h.evidence.some((e) => e.decisive && !e.nonDiagnostic),
     ungrounded: ctx.sessionGrounded && claimsAGroundableVerdict(h) && hasUngroundedVerdict(h),
   };
 }
