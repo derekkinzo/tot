@@ -48,9 +48,9 @@ The clearest concrete example is debugging: competing causes for a failure, evid
 ```
 
 The plugin's `SessionStart` hook runs `npm install` and builds the bundled
-MCP server on first launch and again whenever a plugin update changes
-`packages/server/package.json`. The first run takes about a minute; later
-runs are no-ops.
+MCP server on first launch, and again whenever a plugin update changes any
+build input — the sources, the manifests, or the lockfile. The first run takes
+about a minute; later runs are no-ops.
 
 Because the first build runs while Claude Code is already starting, the
 `tot` MCP server won't connect on that same launch — the server binary is
@@ -204,16 +204,22 @@ directory, grouped by project:
 ~/.tot/projects/<project-id>/sessions/<sessionId>.jsonl
 ```
 
-Logs and command output captured as evidence are stored alongside the trees
-that cite them, so a record can be read back exactly as it was observed.
+Logs and command output captured as evidence are stored beside the trees that
+cite them, so a record can be read back exactly as it was observed:
+
+```
+~/.tot/projects/<project-id>/artifacts/<sessionId>/
+```
 
 Trees persist across restarts — reopen a project and its sessions are still
 there. To store them somewhere else, set the `TOT_DATA_DIR` environment
 variable to any directory (it otherwise defaults to `$XDG_STATE_HOME/tot`,
 then `~/.tot`).
 
-Run `tot-mcp status` from a project to see where that project's trees live and
-list its recent sessions.
+To see where a project's trees live and list its recent sessions, run the built
+CLI from that project — `node /absolute/path/to/tot/packages/server/dist/cli.js
+status`, or `node "$CLAUDE_PLUGIN_DATA/build/packages/server/dist/cli.js" status`
+under the plugin install.
 
 ## Research Background
 
