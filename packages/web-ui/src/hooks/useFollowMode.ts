@@ -6,8 +6,8 @@ type FollowState = 'following' | 'paused';
 interface UseFollowModeOptions {
   /** The displayed session; a change resets the follow target. */
   sessionId: string | null;
-  lastAddedId: string | null;
-  recentlyChanged: Set<string>;
+  /** The node the agent touched last; see TreeState.lastActivityId. */
+  lastActivityId: string | null;
 }
 
 interface UseFollowModeReturn {
@@ -25,7 +25,7 @@ interface UseFollowModeReturn {
  * except across a session switch, which drops the prior session's target so
  * follow cannot pin to a node absent from the new tree.
  */
-export function useFollowMode({ sessionId, lastAddedId, recentlyChanged }: UseFollowModeOptions): UseFollowModeReturn {
+export function useFollowMode({ sessionId, lastActivityId }: UseFollowModeOptions): UseFollowModeReturn {
   const [followMode, setFollowMode] = useState<FollowState>('following');
   const [followTarget, setFollowTarget] = useState<string | null>(null);
   const prevSessionIdRef = useRef<string | null>(sessionId);
@@ -33,8 +33,8 @@ export function useFollowMode({ sessionId, lastAddedId, recentlyChanged }: UseFo
   useEffect(() => {
     const prevSessionId = prevSessionIdRef.current;
     prevSessionIdRef.current = sessionId;
-    setFollowTarget((prev) => nextFollowTarget(prev, { sessionId, prevSessionId, lastAddedId, recentlyChanged }));
-  }, [sessionId, lastAddedId, recentlyChanged]);
+    setFollowTarget((prev) => nextFollowTarget(prev, { sessionId, prevSessionId, lastActivityId }));
+  }, [sessionId, lastActivityId]);
 
   const toggleFollow = useCallback(() => {
     setFollowMode((prev) => (prev === 'following' ? 'paused' : 'following'));

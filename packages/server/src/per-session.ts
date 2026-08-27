@@ -23,7 +23,7 @@ import { makeLock } from './mutex.js';
 import { getCentralArtifactsDir, getCentralSessionsDir, writeProjectMeta } from './central-storage.js';
 import { migrateLegacySessions } from './legacy-migration.js';
 import { STAGNATION_THRESHOLD_DEFAULT, SHUTDOWN_DEADLINE_MS } from './defaults.js';
-import type { ProjectState } from './project-state.js';
+import { sessionCatalog, type ProjectState } from './project-state.js';
 
 /** A running per-session server: the engine, dashboard URL, and teardown. */
 export interface SessionServer {
@@ -104,6 +104,8 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   const server = new McpServer({ name: 'tot-mcp', version: '0.1.0' });
   const { drainAll } = registerTools(server, tm, () => dataDir, {
     getDashboardUrl: () => dashboardUrl,
+    ensureSessionLoaded,
+    listSessions: () => sessionCatalog(projectState),
     // A failed journal append flips the project's health flag, surfaced via
     // /api/info so the dashboard can show that writes are not landing.
     onPersistenceError: () => { projectState.persistenceHealthy = false; },

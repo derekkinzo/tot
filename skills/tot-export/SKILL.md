@@ -10,46 +10,75 @@ Export a completed (or in-progress) hypothesis tree as a structured Markdown rep
 
 ## Instructions
 
-1. Call `get_tree` with format `full` to get the complete tree state.
+1. Call `get_tree` with format `full` to get the complete tree state. Pass
+   `sessionId` when `$1` names one, or when `get_status` lists the finished
+   session the user asked about; with no argument it reads the most recent
+   session. A resolved session reads the same as a live one.
 
-2. Generate a Markdown report with this structure:
+2. Read the payload's own fields. Each hypothesis carries `title` (the short
+   label), `statement` (the full claim, when one was authored), `status`,
+   `evidence`, `conclusion`, and `decomposition` (`axis`, and `gate` when
+   declared). Each evidence record carries `type`, `kind` (`artifact` for
+   captured bytes, `transcription` for a retelling of them), `content`,
+   `source`, and the `decisive` / `nonDiagnostic` / `linkedGroupId` marks.
+
+3. Generate a Markdown report with this structure. Every verdict prints the
+   reason recorded with it — a verdict without its ground is an assertion the
+   tree does not support.
 
 ```markdown
 # Investigation Report
 
 ## Problem
-{problem statement}
+{session.problem}
 
 ## Summary
-{1-2 sentence conclusion: what was found and why}
+{1-2 sentences: which hypotheses survived, on what evidence, and what was left
+untested. Say "no hypothesis survived" when that is the outcome.}
 
 ## Hypothesis Tree
 
-### Corroborated Hypotheses
-- **{hypothesis content}** ({N} supporting, {M} refuting)
-  - Reason: {corroboration reason}
+### Corroborated
+- **{title}** — {statement, when present}
+  - Reason: {conclusion.reason}
+  - Survived: {the refutation tests that were applied and did not refute it}
   - Evidence:
-    - [supports] {evidence content}
-    - [supports] {evidence content}
+    - [{type}, {verbatim|paraphrase}] {content} {(source), when present}
 
-### Eliminated Hypotheses
-- ~~{hypothesis content}~~
-  - Reason: {elimination reason}
-  - Evidence: {refuting evidence}
+### Eliminated
+- ~~{title}~~ — {statement, when present}
+  - Reason: {conclusion.reason}
+  - Refuted by: {the refutes-typed records the verdict was bound to}
 
-### Unresolved (if any)
-- {hypothesis content} — {current state}
+### Set aside (out of scope)
+- {title} — {statement, when present}
+  - Reason: {conclusion.reason}
+  - Not refuted: this branch was left uninvestigated, so nothing here counts
+    against it.
+
+### Still open (if any)
+- {title} — {no evidence yet | evidence gathered, no verdict}
+
+## How the space was divided
+For each decomposed node, one line: {parent title} split {decomposition.axis}
+as {gate}, into {child titles}. Note any node whose declared gate the outcome
+contradicts — two corroborated rivals under `one-of`, or an `all-of` part
+eliminated while the parent still stands.
 
 ## Evidence Trail
-{chronological list of key evidence gathered}
+Records in the order they were added, each marked verbatim or paraphrase, with
+decisive records called out. Note any record marked as not discriminating and
+any linked group, which counts as one observation however many records it holds.
 
 ## Methodology
 Investigation used Tree of Thought reasoning with sibling-level decomposition.
-{N} hypotheses explored, {M} eliminated with evidence, {K} corroborated.
-Corroboration is provisional retention pending falsification (Popper).
+{N} hypotheses in the tree, {M} eliminated with refuting evidence, {K}
+corroborated, {J} set aside as out of scope.
+Corroboration is provisional retention pending falsification (Popper);
+out-of-scope marks a branch nobody tested, not one that was refuted.
 ```
 
-3. Present the report to the user. Offer to:
+4. Present the report to the user. Offer to:
    - Copy to clipboard
    - Write to a file (e.g., `investigation-report.md`)
    - Include in a PR description or commit message

@@ -37,7 +37,7 @@ Call `create_tree` with a clear, specific problem statement. Include the observa
 
 Call `decompose` with 2-5 sibling hypotheses that are comparable along a single framing axis.
 
-Name each one with a short label — a noun phrase such as "Writer pool exhaustion", not a sentence. That label is what the tree renders, so it is capped short; pass `{ title, statement }` when the full claim needs more room than the label allows.
+Name each one with a short label — a noun phrase such as "Writer pool exhaustion", not a sentence. That label is the only text the tree renders, so it is bounded: at most 80 characters, and no trailing period. Pass `{ title, statement }` when the full claim needs more room than the label allows.
 
 Framing axes to choose from:
 
@@ -87,8 +87,8 @@ Key principles:
 
 - Call `eliminate_hypothesis` when refuting evidence is decisive. Bind the verdict to the supporting refuting-evidence ids so the audit trail is preserved.
 - Call `set_out_of_scope` when a branch is plausible but outside the scope of this investigation. Distinct from elimination — it sets a branch aside without claiming refutation.
-- Rank live siblings by disproof: the strongest standing hypothesis is the one with the least refuting evidence against it, not one assigned a confidence number.
-- Drill deeper: call `decompose` on surviving hypotheses to test sub-causes.
+- Compare live siblings by disproof, never by an assigned confidence number — but only over evidence that was weighed against each of them. Heuer's rule (prefer the hypothesis with the fewest inconsistencies) holds inside a matrix where every observation has been checked against every rival; a sibling nobody has tested also has no refuting evidence, and reading that as strength rewards the branch that was never attacked. So separate the two: which siblings are untested (`get_status` reports them as unexplored), and which have survived the tests actually applied to them.
+- Drill deeper first: call `decompose` on a surviving hypothesis to test sub-causes. A verdict is the last act on a node — a corroborated or eliminated node can no longer be decomposed, and a node cannot be corroborated until its children are all terminal.
 - Call `corroborate_hypothesis` when the hypothesis has survived the refutation tests applied to it. Per Popper, corroboration is provisional retention, not verification — the verdict can be reopened by later refuting evidence.
 
 The session resolves only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope). Multiple corroborated branches are valid: many real-world outcomes have compound causes.
@@ -104,8 +104,8 @@ Before declaring done:
 
 The tree is visible in real-time. The `get_status` tool response ends with a
 `Visualization: http://localhost:<port>` line (each session has its own port);
-open that URL, or run `/tot-dashboard`, to see:
-- Color-coded hypothesis statuses (blue=pending, yellow=exploring, red=eliminated, green=corroborated, purple=out-of-scope)
+open that URL, or use the `tot-dashboard` skill, to see:
+- Hypothesis statuses, each carrying a glyph and a label as well as a colour (pending, exploring, eliminated, corroborated, out of scope)
 - Evidence attached to each node
 - Path highlighting from root to selected hypothesis
 

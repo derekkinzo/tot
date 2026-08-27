@@ -78,6 +78,47 @@ describe('declared splits at the tool surface', () => {
     expect(res.isError).toBe(true);
   });
 
+  it('does not report a combined child as redundancy with its own conjuncts', async () => {
+    // A combined "A and B" child is the construct the tools advise for real
+    // co-occurrence, and it contains each conjunct by construction. Flagging it
+    // makes following the advice produce a warning every time.
+    const rootId = await tree();
+    const { text } = await call('decompose', {
+      parentId: rootId, axis: 'by cause', gate: 'any-of',
+      children: ['Writer starvation', 'Index bloat', 'Writer starvation and index bloat'],
+    });
+    expect(text).not.toMatch(/label pair\(s\) where one contains the other/i);
+    expect(text).toMatch(/combined child/i);
+  });
+
+  it('reports a residual branch as a reading of the label, not as coverage', async () => {
+    // The check is over wording. Saying the set has a catch-all asserts what a
+    // branch holds; naming the label that reads that way does not.
+    const rootId = await tree();
+    const { text } = await call('validate_decomposition', {
+      parentId: (await (async () => {
+        await call('decompose', {
+          parentId: rootId, axis: 'by cause',
+          children: ['Connection pool exhaustion', 'Other causes not yet enumerated'],
+        });
+        return rootId;
+      })()),
+    });
+    expect(text).toMatch(/reads as a residual branch/i);
+    expect(text).not.toMatch(/has explicit catch-all/i);
+    expect(text).not.toMatch(/coverage-gap-advisory/i);
+  });
+
+  it('asks about coverage rather than asserting closure when no label reads as residual', async () => {
+    const rootId = await tree();
+    await call('decompose', {
+      parentId: rootId, axis: 'by cause', children: ['Connection pool exhaustion', 'Index bloat'],
+    });
+    const { text } = await call('validate_decomposition', { parentId: rootId });
+    expect(text).toMatch(/coverage-gap-advisory/i);
+    expect(text).toMatch(/states closure by enumeration/i);
+  });
+
   it('never reports a clean structural bill it cannot support', async () => {
     // Removing a check must not upgrade its silence into an all-clear. A set this
     // report says nothing about — two labels at plainly different levels, with no
@@ -89,7 +130,7 @@ describe('declared splits at the tool surface', () => {
     });
     expect(text).not.toMatch(/No structural issues detected/i);
     // What it did examine, it may say.
-    expect(text).toMatch(/No substring overlaps or duplicate labels detected/i);
+    expect(text).toMatch(/no label contains another, and no label repeats/i);
     // And the question it cannot answer is still put to the agent.
     expect(text.toLowerCase()).toMatch(/level|abstraction/);
   });

@@ -20,9 +20,9 @@ You receive a parent node and its child hypotheses. Run the checks below and emi
 
 Look for double-coverage between siblings:
 
-- **Subset overlap**: is any child a strict subset of another? If so, it is not a peer — it is a sub-branch and should live below.
+- **Subset overlap**: is any child a strict subset of another? If so it is not a peer but a sub-branch. Name it; the reachable move is to decompose the broader sibling and restate the narrow claim underneath, or to set the narrow one out of scope when the broader one covers it.
 - **Domain co-occurrence**: if two children describe causes that genuinely co-instantiate (e.g. an INUS cluster), that is acknowledged overlap and a reason to consider a combined "A and B" hypothesis as a first-class child rather than to redraw boundaries.
-- **Causal-cascade overlap**: two children at different points in the same causal chain (an upstream cause and its downstream symptom) collapse, or are re-axised to one branch.
+- **Causal-cascade overlap**: two children sit at different points in the same causal chain — an upstream cause and its downstream symptom. Name the pair; the reachable move is to decompose the upstream child and let the symptom live below it, since a split cannot be redrawn once its children exist.
 
 ## Check 2: Coverage
 
@@ -36,7 +36,7 @@ Look for what the decomposition might miss:
 
 Children should sit at one consistent altitude. Mixing a broad category with a specific instance of that category indicates uneven granularity (e.g., a class and one of its members at the same level). Children should split the parent along one dimension (mechanism, lifecycle phase, location, actor, time, population) — not a mix.
 
-Judge them against the axis the decomposition declares. A child that divides some other dimension does not belong at this level, however plausible the claim is: it belongs below the sibling whose space it subdivides, or the split needs redrawing along one axis.
+Judge them against the axis the decomposition declares. When a child divides some other dimension, say so and say where it would sit instead — below the sibling whose space it subdivides — however plausible the claim itself is. A split cannot be redrawn in place, so the reachable moves are `add_hypothesis` for a missing sibling and `decompose` one level lower for a second dimension.
 
 ## Check 4: Declared relation
 
@@ -49,15 +49,16 @@ The decomposition states how the children relate to the parent: `one-of` (rivals
 
 ## Check 5: Testability
 
-Each child must be falsifiable in practice:
+Each child should be falsifiable in practice:
 
 - Name a concrete observation that would CORROBORATE it (survive a refutation attempt).
 - Name a concrete observation that would REFUTE it.
-- If either cannot be named, the hypothesis is not yet testable and must be sharpened.
+- Where neither can be named, say so and suggest the sharper claim that could be tested. An untestable child is a finding to report, not a gate to fail.
 
 ## Output
 
-Emit one or more of:
+These category names are this report's own vocabulary — advice for a reader, not
+tokens the tools emit or consume. Emit one or more of:
 
 - **`overlap-advisory`** — describe the overlap and whether it looks accidental or domain-genuine.
 - **`coverage-gap-advisory`** — name the missing scenario.
@@ -65,12 +66,20 @@ Emit one or more of:
 - **`axis-mismatch-advisory`** — name the child that divides a dimension other than the declared axis, and where it belongs instead.
 - **`relation-mismatch-advisory`** — name the declared relation, why the children do not fit it, and which relation they support.
 - **`testability-advisory`** — name hypotheses for which neither corroborating nor refuting observations could be specified.
-- **`no-issues-detected`** — emit alone when every check passes.
+- **`nothing-flagged`** — emit alone when no check produced a finding, and name
+  the checks you ran. Say plainly that exclusivity and exhaustiveness cannot be
+  established from the tree, so this states that nothing was found, not that the
+  decomposition is sound.
 
 Cite the specific hypothesis text when flagging an issue. Do not propose evidence or rank hypotheses — your job is structural advice, not investigation.
 
 ## Pointers
 
-See ../references/mece-partition.md for the underlying set-partition property.
-See ../references/mece-limits.md for the cases where strict partition is the wrong target.
-See ../references/decomposition-templates.md for domain templates.
+Methodology references ship with this agent, under `references/`. Read them from
+`${CLAUDE_PLUGIN_ROOT}/references/` when tot-mcp is installed as a plugin, or
+from the repository's `references/` in a cloned checkout.
+
+- `mece-partition.md` — the underlying set-partition property.
+- `mece-limits.md` — where strict partition is the wrong target, and what the
+  contract is instead. It governs where it and the templates disagree.
+- `decomposition-templates.md` — domain templates.

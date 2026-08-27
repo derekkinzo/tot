@@ -15,6 +15,21 @@ import type {
 import { STAGNATION_THRESHOLD_DEFAULT, MAX_DEPTH_DEFAULT, MAX_HYPOTHESES_DEFAULT } from './defaults.js';
 import { nodeLabel, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
 
+/**
+ * Wordings that read as a residual branch. Word-bounded so "another" is not read
+ * as "other". A match says how a label reads, never that the sibling set covers
+ * the space beneath its parent — that is not decidable from the labels.
+ */
+const CATCH_ALL_WORDING = [
+  /\bothers?\b/, /\bremaining\b/, /\bmiscellaneous\b/, /\belse\b/, /\bunknown\b/,
+  /\bresiduals?\b/, /\bcatch-?all\b/, /\bunaccounted\b/, /\bnot listed\b/,
+];
+
+/** The parts of a label joined by "and", as a combined hypothesis states them. */
+function conjunctsOf(label: string): string[] {
+  return label.split(/\s+and\s+/).map((part) => part.trim()).filter((part) => part !== '');
+}
+
 export class TreeManager extends EventEmitter {
   private sessions = new Map<string, Session>();
   private hypotheses = new Map<string, Hypothesis>();
@@ -591,20 +606,24 @@ export class TreeManager extends EventEmitter {
     const labels = children.map((c) => nodeLabel(c).toLowerCase());
 
     const substringOverlaps: [string, string][] = [];
+    const combined = new Set<string>();
     for (let i = 0; i < labels.length; i++) {
       for (let j = i + 1; j < labels.length; j++) {
-        if (labels[i].includes(labels[j]) || labels[j].includes(labels[i])) {
-          substringOverlaps.push([children[i].id, children[j].id]);
-        }
+        if (!labels[i].includes(labels[j]) && !labels[j].includes(labels[i])) continue;
+        const [longer, shorter] = labels[i].length >= labels[j].length
+          ? [labels[i], labels[j]]
+          : [labels[j], labels[i]];
+        // A combined "A and B" child contains each conjunct by construction, and
+        // is a first-class child where the co-occurrence is real (Mackie INUS).
+        // Reporting it as redundancy would flag the construct the tools advise.
+        if (conjunctsOf(longer).includes(shorter)) combined.add(longer);
+        else substringOverlaps.push([children[i].id, children[j].id]);
       }
     }
 
     const duplicateLabels = labels.filter((l, i) => labels.indexOf(l) !== i);
 
-    const catchAllPatterns = ['other', 'remaining', 'miscellaneous', 'everything else', 'unknown'];
-    const hasCatchAll = labels.some((l) =>
-      catchAllPatterns.some((p) => l.includes(p)),
-    );
+    const catchAllLabels = labels.filter((l) => CATCH_ALL_WORDING.some((p) => p.test(l)));
 
     // Whether siblings sit at one level of abstraction is deliberately NOT
     // reported here. That is a property of what the labels denote, not of their
@@ -617,7 +636,8 @@ export class TreeManager extends EventEmitter {
       childCount: children.length,
       substringOverlaps,
       duplicateLabels,
-      hasCatchAll,
+      combinedLabels: [...combined],
+      catchAllLabels,
     };
   }
 

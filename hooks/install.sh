@@ -35,17 +35,6 @@ if [ "$NODE_MAJOR" -lt 20 ] || { [ "$NODE_MAJOR" -eq 20 ] && [ "$NODE_MINOR" -lt
   exit 0
 fi
 
-if command -v sha256sum >/dev/null 2>&1; then
-  hash_file() { sha256sum "$1" | awk '{print $1}'; }
-  hash_stream() { sha256sum | awk '{print $1}'; }
-elif command -v shasum >/dev/null 2>&1; then
-  hash_file() { shasum -a 256 "$1" | awk '{print $1}'; }
-  hash_stream() { shasum -a 256 | awk '{print $1}'; }
-else
-  echo "[tot-mcp] Neither sha256sum nor shasum available; skipping build." >&2
-  exit 0
-fi
-
 mkdir -p "$PLUGIN_DATA"
 
 LOCK="$PLUGIN_DATA/.install.lock"
@@ -63,17 +52,14 @@ BUILT_CLI="$BUILD_DIR/packages/server/dist/cli.js"
 BUILT_INDEX="$BUILD_DIR/packages/server/static/index.html"
 PERSISTED_SIG="$PLUGIN_DATA/source-signature"
 
-source_signature() {
-  local lock_hash root_pkg_hash server_pkg_hash webui_pkg_hash
-  lock_hash=$(hash_file "$PLUGIN_ROOT/package-lock.json")
-  root_pkg_hash=$(hash_file "$PLUGIN_ROOT/package.json")
-  server_pkg_hash=$(hash_file "$PLUGIN_ROOT/packages/server/package.json")
-  webui_pkg_hash=$(hash_file "$PLUGIN_ROOT/packages/web-ui/package.json")
-  printf '%s\n%s\n%s\n%s\n' "$lock_hash" "$root_pkg_hash" "$server_pkg_hash" "$webui_pkg_hash" \
-    | hash_stream
-}
-
-SOURCE_SIG=$(source_signature)
+# Signing the build over its inputs is what makes "rebuild only when something
+# changed" true; without a usable signature there is no way to tell a current
+# build from a stale one, so leave the previous build in place rather than
+# serving it against sources it may not match.
+if ! SOURCE_SIG=$(bash "$PLUGIN_ROOT/hooks/source-signature.sh" "$PLUGIN_ROOT" 2>/dev/null); then
+  echo "[tot-mcp] Could not sign the plugin sources; skipping build." >&2
+  exit 0
+fi
 
 if [ -f "$BUILT_CLI" ] && [ -f "$BUILT_INDEX" ] && [ -f "$PERSISTED_SIG" ] \
    && [ "$(cat "$PERSISTED_SIG")" = "$SOURCE_SIG" ]; then
@@ -115,7 +101,9 @@ stage_entries() {
   find "$STAGE" -name static -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
-if ! stage_entries; then
+# Run in a subshell so the function's `exit 1` fails this `if` instead of
+# leaving the script — otherwise a missing entry orphans the staging tree.
+if ! ( stage_entries ); then
   rm -rf "$STAGE"
   exit 1
 fi

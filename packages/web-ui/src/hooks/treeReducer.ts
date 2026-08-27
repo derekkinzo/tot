@@ -10,6 +10,12 @@ export interface TreeState {
   connected: boolean;
   recentlyChanged: Set<string>;
   lastAddedId: string | null;
+  /** The node the agent touched last — added, updated, or given evidence.
+   *  Follow mode pins the view to it. Ordering matters and category does not: an
+   *  act on an earlier node is more recent than the add that preceded it. Unlike
+   *  the highlight signals it is not cleared when the highlight expires, so
+   *  enabling follow during a quiet moment still lands on the worked-on node. */
+  lastActivityId: string | null;
   /** A session the agent started while another was on screen. Held so the
    *  dashboard can say the work has moved on, rather than showing a stale tree
    *  as though it were current. Null once the view moves. */
@@ -35,6 +41,7 @@ export function initialTreeState(): TreeState {
     connected: false,
     recentlyChanged: new Set<string>(),
     lastAddedId: null,
+    lastActivityId: null,
     newerSession: null,
   };
 }
@@ -55,7 +62,7 @@ export function reducer(state: TreeState, action: Action): TreeState {
       const newerSession = moved ? null : state.newerSession;
       return {
         ...state, session: action.session, hypotheses: map, connected: state.connected,
-        recentlyChanged: new Set(), lastAddedId: null, newerSession,
+        recentlyChanged: new Set(), lastAddedId: null, lastActivityId: null, newerSession,
       };
     }
     case 'session-created':
@@ -76,7 +83,7 @@ export function reducer(state: TreeState, action: Action): TreeState {
       if (state.session && action.hypothesis.sessionId !== state.session.id) return state;
       const next = new Map(state.hypotheses);
       next.set(action.hypothesis.id, action.hypothesis);
-      return { ...state, hypotheses: next, lastAddedId: action.hypothesis.id };
+      return { ...state, hypotheses: next, lastAddedId: action.hypothesis.id, lastActivityId: action.hypothesis.id };
     }
     case 'hypothesis-updated': {
       if (state.session && action.hypothesis.sessionId !== state.session.id) return state;
@@ -88,7 +95,7 @@ export function reducer(state: TreeState, action: Action): TreeState {
       const recent = new Set(state.recentlyChanged);
       recent.delete(action.hypothesis.id);
       recent.add(action.hypothesis.id);
-      return { ...state, hypotheses: next, recentlyChanged: recent };
+      return { ...state, hypotheses: next, recentlyChanged: recent, lastActivityId: action.hypothesis.id };
     }
     case 'evidence-added': {
       const h = state.hypotheses.get(action.hypothesisId);
@@ -96,7 +103,7 @@ export function reducer(state: TreeState, action: Action): TreeState {
       const updated = { ...h, evidence: [...h.evidence, action.evidence] };
       const next = new Map(state.hypotheses);
       next.set(h.id, updated);
-      return { ...state, hypotheses: next };
+      return { ...state, hypotheses: next, lastActivityId: h.id };
     }
     case 'session-completed': {
       // A completion for the announced session retires the announcement: it

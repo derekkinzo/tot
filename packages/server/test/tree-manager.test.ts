@@ -945,7 +945,7 @@ describe('TreeManager', () => {
       expect(check.childCount).toBe(3);
       expect(check.substringOverlaps).toHaveLength(0);
       expect(check.duplicateLabels).toHaveLength(0);
-      expect(check.hasCatchAll).toBe(false);
+      expect(check.catchAllLabels).toHaveLength(0);
     });
 
     it('detects substring overlap', () => {
@@ -959,7 +959,53 @@ describe('TreeManager', () => {
       const { root } = tm.createSession('Problem');
       tm.decompose(root.id, [{ title: 'Known issue' }, { title: 'Other' }], { axis: 'by cause' });
       const check = tm.validateDecomposition(root.id);
-      expect(check.hasCatchAll).toBe(true);
+      expect(check.catchAllLabels).toEqual(['other']);
+    });
+
+    it('separates a combined child from accidental redundancy', () => {
+      // The docs make a combined "A and B" child first-class for genuine
+      // co-occurrence (Mackie INUS). Its label necessarily contains a sibling's,
+      // so a plain containment test reports the recommended construct as a
+      // defect — twice, once per conjunct.
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, [
+        { title: 'Writer starvation' },
+        { title: 'Index bloat' },
+        { title: 'Writer starvation and index bloat' },
+      ], { axis: 'by cause' });
+      const check = tm.validateDecomposition(root.id);
+      expect(check.substringOverlaps).toHaveLength(0);
+      expect(check.combinedLabels).toHaveLength(1);
+    });
+
+    it('still reports containment that is not a conjunction of siblings', () => {
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, [
+        { title: 'Network error' },
+        { title: 'Network' },
+        { title: 'Disk and something unrelated' },
+      ], { axis: 'by cause' });
+      const check = tm.validateDecomposition(root.id);
+      expect(check.substringOverlaps).toHaveLength(1);
+      expect(check.combinedLabels).toHaveLength(0);
+    });
+
+    it('names the labels that read as a residual rather than asserting one exists', () => {
+      // The test is lexical, so what it can report is which labels read that
+      // way — not that the set covers its space.
+      const { root } = tm.createSession('Problem');
+      tm.decompose(root.id, [{ title: 'Known issue' }, { title: 'Other causes' }], { axis: 'by cause' });
+      expect(tm.validateDecomposition(root.id).catchAllLabels).toEqual(['other causes']);
+    });
+
+    it('recognises a residual branch however it is worded', () => {
+      // 'residual' is the term the project's own reference material uses; a
+      // lexicon that misses it reports a coverage gap against a set that has none.
+      for (const label of ['Residual causes', 'Something else entirely', 'Cause not listed above', 'Unknown mechanism']) {
+        const { root } = tm.createSession(`Problem for ${label}`);
+        tm.decompose(root.id, [{ title: 'Known issue' }, { title: label }], { axis: 'by cause' });
+        expect(tm.validateDecomposition(root.id).catchAllLabels, label).toHaveLength(1);
+      }
     });
 
     it('detects duplicate labels', () => {

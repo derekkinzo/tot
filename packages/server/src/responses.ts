@@ -53,6 +53,7 @@ import { nodeLabel, supportingWeight, refutingWeight, gateLabel, gateMeaning, ga
 import { pickActiveSession } from './persistence.js';
 import type { Decomposition, DecompositionGate, Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
+import type { SessionSummary } from './project-state.js';
 
 export function formatCreateTree(sessionId: string, rootId: string, problem: string): string {
   return JSON.stringify({ sessionId, rootId }) + '\n\n' +
@@ -116,14 +117,21 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   result += `── Checks ──\n`;
   if (check.childCount < 2) result += `⚠ Only ${check.childCount} child — consider adding more\n`;
   if (check.childCount > 7) result += `Note: ${check.childCount} children — consider whether some could be grouped at a higher abstraction level\n`;
-  if (check.substringOverlaps.length > 0) result += `⚠ Overlap detected between ${check.substringOverlaps.length} pair(s)\n`;
-  if (!check.hasCatchAll) result += `Note: No catch-all — is anything missing?\n`;
+  if (check.substringOverlaps.length > 0) {
+    result += `⚠ ${check.substringOverlaps.length} label pair(s) where one contains the other — accidental redundancy, or real co-occurrence?\n`;
+  }
+  if (check.combinedLabels.length > 0) {
+    result += `Note: "${check.combinedLabels.join('", "')}" reads as a combined child of two siblings — first-class where the co-occurrence is real.\n`;
+  }
+  if (check.catchAllLabels.length === 0) {
+    result += `Note: no label reads as a residual — is anything missing?\n`;
+  }
 
   // Names what was actually examined. An unqualified "no structural issues"
   // would assert a clean bill on sets this check cannot speak to — level of
   // abstraction among them — which is the same overclaim in the other direction.
   if (check.substringOverlaps.length === 0 && check.childCount >= 2) {
-    result += `No substring overlaps or duplicate labels detected.\n`;
+    result += `No label contains another, and no label repeats.\n`;
   }
 
   // Premature decomposition guard: parent had no evidence
@@ -444,7 +452,7 @@ export function formatValidateDecomposition(
   const advisories: string[] = [];
   if (check.substringOverlaps.length > 0) advisories.push('overlap-advisory');
   if (check.duplicateLabels.length > 0) advisories.push('overlap-advisory');
-  if (!check.hasCatchAll) advisories.push('coverage-gap-advisory');
+  if (check.catchAllLabels.length === 0) advisories.push('coverage-gap-advisory');
   // Names what was examined rather than declaring the decomposition sound. This
   // check speaks to overlap and coverage; whether siblings sit at one level of
   // abstraction is not something it can establish, so an unqualified all-clear
@@ -471,16 +479,24 @@ export function formatValidateDecomposition(
   if (check.substringOverlaps.length > 0) {
     result += `overlap-advisory: ${check.substringOverlaps.length} substring pair(s) — accidental redundancy, or domain co-occurrence (INUS)?\n`;
   } else {
-    result += `No substring overlaps detected.\n`;
+    result += `No sibling label contains another.\n`;
+  }
+
+  if (check.combinedLabels.length > 0) {
+    result += `Combined child: "${check.combinedLabels.join('", "')}" states two siblings jointly. `
+      + `First-class where the co-occurrence is real (Mackie INUS); it contains its conjuncts by construction, so that containment is not reported as redundancy.\n`;
   }
 
   if (check.duplicateLabels.length > 0) {
     result += `overlap-advisory: duplicate labels: ${check.duplicateLabels.join(', ')}\n`;
   }
 
-  result += check.hasCatchAll
-    ? `Has explicit catch-all branch.\n`
-    : `coverage-gap-advisory: no explicit catch-all — closure of the cause space is being claimed by enumeration.\n`;
+  // A lexical read of the labels, reported as one: whether a branch actually
+  // holds the residual is a claim about what it denotes, which the wording
+  // cannot settle in either direction.
+  result += check.catchAllLabels.length > 0
+    ? `"${check.catchAllLabels.join('", "')}" reads as a residual branch — is that what it holds?\n`
+    : `coverage-gap-advisory: no label reads as a residual, so this set states closure by enumeration.\n`;
 
 
   result += `\n── Review Questions ──\n`;
@@ -508,15 +524,67 @@ export function formatQualifyEvidence(hypothesis: Hypothesis, evidenceId: string
     formatTreeSummary(tm, hypothesis.sessionId);
 }
 
-export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null): string {
+/**
+ * What a read reports when the project holds no tree at all.
+ *
+ * Shared by every read surface: an absent tree is one condition, so a caller
+ * (or a skill quoting the text) has one string to recognize. It does not say
+ * "open", because neither read requires an open session.
+ */
+export const NO_SESSION_MESSAGE = 'No session yet for this project. Call create_tree to start.';
+
+/** How many other sessions the status read-out names before deferring to the dashboard. */
+const SESSIONS_LISTED = 5;
+
+/**
+ * The "other sessions" block: full ids, newest first, so a caller can pass one
+ * to get_tree.
+ *
+ * Ids are given in full rather than the 8-char display form because that is
+ * what get_tree takes. The list is bounded and says how many it is naming out
+ * of how many exist, so a long project history neither floods the read-out nor
+ * hides sessions behind a silent cut.
+ */
+function formatOtherSessions(all: SessionSummary[], currentId: string): string {
+  const others = all.filter((s) => s.id !== currentId);
+  if (others.length === 0) return '';
+  const shown = others.slice(0, SESSIONS_LISTED);
+  const scope = shown.length === others.length
+    ? `${others.length} other session${others.length === 1 ? '' : 's'}`
+    : `${shown.length} of ${others.length} other sessions, newest first`;
+  return `\nAlso in this project (${scope}); pass a full id to get_tree(sessionId):\n`
+    + shown.map((s) => `  ${s.id} (${s.status}) "${truncate(s.problem, 50)}"`).join('\n') + '\n';
+}
+
+/** What the status read-out needs beyond the engine itself. */
+export interface StatusContext {
+  /** Where the dashboard is serving, when it started. */
+  dashboardUrl?: string | null;
+  /** Every session of the project, so the read-out can name the others. */
+  listSessions?: () => SessionSummary[];
+  /** Session to summarize; defaults to the most recent open, else most recent. */
+  sessionId?: string;
+}
+
+export function formatStatus(tm: TreeManager, context: StatusContext = {}): string {
+  const { dashboardUrl = null, listSessions, sessionId } = context;
   // Summarize the same session the dashboard renders: the active one when an
   // investigation is in progress, otherwise the most recent. This keeps the
   // status read-out — and the dashboard URL it carries — available for a tree
   // whose branches have all reached a terminal state, not just a live one.
   const allSessions = tm.getAllSessions();
-  const session = pickActiveSession(allSessions);
+  const session = sessionId !== undefined
+    ? allSessions.find((s) => s.id === sessionId)
+    : pickActiveSession(allSessions);
   if (!session) {
-    return `No open session. Call create_tree to start.`;
+    // A named session that is absent is a different condition from a project
+    // with no tree, and saying the latter would deny trees this project has.
+    if (sessionId !== undefined) return `No such session: ${sessionId}`;
+    // The dashboard is already serving, and shows an empty state until a tree
+    // exists, so the URL is reported here too — it is the only place the
+    // ephemeral port is published, and withholding it would leave a caller
+    // told to open the dashboard with no address to open.
+    return dashboardUrl ? `${NO_SESSION_MESSAGE}\nVisualization: ${dashboardUrl}` : NO_SESSION_MESSAGE;
   }
 
   const { counts, stagnant, unexplored } = tm.getStatus(session.id);
@@ -542,12 +610,16 @@ export function formatStatus(tm: TreeManager, dashboardUrl: string | null = null
     }
   }
 
-  const openSessions = allSessions.filter((s) => s.status === 'open');
-  if (openSessions.length > 1) {
-    const others = openSessions.filter((s) => s.id !== session.id);
-    result += `\nNote: ${openSessions.length} open sessions. View another by passing its full id to get_tree(sessionId): ` +
-      others.map((s) => s.id).join(', ');
-  }
+  // Sessions this project holds beyond the one summarized above. Drawn from the
+  // catalog rather than from memory, because only one session is loaded at
+  // start-up: without it, a finished investigation has no id a caller could
+  // discover, and nothing to pass to get_tree.
+  result += formatOtherSessions(
+    listSessions?.() ?? allSessions.map((s) => ({
+      id: s.id, problem: s.problem, status: s.status, createdAt: s.createdAt, nodeCount: 0,
+    })),
+    session.id,
+  );
 
   if (dashboardUrl) {
     result += `\nVisualization: ${dashboardUrl}`;

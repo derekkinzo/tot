@@ -135,6 +135,25 @@ describe('status palette', () => {
     }
   });
 
+  it('marks a status the same way wherever it is shown', () => {
+    // The legend key, the minimap dot and the status-bar pill all describe the
+    // node the canvas draws. Drawing a status in one colour on the canvas and
+    // another in the key that explains it makes the key wrong: a reader told the
+    // mark is red looks for red and finds none.
+    for (const status of Object.keys(STATUS_NODE_STYLES) as HypothesisStatus[]) {
+      expect(STATUS_NODE_STYLES[status].border, status).toBe(STATUS_COLORS[status]);
+    }
+  });
+
+  it('keeps every status mark legible where it is drawn at full opacity', () => {
+    // WCAG 2.2 SC 1.4.11: a 10px legend swatch and a status pill are
+    // user-interface components, and unlike the canvas node they are not dimmed,
+    // so the mark itself has to clear 3:1 against the surface under it.
+    for (const [status, color] of Object.entries(STATUS_COLORS)) {
+      expect(contrast(color, declared('.overlay-widget', 'background')), `${status} ${color}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it('gives each status and evidence type a distinct colour', () => {
     const statuses = Object.values(STATUS_COLORS);
     expect(new Set(statuses).size).toBe(statuses.length);

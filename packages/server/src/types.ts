@@ -37,9 +37,16 @@ export const STATUS_ICONS: Record<HypothesisStatus, string> = {
 
 export interface StructuralCheck {
   childCount: number;
+  /** Sibling id pairs where one label contains the other and the containment is
+   *  not a declared conjunction of siblings. */
   substringOverlaps: [string, string][];
   duplicateLabels: string[];
-  hasCatchAll: boolean;
+  /** Labels that read as a conjunction of two siblings — the combined-hypothesis
+   *  construct, which contains its conjuncts by construction. */
+  combinedLabels: string[];
+  /** Labels whose wording reads as a residual branch. Lexical: it says how the
+   *  labels read, never that the set covers the space beneath its parent. */
+  catchAllLabels: string[];
 }
 
 export interface TreeState {

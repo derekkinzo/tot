@@ -33,6 +33,15 @@ if (args[0] === '--help' || args[0] === '-h') {
 }
 
 /**
+ * Collapses whitespace and truncates, so agent-supplied text occupies exactly
+ * one line. A status line is read by eye and matched by line-oriented tools; an
+ * embedded newline would let a problem statement forge a second line.
+ */
+function oneLine(text: string, max: number): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+/**
  * Builds the lines printed by `tot-mcp status`: a pure read of central storage
  * for the current project (no running server is required or queried).
  */
@@ -70,7 +79,7 @@ export function statusLines(): string[] {
   });
   for (const s of sorted.slice(0, 5)) {
     const icon = s.status === 'open' ? '*' : s.status === 'resolved' ? '+' : '-';
-    lines.push(`  [${icon}] ${s.id.slice(0, 8)} "${s.problem.slice(0, 50)}" (${s.nodeCount} nodes)`);
+    lines.push(`  [${icon}] ${s.id.slice(0, 8)} "${oneLine(s.problem, 50)}" (${s.nodeCount} nodes)`);
   }
   if (sorted.length > 5) {
     lines.push(`  ... and ${sorted.length - 5} more`);

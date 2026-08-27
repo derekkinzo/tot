@@ -7,14 +7,17 @@ export interface FollowTargetInputs {
   sessionId: string | null;
   /** The session displayed on the prior derivation. */
   prevSessionId: string | null;
-  lastAddedId: string | null;
-  recentlyChanged: Set<string>;
+  /** The node the agent touched last, whatever the kind of activity. */
+  lastActivityId: string | null;
 }
 
 /**
  * Returns the next follow target given the prior one and the activity signals.
  *
- * - A just-added node wins; otherwise the most-recently-changed node.
+ * - The node the agent touched last wins, whether it was added, updated, or
+ *   given evidence. Recency decides, not the kind of activity: an agent that
+ *   decomposes and then gathers evidence on the first child has most recently
+ *   acted on a node added before the last one.
  * - With no fresh signal the prior target is retained, so enabling follow during
  *   a quiet moment still focuses the active hypothesis.
  * - When the displayed session changes, the prior target (a node from the old
@@ -22,9 +25,7 @@ export interface FollowTargetInputs {
  *   signal cannot pin selection to a node that no longer exists.
  */
 export function nextFollowTarget(prevTarget: string | null, inputs: FollowTargetInputs): string | null {
-  const { sessionId, prevSessionId, lastAddedId, recentlyChanged } = inputs;
+  const { sessionId, prevSessionId, lastActivityId } = inputs;
   const base = sessionId !== prevSessionId ? null : prevTarget;
-  if (lastAddedId) return lastAddedId;
-  if (recentlyChanged.size > 0) return [...recentlyChanged][recentlyChanged.size - 1];
-  return base;
+  return lastActivityId ?? base;
 }

@@ -18,13 +18,18 @@ to start.
    ```
    Visualization: http://localhost:<port>
    ```
-   - Present → that is the dashboard URL. Open it. The dashboard renders the
-     project's most recent tree and offers a Sessions selector for the rest,
-     so the URL is valid whether or not an investigation is still in progress.
-   - `No open session` → no tree exists for this project yet; tell the user to
-     run `/tot-reason` to start one, then stop.
-   - No `Visualization:` line → the in-process HTTP server did not start;
-     tell the user the dashboard is unavailable and offer `/tot-inspect`.
+   - Present → that `http://localhost:<port>` is the dashboard URL; use it
+     verbatim in the next step. It opens on the project's most recent open
+     tree, or its most recent tree when none is open, with a Sessions selector
+     for the rest — so the URL is valid whether or not an investigation is
+     still in progress, and shows an empty state when the project has no tree
+     yet.
+   - Absent → the in-process HTTP server did not start. Tell the user the
+     dashboard is unavailable and offer the `tot-inspect` skill for a text
+     read-out.
+   - `No session yet for this project` alongside the URL means the project has
+     no tree; the dashboard still opens. Mention that the `tot-reason` skill
+     starts one.
 
 2. **Open the browser** to that URL, substituting the port you read:
    ```bash
@@ -48,5 +53,5 @@ to start.
 - If the browser does not open (headless host, SSH session without
   forwarding, missing opener), the printed URL is the fallback. Forward the
   reported port with `ssh -L <port>:localhost:<port> <host>`.
-- For a textual summary of the tree without opening a browser, use `/tot-inspect`.
-- For a markdown report of a completed investigation, use `/tot-export`.
+- For a textual summary of the tree without opening a browser, use the `tot-inspect` skill.
+- For a markdown report of a completed investigation, use the `tot-export` skill.

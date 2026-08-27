@@ -10,6 +10,8 @@ Heuer's *Psychology of Intelligence Analysis* originally assumed MECE for ACH pr
 
 The Inconsistency Score replaces the partition assumption. Each hypothesis is evaluated independently, with the most likely hypothesis defined as the one with the *least evidence against it* — selection by disproof, not by accumulation of positive support.
 
+That comparison presupposes ACH's matrix: every observation is checked against every hypothesis, so a low inconsistency count means the evidence was weighed and did not tell against it. Outside that setting the count means something else. In a tree where evidence is attached per hypothesis, a branch nobody has tested also carries no evidence against it, and ranking on the raw count would put the untested branch on top. Read the two apart: untested, versus tested and still standing.
+
 Mackie's INUS account (1965, *The Cement of the Universe* 1974) reaches the same conclusion from a different direction. A cause is an Insufficient but Necessary part of an Unnecessary but Sufficient condition: real causal structure is a disjunction of conjunctions, where multiple alternative clusters can coexist and each cluster contains several jointly necessary contributors. "Find the cause" is therefore "verify a co-instantiated cluster", not "isolate a single survivor."
 
 In medicine, differential diagnosis frameworks accept overlap directly. Two diagnoses can attach to one patient when symptoms fit either; combined diagnoses (e.g. "primary hyperparathyroidism without cancer", "cancer without primary hyperparathyroidism", and the combined category) are first-class candidates rather than violations to eliminate. The "surgical sieve" is described as presentational, not ontological — its categories overlap by design.
