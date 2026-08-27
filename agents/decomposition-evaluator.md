@@ -81,5 +81,5 @@ from the repository's `references/` in a cloned checkout.
 
 - `mece-partition.md` — the underlying set-partition property.
 - `mece-limits.md` — where strict partition is the wrong target, and what the
-  contract is instead. It governs where it and the templates disagree.
+  contract is instead. Where it and the templates disagree, it governs.
 - `decomposition-templates.md` — domain templates.
