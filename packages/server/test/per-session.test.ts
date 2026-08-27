@@ -387,7 +387,8 @@ describe('reading a tree that is no longer the live one', () => {
     const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
     const tree = getText(await client.callTool({ name: 'get_tree', arguments: { format: 'compact' } }));
     const problemOf = (t: string) => (t.match(/the (finished|live) investigation/) || [])[0];
-    expect(problemOf(status), `status said: ${status.slice(0, 120)}`).toBeTruthy();
+    // The restart loads the most recent open session, so both must name that one.
+    expect(problemOf(status), `status said: ${status.slice(0, 120)}`).toBe('the live investigation');
     expect(problemOf(tree), `tree said: ${tree.slice(0, 120)}`).toBe(problemOf(status));
   });
 

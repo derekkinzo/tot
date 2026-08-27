@@ -89,12 +89,9 @@ export function reducer(state: TreeState, action: Action): TreeState {
       if (state.session && action.hypothesis.sessionId !== state.session.id) return state;
       const next = new Map(state.hypotheses);
       next.set(action.hypothesis.id, action.hypothesis);
-      // Re-append on re-update so the most-recently-changed id is always last
-      // (a plain Set.add keeps the original insertion position). Follow mode
-      // reads the last entry to focus the node that just changed.
-      const recent = new Set(state.recentlyChanged);
-      recent.delete(action.hypothesis.id);
-      recent.add(action.hypothesis.id);
+      // Membership is all this carries: the canvas pulses whatever is in the set,
+      // and which node was touched last is `lastActivityId`.
+      const recent = new Set(state.recentlyChanged).add(action.hypothesis.id);
       return { ...state, hypotheses: next, recentlyChanged: recent, lastActivityId: action.hypothesis.id };
     }
     case 'evidence-added': {

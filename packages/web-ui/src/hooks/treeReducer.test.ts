@@ -52,15 +52,16 @@ describe('treeReducer', () => {
     expect(next.lastAddedId).toBe('x');
   });
 
-  it('hypothesis-updated re-appends the id so the most-recently-changed is LAST in recentlyChanged', () => {
-    // Contract (follow mode): the last entry must be the node that just changed,
-    // even when it was changed earlier too. Update A, then B, then A again → A last.
+  it('tracks the node that just changed even when it changed earlier too', () => {
+    // Contract (follow mode): update A, then B, then A again → the node touched
+    // last is A. The highlight set holds every node that changed in the window;
+    // which one was last is a separate signal, so it does not depend on set order.
     let s = initialTreeState();
     s = reducer(s, { type: 'hypothesis-updated', hypothesis: hyp('A') });
     s = reducer(s, { type: 'hypothesis-updated', hypothesis: hyp('B') });
     s = reducer(s, { type: 'hypothesis-updated', hypothesis: hyp('A') });
-    expect([...s.recentlyChanged]).toEqual(['B', 'A']);
-    expect([...s.recentlyChanged][s.recentlyChanged.size - 1]).toBe('A');
+    expect(s.lastActivityId).toBe('A');
+    expect([...s.recentlyChanged].sort()).toEqual(['A', 'B']);
   });
 
   it('hypothesis-updated overwrites the stored node', () => {
