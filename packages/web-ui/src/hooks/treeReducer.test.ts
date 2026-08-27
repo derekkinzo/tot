@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reducer, initialTreeState, type TreeState } from './treeReducer';
+import { reducer, initialTreeState, type Action, type TreeState } from './treeReducer';
 import type { Hypothesis, Session, Evidence } from '../types';
 
 function hyp(id: string, over: Partial<Hypothesis> = {}): Hypothesis {
@@ -52,15 +52,16 @@ describe('treeReducer', () => {
     expect(next.lastAddedId).toBe('x');
   });
 
-  it('hypothesis-updated re-appends the id so the most-recently-changed is LAST in recentlyChanged', () => {
-    // Contract (follow mode): the last entry must be the node that just changed,
-    // even when it was changed earlier too. Update A, then B, then A again → A last.
+  it('tracks the node that just changed even when it changed earlier too', () => {
+    // Contract (follow mode): update A, then B, then A again → the node touched
+    // last is A. The highlight set holds every node that changed in the window;
+    // which one was last is a separate signal, so it does not depend on set order.
     let s = initialTreeState();
     s = reducer(s, { type: 'hypothesis-updated', hypothesis: hyp('A') });
     s = reducer(s, { type: 'hypothesis-updated', hypothesis: hyp('B') });
     s = reducer(s, { type: 'hypothesis-updated', hypothesis: hyp('A') });
-    expect([...s.recentlyChanged]).toEqual(['B', 'A']);
-    expect([...s.recentlyChanged][s.recentlyChanged.size - 1]).toBe('A');
+    expect(s.lastActivityId).toBe('A');
+    expect([...s.recentlyChanged].sort()).toEqual(['A', 'B']);
   });
 
   it('hypothesis-updated overwrites the stored node', () => {
@@ -123,6 +124,70 @@ describe('treeReducer', () => {
   // project; the dashboard displays one session at a time. Hypothesis events for
   // a session other than the displayed one must be ignored, or they inject
   // orphan nodes into the viewed tree.
+  describe('which node the agent touched last', () => {
+    // Follow mode pins the view to the node being worked on. Within one burst an
+    // agent decomposes and then gathers evidence on the first child, so the most
+    // recent activity is an act on an EARLIER node than the last one added;
+    // preferring adds categorically leaves the view on the wrong sibling.
+    const build = (actions: Action[]): TreeState =>
+      actions.reduce(reducer, { ...initialTreeState(), session: session() });
+
+    it('is the node just updated, not the last one added before it', () => {
+      const state = build([
+        { type: 'hypothesis-added', hypothesis: hyp('a') },
+        { type: 'hypothesis-added', hypothesis: hyp('b') },
+        { type: 'hypothesis-updated', hypothesis: hyp('a', { status: 'exploring' }) },
+      ]);
+      expect(state.lastActivityId).toBe('a');
+    });
+
+    it('is the node evidence just landed on', () => {
+      // An evidence record on a node whose status does not change emits no
+      // hypothesis-updated, so this is the only signal that the node was acted on.
+      const state = build([
+        { type: 'hypothesis-added', hypothesis: hyp('a') },
+        { type: 'hypothesis-added', hypothesis: hyp('b') },
+        { type: 'evidence-added', hypothesisId: 'a', evidence: ev('e1') },
+      ]);
+      expect(state.lastActivityId).toBe('a');
+    });
+
+    it('is the newly added node when the add is the most recent act', () => {
+      const state = build([
+        { type: 'hypothesis-updated', hypothesis: hyp('a', { status: 'exploring' }) },
+        { type: 'hypothesis-added', hypothesis: hyp('b') },
+      ]);
+      expect(state.lastActivityId).toBe('b');
+    });
+
+    it('survives the highlight expiring, so enabling follow later still finds it', () => {
+      const state = build([
+        { type: 'hypothesis-added', hypothesis: hyp('a') },
+        { type: 'clear-recent' },
+      ]);
+      expect(state.lastAddedId).toBeNull();
+      expect(state.recentlyChanged.size).toBe(0);
+      expect(state.lastActivityId).toBe('a');
+    });
+
+    it('is dropped by a snapshot, which replaces the tree it referred to', () => {
+      const state = build([
+        { type: 'hypothesis-added', hypothesis: hyp('a') },
+        { type: 'snapshot', session: session({ id: 's2' }), hypotheses: [] },
+      ]);
+      expect(state.lastActivityId).toBeNull();
+    });
+
+    it('ignores activity in a session that is not on display', () => {
+      const state = build([
+        { type: 'hypothesis-added', hypothesis: hyp('a') },
+        { type: 'hypothesis-added', hypothesis: hyp('other', { sessionId: 's-other' }) },
+        { type: 'evidence-added', hypothesisId: 'nowhere', evidence: ev('e1') },
+      ]);
+      expect(state.lastActivityId).toBe('a');
+    });
+  });
+
   describe('cross-session event isolation', () => {
     it('hypothesis-added for a different session is ignored', () => {
       const s: TreeState = { ...initialTreeState(), session: session({ id: 's1' }) };

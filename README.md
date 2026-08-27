@@ -109,7 +109,7 @@ tree. Each MCP server instance picks its own free port at startup.
 | `eliminate_hypothesis` | Mark a hypothesis as a dead end (with reason) |
 | `corroborate_hypothesis` | Mark a surviving hypothesis as corroborated (provisionally retained) |
 | `set_out_of_scope` | Mark a branch terminal without investigating it (no refutation claimed) |
-| `get_tree` | View the current tree structure |
+| `get_tree` | View a tree — the session `get_status` summarizes, or any other session of the project by id |
 | `get_status` | Progress summary + stagnation detection |
 | `validate_decomposition` | Check structural properties of a decomposition |
 | `qualify_evidence` | Mark a record decisive, non-discriminating, or dependent on another |
@@ -128,16 +128,18 @@ MCP tools. Point Claude Code at the cloned directory to load them.
 | `/tot-export` | Generate a Markdown investigation report from a completed tree |
 | `/tot-dashboard` | Open the live dashboard in the browser (URL reported by `get_status`) |
 
+Installed as a plugin, skills are namespaced — `/tot-mcp:tot-reason`. Loaded from
+a cloned directory, they keep their bare names.
+
 | Agent | Purpose |
 |-------|---------|
 | `hypothesis-challenger` | Stress-tests a hypothesis from multiple angles, surfacing assumptions and missing alternatives |
 | `evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
 | `decomposition-evaluator` | Advises on decomposition structure: sibling overlap, coverage, level of abstraction, testability. Emits advisory categories, not pass/fail. |
 
-Hooks under `hooks/hooks.json` build the bundled MCP server on first
-session and after plugin updates (`SessionStart`), surface a hint when
-Bash output looks like a failure pattern (`PostToolUse`), and announce
-active reasoning sessions on resume.
+Hooks under `hooks/hooks.json` run at `SessionStart` (on start-up and resume):
+one builds the bundled MCP server when its sources differ from the last build,
+the other reports whether this project has an open reasoning session.
 
 ## How It Works
 
@@ -157,7 +159,7 @@ port and reports the URL in the `get_status` tool response
 (`Visualization: http://localhost:<port>`). The browser UI shows:
 
 - **Live tree updates** via Server-Sent Events (no polling)
-- **Color-coded status** — pending (blue), exploring (yellow), eliminated (dimmed), corroborated (green)
+- **Status marks** — each status carries a glyph and a label as well as a colour: pending, exploring, corroborated, out of scope, and eliminated (grey and dimmed, its lineage retired)
 - **Path highlighting** — click a node to see the path from root
 - **Evidence detail panel** — click any node to see all attached evidence,
   refutation first, with each record marked verbatim or paraphrase

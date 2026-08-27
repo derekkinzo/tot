@@ -4,6 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
+import { NO_SESSION_MESSAGE } from '../src/responses.js';
 import { mkdtempSync, mkdirSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -613,7 +614,9 @@ describe('MCP Integration', () => {
         name: 'get_tree',
         arguments: { format: 'compact' },
       });
-      expect(getText(result)).toContain('No open session');
+      // Names the absence of any tree, not of an open one: a resolved session is
+      // readable, so "no open session" would misdescribe what is missing.
+      expect(getText(result)).toBe(NO_SESSION_MESSAGE);
     });
 
     it('rejects an unsupported format value at the wire boundary', async () => {
@@ -834,7 +837,7 @@ describe('MCP Integration', () => {
 
     it('no session returns informative message', async () => {
       const result = await client.callTool({ name: 'get_status', arguments: {} });
-      expect(getText(result)).toContain('No open session');
+      expect(getText(result)).toBe(NO_SESSION_MESSAGE);
     });
   });
 
@@ -886,7 +889,7 @@ describe('MCP Integration', () => {
         arguments: { parentId: rootId },
       });
       const text = getText(result);
-      expect(text).toContain('No substring overlaps');
+      expect(text).toMatch(/no sibling label contains another/i);
     });
 
     it('emits advisory categories rather than pass/fail', async () => {

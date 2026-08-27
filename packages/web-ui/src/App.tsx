@@ -10,7 +10,10 @@ import type { ArtifactRef } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
-  const { session, hypotheses, connected, newerSession, loadSession, recentlyChanged, lastAddedId, persistenceHealthy } = useTreeStream();
+  const {
+    session, hypotheses, connected, newerSession, loadSession,
+    recentlyChanged, lastAddedId, lastActivityId, persistenceHealthy,
+  } = useTreeStream();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // The captured evidence being read, if any. Held here rather than in the
   // panel because it is a layer above the canvas: while it is open the canvas
@@ -19,8 +22,7 @@ export default function App() {
 
   const { followMode, followTarget, toggleFollow } = useFollowMode({
     sessionId: session?.id ?? null,
-    lastAddedId,
-    recentlyChanged,
+    lastActivityId,
   });
 
   const selected = selectedId ? hypotheses.get(selectedId) ?? null : null;

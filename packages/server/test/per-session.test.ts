@@ -294,3 +294,259 @@ describe('per-session server', () => {
     expect(text).toContain('Old tree');
   });
 });
+
+describe('reading a tree that is no longer the live one', () => {
+  // /tot-export exists to export a COMPLETED tree and /tot-inspect to inspect any
+  // tree, and both are documented as calling get_tree. A read surface that can
+  // only reach the session already in memory cannot serve either: only one
+  // session is loaded at boot, so every finished investigation is unreachable.
+  let stateDir: string;
+  let projectDir: string;
+  const open: SessionServer[] = [];
+  const clients: Client[] = [];
+  const savedDataDir = process.env['TOT_DATA_DIR'];
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'tot-read-state-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'tot-read-proj-'));
+    process.env['TOT_DATA_DIR'] = stateDir;
+  });
+  afterEach(async () => {
+    for (const c of clients.splice(0)) { try { await c.close(); } catch { /* ignore */ } }
+    for (const s of open.splice(0)) { try { await s.close(); } catch { /* ignore */ } }
+    if (savedDataDir === undefined) delete process.env['TOT_DATA_DIR'];
+    else process.env['TOT_DATA_DIR'] = savedDataDir;
+    for (const d of [stateDir, projectDir]) rmSync(d, { recursive: true, force: true });
+  });
+
+  async function start(): Promise<{ s: SessionServer; client: Client }> {
+    const s = await createSessionServer({ projectDir });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+    return { s, client };
+  }
+
+  /** Builds a finished tree and a later, still-open one, then restarts. */
+  async function twoSessionsThenRestart(): Promise<{ client: Client; finishedId: string; openId: string }> {
+    const first = await start();
+    const done = parseResult(await first.client.callTool({
+      name: 'create_tree', arguments: { problem: 'the finished investigation', rootTitle: 'Finished' },
+    }));
+    const kids = parseResult(await first.client.callTool({
+      name: 'decompose',
+      arguments: { parentId: done.rootId, axis: 'by cause', children: ['Alpha', 'Beta'] },
+    })).childIds;
+    await first.client.callTool({ name: 'add_evidence', arguments: { hypothesisId: kids[0], type: 'refutes', content: 'ruled out' } });
+    await first.client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: kids[0], reason: 'ruled out' } });
+    await first.client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: kids[1], reason: 'set aside' } });
+
+    // A later session, which is the one a restart will load.
+    const later = parseResult(await first.client.callTool({
+      name: 'create_tree', arguments: { problem: 'the live investigation', rootTitle: 'Live' },
+    }));
+
+    await first.s.close();
+    open.length = 0;
+    const second = await start();
+    return { client: second.client, finishedId: done.sessionId, openId: later.sessionId };
+  }
+
+  it('reads a finished tree when its session is named', async () => {
+    const { client, finishedId } = await twoSessionsThenRestart();
+    const res: any = await client.callTool({ name: 'get_tree', arguments: { format: 'compact', sessionId: finishedId } });
+    expect(res.isError).toBeFalsy();
+    expect(getText(res)).toContain('the finished investigation');
+  });
+
+  it('reads a finished tree in full form, which is what an export needs', async () => {
+    const { client, finishedId } = await twoSessionsThenRestart();
+    const res: any = await client.callTool({ name: 'get_tree', arguments: { format: 'full', sessionId: finishedId } });
+    expect(res.isError).toBeFalsy();
+    const payload = JSON.parse(getText(res));
+    expect(payload.session.id).toBe(finishedId);
+    // Verdicts and reasons have to survive, or the export is not a record.
+    const nodes: any[] = Object.values(payload.hypotheses);
+    expect(nodes.map((n) => n.status).sort()).toEqual(['eliminated', 'exploring', 'out-of-scope']);
+    expect(nodes.some((n) => n.conclusion?.reason === 'ruled out')).toBe(true);
+  });
+
+  it('still refuses a session id that names nothing', async () => {
+    const { client } = await twoSessionsThenRestart();
+    const res: any = await client.callTool({
+      name: 'get_tree', arguments: { format: 'compact', sessionId: '11111111-1111-4111-8111-111111111111' },
+    });
+    expect(res.isError).toBe(true);
+    expect(getText(res)).toMatch(/No such session/);
+  });
+
+  it('agrees with get_status about which tree is current', async () => {
+    // The two read surfaces resolving the default session differently is how a
+    // caller ends up told there is no tree by one tool and shown one by the other.
+    const { client } = await twoSessionsThenRestart();
+    const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+    const tree = getText(await client.callTool({ name: 'get_tree', arguments: { format: 'compact' } }));
+    const problemOf = (t: string) => (t.match(/the (finished|live) investigation/) || [])[0];
+    // The restart loads the most recent open session, so both must name that one.
+    expect(problemOf(status), `status said: ${status.slice(0, 120)}`).toBe('the live investigation');
+    expect(problemOf(tree), `tree said: ${tree.slice(0, 120)}`).toBe(problemOf(status));
+  });
+
+  it('reads the only tree there is even after it has finished', async () => {
+    // A single investigation, carried to a close, then reopened later: the whole
+    // point of an audit trail.
+    const first = await start();
+    const done = parseResult(await first.client.callTool({
+      name: 'create_tree', arguments: { problem: 'the only investigation', rootTitle: 'Only' },
+    }));
+    const kids = parseResult(await first.client.callTool({
+      name: 'decompose', arguments: { parentId: done.rootId, axis: 'by cause', children: ['Alpha', 'Beta'] },
+    })).childIds;
+    for (const id of kids) {
+      await first.client.callTool({ name: 'set_out_of_scope', arguments: { hypothesisId: id, reason: 'set aside' } });
+    }
+    await first.s.close();
+    open.length = 0;
+
+    const second = await start();
+    const res: any = await second.client.callTool({ name: 'get_tree', arguments: { format: 'compact' } });
+    expect(res.isError).toBeFalsy();
+    expect(getText(res)).toContain('the only investigation');
+  });
+});
+
+describe('enumerating a project\'s sessions', () => {
+  let stateDir: string;
+  let projectDir: string;
+  const open: SessionServer[] = [];
+  const clients: Client[] = [];
+  const savedDataDir = process.env['TOT_DATA_DIR'];
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'tot-list-state-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'tot-list-proj-'));
+    process.env['TOT_DATA_DIR'] = stateDir;
+  });
+  afterEach(async () => {
+    for (const c of clients.splice(0)) { try { await c.close(); } catch { /* ignore */ } }
+    for (const s of open.splice(0)) { try { await s.close(); } catch { /* ignore */ } }
+    if (savedDataDir === undefined) delete process.env['TOT_DATA_DIR'];
+    else process.env['TOT_DATA_DIR'] = savedDataDir;
+    for (const d of [stateDir, projectDir]) rmSync(d, { recursive: true, force: true });
+  });
+
+  async function start(): Promise<{ s: SessionServer; client: Client }> {
+    const s = await createSessionServer({ projectDir });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+    return { s, client };
+  }
+
+  const problems = (n: number) => Array.from({ length: n }, (_, i) => `investigation number ${i + 1}`);
+
+  it('counts and lists the same sessions, including one created after start-up', async () => {
+    // The count and the list are read by one dashboard at one moment; a count
+    // taken from the boot scan alone omits whatever was created since, and the
+    // header then contradicts the selector beside it.
+    const first = await start();
+    await first.client.callTool({ name: 'create_tree', arguments: { problem: problems(1)[0] } });
+    await first.s.close();
+    open.length = 0;
+
+    const second = await start();
+    await second.client.callTool({ name: 'create_tree', arguments: { problem: 'created after start-up' } });
+
+    const base = `http://localhost:${second.s.port}`;
+    const info = await (await fetch(`${base}/api/info`)).json() as { sessionCount: number };
+    const list = await (await fetch(`${base}/api/sessions`)).json() as { sessions: Array<{ id: string; problem: string }> };
+    expect(list.sessions).toHaveLength(2);
+    expect(info.sessionCount).toBe(list.sessions.length);
+    expect(list.sessions.map((s) => s.problem)).toContain('created after start-up');
+  });
+
+  it('names the other sessions of the project, so their ids can be read and passed on', async () => {
+    // A session id is only obtainable from a tool response. Without one for a
+    // session that is not the current one, no caller can ask get_tree for it.
+    const first = await start();
+    const finished = parseResult(await first.client.callTool({
+      name: 'create_tree', arguments: { problem: 'the earlier investigation' },
+    }));
+    await first.client.callTool({
+      name: 'set_out_of_scope', arguments: { hypothesisId: finished.rootId, reason: 'set aside' },
+    });
+    const live = parseResult(await first.client.callTool({
+      name: 'create_tree', arguments: { problem: 'the later investigation' },
+    }));
+
+    const status = getText(await first.client.callTool({ name: 'get_status', arguments: {} }));
+    // The summarized session is identified by its short display form; the ones it
+    // is not summarizing carry the full id, because that is what get_tree takes.
+    expect(status).toContain(`Session: ${live.sessionId.slice(0, 8)}`);
+    expect(status).toContain(finished.sessionId);
+    expect(status).toContain('the earlier investigation');
+
+    // And the id it hands out is one get_tree accepts.
+    const res: any = await first.client.callTool({
+      name: 'get_tree', arguments: { format: 'compact', sessionId: finished.sessionId },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(getText(res)).toContain('the earlier investigation');
+  });
+
+  it('bounds the list it prints and says how much of the project it is naming', async () => {
+    // An unbounded list would grow with project history in a read-out the agent
+    // calls constantly; a silent cut would read as the whole project.
+    const { client } = await start();
+    const ids: string[] = [];
+    for (const problem of problems(9)) {
+      ids.push(parseResult(await client.callTool({ name: 'create_tree', arguments: { problem } })).sessionId);
+    }
+    const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+    const named = ids.filter((id) => status.includes(id));
+    expect(named).toHaveLength(5);            // five of the eight it is not summarizing
+    expect(status).toContain('of 8 other sessions');
+    // Newest first: the oldest sessions are the ones left out.
+    expect(status).not.toContain(ids[0]);
+  });
+
+  it('summarizes the session it is asked about, not just the current one', async () => {
+    // Both reporting skills advertise a sessionId argument. Silently ignoring one
+    // answers about a different tree than the caller named.
+    const first = await start();
+    const earlier = parseResult(await first.client.callTool({
+      name: 'create_tree', arguments: { problem: 'the earlier investigation' },
+    }));
+    await first.client.callTool({ name: 'create_tree', arguments: { problem: 'the later investigation' } });
+
+    const asked = getText(await first.client.callTool({
+      name: 'get_status', arguments: { sessionId: earlier.sessionId },
+    }));
+    expect(asked).toContain('the earlier investigation');
+    expect(asked).toContain(`Session: ${earlier.sessionId.slice(0, 8)}`);
+
+    // And it refuses an id that names nothing rather than answering about another.
+    const bogus: any = await first.client.callTool({
+      name: 'get_status', arguments: { sessionId: '11111111-1111-4111-8111-111111111111' },
+    });
+    expect(bogus.isError).toBe(true);
+    expect(getText(bogus)).toMatch(/No such session/);
+  });
+
+  it('publishes the dashboard address before any tree exists', async () => {
+    // The port is ephemeral and this response is the only place it is published;
+    // the dashboard itself serves an empty state, so the address is usable.
+    const { s, client } = await start();
+    const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).toContain('No session yet for this project');
+    expect(status).toContain(`Visualization: ${s.dashboardUrl}`);
+  });
+
+  it('says nothing about other sessions when the project has only one', async () => {
+    const { client } = await start();
+    await client.callTool({ name: 'create_tree', arguments: { problem: 'the only investigation' } });
+    const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).not.toContain('other session');
+    expect(status).not.toContain('Also in this project');
+  });
+});

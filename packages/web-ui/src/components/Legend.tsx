@@ -30,6 +30,8 @@ export default function Legend() {
         <span style={{ fontWeight: 600, color: '#8b949e' }}>Legend</span>
         <button
           onClick={() => setDismissed(true)}
+          aria-label="Hide legend"
+          title="Hide the legend"
           style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14 }}
         >×</button>
       </div>

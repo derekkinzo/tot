@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
-import type { ProjectState } from './project-state.js';
+import { sessionCatalog, type ProjectState } from './project-state.js';
 import { pickActiveSession } from './persistence.js';
 import { checkIntegrity, readLineWindow, resolveArtifactPath } from './artifacts.js';
 import { rendersAsLines } from './types.js';
@@ -225,61 +225,7 @@ async function handleStateAPI(res: ServerResponse, url: URL, project: ProjectSta
 
 function handleSessionsAPI(res: ServerResponse, project: ProjectState): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
-
-  const { tm, sessionIndex } = project;
-
-  // If we have a session index, use it for the list (no full loading needed)
-  if (sessionIndex.length > 0) {
-    const loadedSessions = tm.getAllSessions();
-    const loadedIds = new Set(loadedSessions.map((s) => s.id));
-
-    const summaries: Array<{ id: string; problem: string; status: string; createdAt: string; nodeCount: number }> = [];
-
-    // Add loaded sessions with accurate node counts
-    for (const s of loadedSessions) {
-      const hypotheses = tm.getHypothesesBySession(s.id);
-      summaries.push({
-        id: s.id,
-        problem: s.problem,
-        status: s.status,
-        createdAt: s.createdAt,
-        nodeCount: hypotheses.length,
-      });
-    }
-
-    // Add unloaded sessions from the index
-    for (const entry of sessionIndex) {
-      if (!loadedIds.has(entry.id)) {
-        summaries.push({
-          id: entry.id,
-          problem: entry.problem,
-          status: entry.status,
-          createdAt: entry.createdAt,
-          nodeCount: entry.nodeCount,
-        });
-      }
-    }
-
-    summaries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    res.end(JSON.stringify({ sessions: summaries }));
-    return;
-  }
-
-  // Fallback: no session index
-  const sessions = tm.getAllSessions().sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-  const summaries = sessions.map((s) => {
-    const hypotheses = tm.getHypothesesBySession(s.id);
-    return {
-      id: s.id,
-      problem: s.problem,
-      status: s.status,
-      createdAt: s.createdAt,
-      nodeCount: hypotheses.length,
-    };
-  });
-  res.end(JSON.stringify({ sessions: summaries }));
+  res.end(JSON.stringify({ sessions: sessionCatalog(project) }));
 }
 
 function handleInfoAPI(res: ServerResponse, project: ProjectState): void {
@@ -293,7 +239,7 @@ function handleInfoAPI(res: ServerResponse, project: ProjectState): void {
   res.end(JSON.stringify({
     projectDir: project.projectDir,
     activeProblem: latestOpen?.problem ?? null,
-    sessionCount: project.sessionIndex.length || project.tm.getAllSessions().length,
+    sessionCount: sessionCatalog(project).length,
     persistenceHealthy: project.persistenceHealthy,
   }));
 }

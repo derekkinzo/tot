@@ -88,7 +88,10 @@ Hypotheses". Published by the Center for the Study of Intelligence, CIA.
 - **Inconsistency-counting over consistency-counting**: Heuer argues the
   analyst should focus on which hypotheses the evidence *refutes*, not which
   it *fits*. The hypothesis with the fewest inconsistencies is preferred,
-  not the one with the most consistencies.
+  not the one with the most consistencies. The preference holds because the
+  matrix scores one evidence set against every hypothesis; a hypothesis no
+  observation was checked against scores zero inconsistencies without having
+  been tested at all, and is not thereby preferred.
 
 ## 4. Evidence Hierarchy (singular causation)
 

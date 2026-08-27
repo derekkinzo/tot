@@ -58,6 +58,8 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
         </div>
         <button
           onClick={onClose}
+          aria-label="Close details"
+          title="Close the detail panel"
           style={{
             background: '#21262d', border: '1px solid #30363d', color: '#8b949e',
             cursor: 'pointer', fontSize: 16, lineHeight: 1, borderRadius: 4,

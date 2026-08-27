@@ -1,12 +1,13 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { TreeError, type TreeManager } from './tree-manager.js';
-import { Persistence } from './persistence.js';
+import { Persistence, pickActiveSession } from './persistence.js';
 import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
 import { GATES, gateLabel, gateMeaning, nodeLabel, titleProblem, TITLE_MAX_LENGTH, type HypothesisDraft } from '@tot-mcp/shared';
 import { ArtifactError, artifactsDirFor, captureArtifact, discardArtifact } from './artifacts.js';
+import type { SessionSummary } from './project-state.js';
 
 // ─── Types ───
 
@@ -140,15 +141,17 @@ const TOOL_DEFS = {
     }),
   },
   get_tree: {
-    description: 'View a hypothesis tree structure. Defaults to the active session; pass sessionId to view another open session.',
+    description: 'View a hypothesis tree structure. Defaults to the session get_status summarizes; pass sessionId to view any other session of this project, whether still open or already resolved. get_status lists the ids.',
     input: z.object({
       format: z.enum(['full', 'compact']).optional().default('compact').describe('Output format'),
-      sessionId: identifier().optional().describe('Session to view (defaults to the active session)'),
+      sessionId: identifier().optional().describe('Session to view. Defaults to the most recent open session, or the most recent session when none is open.'),
     }),
   },
   get_status: {
-    description: 'Get a summary of the current investigation: progress, unexplored branches, and stagnation check.',
-    input: z.object({}),
+    description: 'Get a summary of an investigation: progress, unexplored branches, a stagnation check, and the ids of the project\'s other sessions. Defaults to the session get_tree also defaults to.',
+    input: z.object({
+      sessionId: identifier().optional().describe('Session to summarize. Defaults to the most recent open session, or the most recent session when none is open.'),
+    }),
   },
   validate_decomposition: {
     description: 'Check structural properties of a decomposition (child count, overlaps, catch-all). For semantic MECE validation, reason about whether hypotheses truly don\'t overlap and cover all possibilities.',
@@ -191,6 +194,8 @@ export function getToolHandlers(
   getDataDir: () => string,
   onPersistenceError?: (err: Error) => void,
   getDashboardUrl?: () => string | null,
+  ensureSessionLoaded?: (sessionId: string) => boolean,
+  listSessions?: () => SessionSummary[],
 ): ToolHandlers {
   // Bytes live beside the journals that cite them, so the store follows the data
   // directory rather than being pointed at separately.
@@ -213,6 +218,25 @@ export function getToolHandlers(
 
   function toolResult(text: string, isError = false) {
     return { content: [{ type: 'text' as const, text }], isError };
+  }
+
+  /**
+   * The tree a read should show, or null when the project holds none.
+   *
+   * Only one session is loaded when the server starts, so a named one may still
+   * be on disk — it is loaded on demand rather than reported as non-existent.
+   * With no session named, this resolves the way the status read-out does: the
+   * most recent open session, falling back to the most recent overall, so a
+   * finished investigation stays readable and the two surfaces cannot disagree
+   * about which tree is current.
+   */
+  function readableTree(sessionId?: string): ReturnType<TreeManager['getTree']> {
+    if (sessionId !== undefined) {
+      if (!tm.hasSession(sessionId) && !(ensureSessionLoaded?.(sessionId) ?? false)) return null;
+      return tm.getTree(sessionId);
+    }
+    const chosen = pickActiveSession(tm.getAllSessions());
+    return chosen ? tm.getTree(chosen.id) : null;
   }
 
   /**
@@ -431,11 +455,12 @@ export function getToolHandlers(
   handlers.set('get_tree', async (args) => {
     try {
       const { format, sessionId } = TOOL_DEFS.get_tree.input.parse(args);
-      if (sessionId && !tm.hasSession(sessionId)) {
-        return toolResult(`No such session: ${sessionId}`, true);
+      const state = readableTree(sessionId);
+      if (!state) {
+        return sessionId !== undefined
+          ? toolResult(`No such session: ${sessionId}`, true)
+          : toolResult(fmt.NO_SESSION_MESSAGE);
       }
-      const state = tm.getTree(sessionId);
-      if (!state) return toolResult('No open session. Call create_tree to start.');
 
       if (format === 'full') {
         const hypotheses = Object.fromEntries(state.hypotheses);
@@ -463,8 +488,18 @@ export function getToolHandlers(
     }
   });
 
-  handlers.set('get_status', async () => {
-    return toolResult(fmt.formatStatus(tm, getDashboardUrl?.() ?? null));
+  handlers.set('get_status', async (args) => {
+    const { sessionId } = TOOL_DEFS.get_status.input.parse(args);
+    // A named session is resolved the same way get_tree resolves one, so the two
+    // read surfaces answer for the same tree or refuse for the same reason.
+    if (sessionId !== undefined && readableTree(sessionId) === null) {
+      return toolResult(`No such session: ${sessionId}`, true);
+    }
+    return toolResult(fmt.formatStatus(tm, {
+      dashboardUrl: getDashboardUrl?.() ?? null,
+      listSessions,
+      sessionId,
+    }));
   });
 
   return { handlers, drainAll: () => sink.drainAll() };
@@ -488,9 +523,21 @@ export function registerTools(
   server: McpServer,
   tm: TreeManager,
   getDataDir: () => string,
-  opts: { getDashboardUrl?: () => string | null; onPersistenceError?: (err: Error) => void } = {},
+  opts: {
+    getDashboardUrl?: () => string | null;
+    onPersistenceError?: (err: Error) => void;
+    /** Loads a session that is on disk but not yet in memory, so a read can reach
+     *  a tree the boot did not eager-load. */
+    ensureSessionLoaded?: (sessionId: string) => boolean;
+    /** Every session of this project, in memory or on disk, so the status
+     *  read-out can name the ones it is not summarizing. */
+    listSessions?: () => SessionSummary[];
+  } = {},
 ): { drainAll: () => Promise<void> } {
-  const { handlers, drainAll } = getToolHandlers(tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl);
+  const { handlers, drainAll } = getToolHandlers(
+    tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl,
+    opts.ensureSessionLoaded, opts.listSessions,
+  );
 
   for (const [name, schema] of Object.entries(TOOL_SCHEMAS)) {
     const handler = handlers.get(name)!;

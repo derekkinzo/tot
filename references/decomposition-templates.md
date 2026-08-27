@@ -2,6 +2,8 @@
 
 These are starting points, not prescriptive. The right axis depends on what cleanly partitions the cause space for the specific problem. A template that is MECE for one instance may overlap or leave gaps for another. Always validate the partition against the actual evidence before committing to a tree.
 
+Where a template's advice conflicts with `mece-limits.md`, that document governs: overlap is a flag to interpret, not a fault to eliminate, and a combined hypothesis or an explicit catch-all is a legitimate child. The per-domain validation notes below say what a clean split would look like, not what is required of one.
+
 ## 1. Software Debugging
 
 - **Trigger**: A program produces wrong output, crashes, hangs, or degrades. A reproducible (or partially reproducible) symptom exists.
@@ -10,8 +12,8 @@ These are starting points, not prescriptive. The right axis depends on what clea
   - By scope: all users / subset / single user or request
   - By time: pre-change / post-change / gradual drift
   - By failure mode: crash / hang / incorrect result / slow
-- **Validation**: Every observed symptom must fit exactly one bucket on the chosen axis. If a symptom plausibly belongs to two (e.g., "slow because of bad data"), the axis is wrong for this case — pick a different one or split further.
-- **Anti-pattern**: Mixing axes in siblings (e.g., "code bug" vs. "affects one user") — these are not mutually exclusive and the tree loses meaning.
+- **Validation**: Ask which bucket each observed symptom lands in. A symptom that plausibly belongs to two (e.g., "slow because of bad data") is either a sign the axis mixes dimensions, or a genuine co-occurrence — decide which before reading evidence, since one calls for a different axis and the other for a combined hypothesis.
+- **Anti-pattern**: Mixing axes in siblings (e.g., "code bug" vs. "affects one user"). The two divide different dimensions, so no observation compares them, and the split records an axis that never described them. Nothing detects this: the axis is displayed, not checked.
 
 ## 2. Medical Differential Diagnosis
 
@@ -68,4 +70,6 @@ When none of the above templates cleanly fit, derive an axis from the problem it
 - What dimension, if varied, reproduces or removes the symptom?
 - What categorical distinction matches the granularity of the available evidence?
 
-A good axis produces siblings that are evidently mutually exclusive (no candidate fits two) and collectively exhaustive (no plausible candidate fits none). If either property fails, change the axis before deepening the tree.
+A good axis produces siblings that divide one dimension, so that an observation can bear on one and not another. Judge a candidate axis before decomposing: a split cannot be redrawn once its children exist, and neither exclusivity nor exhaustiveness can be established from the tree afterwards.
+
+Once a split exists, the reachable moves are `add_hypothesis` for a possibility the set misses, `decompose` on a child to divide a second dimension below it, and `set_out_of_scope` for a branch this investigation will not pursue. Overlap that turns out to be real domain co-occurrence is not a defect to repair — record it as a combined hypothesis and read the evidence accordingly.

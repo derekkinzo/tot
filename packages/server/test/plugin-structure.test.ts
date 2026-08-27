@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { TOOL_SCHEMAS } from '../src/tools.js';
+import { TITLE_MAX_LENGTH } from '@tot-mcp/shared';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 
@@ -156,5 +162,163 @@ describe('Plugin Structure', () => {
         expect(validEvents).toContain(event);
       }
     });
+  });
+});
+
+describe('what the guidance tells an agent to call', () => {
+  // A skill, agent brief, or the README is the only description of this server an
+  // agent reads before calling it. A tool named there that the server does not
+  // serve sends the agent to a dead end it cannot diagnose.
+  //
+  // A backticked token counts as naming a tool when it is called (`x(`), told to
+  // be called ("Call `x`"), or shaped like a tool name (snake_case). A bare
+  // single word in backticks does not, because an argument name looks the same.
+  const NAMED_AS_TOOL = /(?:[Cc]all\s+`([a-z][a-z0-9_]*)`)|`([a-z][a-z0-9_]*)\(|`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g;
+
+  const toolsNamedIn = (text: string): string[] =>
+    [...text.matchAll(NAMED_AS_TOOL)].map((m) => m[1] ?? m[2] ?? m[3]);
+
+  /** Markdown that ships as guidance: skills, agent briefs, references, README. */
+  function guidanceFiles(): string[] {
+    const files = [join(REPO_ROOT, 'README.md')];
+    for (const [dir, leaf] of [['skills', 'SKILL.md'], ['agents', null], ['references', null]] as const) {
+      const base = join(REPO_ROOT, dir);
+      if (!existsSync(base)) continue;
+      for (const entry of readdirSync(base)) {
+        const path = leaf ? join(base, entry, leaf) : join(base, entry);
+        if (existsSync(path) && statSync(path).isFile() && path.endsWith('.md')) files.push(path);
+      }
+    }
+    return files;
+  }
+
+  it('reads guidance from every shipped markdown file', () => {
+    // A scan over an empty file list would pass without checking anything.
+    const files = guidanceFiles();
+    expect(files.length).toBeGreaterThan(5);
+    expect(files.some((f) => f.endsWith('SKILL.md'))).toBe(true);
+  });
+
+  it('names only tools this server serves', () => {
+    const served = new Set(Object.keys(TOOL_SCHEMAS));
+    const unknown: string[] = [];
+    for (const file of guidanceFiles()) {
+      const text = readFileSync(file, 'utf-8');
+      for (const name of toolsNamedIn(text)) {
+        if (!served.has(name)) unknown.push(`${file.slice(REPO_ROOT.length + 1)}: ${name}`);
+      }
+    }
+    expect(unknown, `named as a tool but not served:\n${unknown.join('\n')}`).toEqual([]);
+  });
+
+  it('states the label bound the tools actually enforce', () => {
+    // Guidance that names a different number teaches an agent to lose a
+    // round-trip on the tree's foundational call.
+    const claims: string[] = [];
+    for (const file of guidanceFiles()) {
+      const text = readFileSync(file, 'utf-8');
+      for (const m of text.matchAll(/(\d+)\s+characters/g)) {
+        claims.push(`${file.slice(REPO_ROOT.length + 1)}: ${m[0]}`);
+        expect(Number(m[1]), `${file.slice(REPO_ROOT.length + 1)}: "${m[0]}"`).toBe(TITLE_MAX_LENGTH);
+      }
+    }
+    // The bound is stated somewhere, not merely never mis-stated.
+    expect(claims.length).toBeGreaterThan(0);
+  });
+
+  it('documents every tool it serves somewhere in the guidance', () => {
+    // The other direction: a tool no guidance mentions is one an agent has to
+    // discover from the schema list alone.
+    const guidance = guidanceFiles().map((f) => readFileSync(f, 'utf-8')).join('\n');
+    const undocumented = Object.keys(TOOL_SCHEMAS)
+      .filter((tool) => !new RegExp(`\`${tool}[\`(]`).test(guidance));
+    expect(undocumented, `served but never named in guidance: ${undocumented.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('deciding whether the bundled build is stale', () => {
+  // The installer rebuilds only when the signature of the sources differs from
+  // the one stored beside the last build. A signature blind to a source edit
+  // makes an updated plugin keep serving the previous build — including a tool
+  // that no longer exists in the sources the user has.
+  const SCRIPT = join(REPO_ROOT, 'hooks/source-signature.sh');
+
+  /** A minimal tree shaped like the plugin root: manifests plus one package. */
+  function fixture(): string {
+    const root = mkdtempSync(join(tmpdir(), 'tot-sig-'));
+    mkdirSync(join(root, 'packages/a/src'), { recursive: true });
+    writeFileSync(join(root, 'package.json'), '{}');
+    writeFileSync(join(root, 'package-lock.json'), '{}');
+    writeFileSync(join(root, 'packages/a/src/x.ts'), 'export const a = 1;\n');
+    return root;
+  }
+
+  const sign = (root: string): string => execFileSync('bash', [SCRIPT, root], { encoding: 'utf-8' }).trim();
+
+  it('changes when a source file changes', () => {
+    const root = fixture();
+    try {
+      const before = sign(root);
+      expect(before).toMatch(/^[0-9a-f]{64}$/);
+      writeFileSync(join(root, 'packages/a/src/x.ts'), 'export const a = 2;\n');
+      expect(sign(root)).not.toBe(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('changes when a source file is added, renamed, or removed', () => {
+    const root = fixture();
+    try {
+      const before = sign(root);
+      writeFileSync(join(root, 'packages/a/src/y.ts'), 'export const b = 1;\n');
+      const added = sign(root);
+      expect(added).not.toBe(before);
+      renameSync(join(root, 'packages/a/src/y.ts'), join(root, 'packages/a/src/z.ts'));
+      expect(sign(root)).not.toBe(added);
+      rmSync(join(root, 'packages/a/src/z.ts'));
+      expect(sign(root)).toBe(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('changes when a manifest or the lockfile changes', () => {
+    const root = fixture();
+    try {
+      const before = sign(root);
+      writeFileSync(join(root, 'package-lock.json'), '{"lockfileVersion":3}');
+      expect(sign(root)).not.toBe(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('ignores build outputs and installed dependencies', () => {
+    // Otherwise a build invalidates the signature it just wrote and every
+    // session rebuilds from scratch.
+    const root = fixture();
+    try {
+      const before = sign(root);
+      for (const dir of ['packages/a/dist', 'packages/a/static', 'packages/a/node_modules/dep']) {
+        mkdirSync(join(root, dir), { recursive: true });
+        writeFileSync(join(root, dir, 'out.js'), 'whatever');
+      }
+      expect(sign(root)).toBe(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('fails rather than printing a signature it could not compute', () => {
+    // A blank or bogus signature would compare unequal every time (endless
+    // rebuilds) or equal by accident (a stale build served forever).
+    const root = fixture();
+    try {
+      rmSync(join(root, 'package-lock.json'));
+      expect(() => sign(root)).toThrow();
+      expect(() => execFileSync('bash', [SCRIPT, join(root, 'nope')], { encoding: 'utf-8' })).toThrow();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('ships as an executable the installer can run', () => {
+    // The installer refuses to build when it cannot sign the sources, so a
+    // missing or non-executable script leaves the MCP server unbuilt.
+    expect(existsSync(SCRIPT)).toBe(true);
+    expect((statSync(SCRIPT).mode & 0o111) !== 0).toBe(true);
+    const installer = readFileSync(join(REPO_ROOT, 'hooks/install.sh'), 'utf-8');
+    expect(installer).toContain('source-signature.sh');
   });
 });

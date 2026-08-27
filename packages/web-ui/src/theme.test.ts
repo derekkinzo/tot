@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { STATUS_COLORS, STATUS_NODE_STYLES, STATUS_LABELS, EVIDENCE_TYPE_COLORS } from './theme';
 import { isPruned, type HypothesisStatus } from './types';
@@ -135,10 +135,118 @@ describe('status palette', () => {
     }
   });
 
+  it('marks a status the same way wherever it is shown', () => {
+    // The legend key, the minimap dot and the status-bar pill all describe the
+    // node the canvas draws. Drawing a status in one colour on the canvas and
+    // another in the key that explains it makes the key wrong: a reader told the
+    // mark is red looks for red and finds none.
+    for (const status of Object.keys(STATUS_NODE_STYLES) as HypothesisStatus[]) {
+      expect(STATUS_NODE_STYLES[status].border, status).toBe(STATUS_COLORS[status]);
+    }
+  });
+
+  it('keeps every status mark legible where it is drawn at full opacity', () => {
+    // WCAG 2.2 SC 1.4.11: a 10px legend swatch and a status pill are
+    // user-interface components, and unlike the canvas node they are not dimmed,
+    // so the mark itself has to clear 3:1 against the surface under it.
+    for (const [status, color] of Object.entries(STATUS_COLORS)) {
+      expect(contrast(color, declared('.overlay-widget', 'background')), `${status} ${color}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it('gives each status and evidence type a distinct colour', () => {
     const statuses = Object.values(STATUS_COLORS);
     expect(new Set(statuses).size).toBe(statuses.length);
     const evidence = Object.values(EVIDENCE_TYPE_COLORS);
     expect(new Set(evidence).size).toBe(evidence.length);
+  });
+});
+
+describe('a control that shows only a glyph still says what it does', () => {
+  // A button whose whole content is a symbol is announced as "button" and nothing
+  // else without an accessible name (WCAG 2.2 SC 4.1.2 Name, Role, Value). Checked
+  // as the class over every component, so a new one cannot slip in unnamed.
+  const COMPONENT_DIR = resolve(__dirname, 'components');
+  const GLYPH_ONLY = /^[\s×✕✖?▼▶◀▲←→↑↓·▪⚠◍✓✗○◉⊘+\-–—]{1,4}$/;
+
+  /**
+   * Every `<button>` in a source file, as [openingTag, content].
+   *
+   * The opening tag is found by scanning for a `>` outside braces, quotes and
+   * parens — a handler like `onClick={() => f()}` contains a `>` that a
+   * character-class match would stop at, which would hide the whole element from
+   * this check.
+   */
+  const buttons = (src: string): [string, string][] => {
+    const found: [string, string][] = [];
+    let i = 0;
+    while ((i = src.indexOf('<button', i)) !== -1) {
+      let j = i + 7;
+      let brace = 0, paren = 0;
+      let quote: string | null = null;
+      while (j < src.length) {
+        const ch = src[j];
+        if (quote) {
+          if (ch === quote && src[j - 1] !== '\\') quote = null;
+        } else if (ch === '"' || ch === "'" || ch === '`') quote = ch;
+        else if (ch === '{') brace++;
+        else if (ch === '}') brace--;
+        else if (ch === '(') paren++;
+        else if (ch === ')') paren--;
+        else if (ch === '>' && brace === 0 && paren === 0) break;
+        j++;
+      }
+      const openTag = src.slice(i + 7, j);
+      const close = src.indexOf('</button>', j);
+      if (close === -1) break;
+      found.push([openTag, src.slice(j + 1, close)]);
+      i = close + 9;
+    }
+    return found;
+  };
+
+  it('finds the buttons it is meant to check, including multi-line handlers', () => {
+    // Guards the guard. The arrow in the handler carries a '>' that a naive match
+    // stops at, which is how an unnamed control hid from an earlier version of
+    // this check.
+    const sample = [
+      '<button',
+      '  onClick={() => setOpen(!open)}',
+      '  aria-label="Go"',
+      '>→</button>',
+      '<button onClick={x}>Save</button>',
+    ].join('\n');
+    const found = buttons(sample);
+    expect(found).toHaveLength(2);
+    expect(found[0][1].trim()).toBe('→');
+    expect(found[0][0]).toContain('aria-label="Go"');
+    expect(found[1][1].trim()).toBe('Save');
+    expect(GLYPH_ONLY.test('→')).toBe(true);
+    expect(GLYPH_ONLY.test('Save')).toBe(false);
+  });
+
+  it('examines every button the components declare', () => {
+    // A check that silently examined none would pass vacuously.
+    let total = 0;
+    for (const file of readdirSync(COMPONENT_DIR).filter((f) => f.endsWith('.tsx'))) {
+      total += buttons(readFileSync(resolve(COMPONENT_DIR, file), 'utf-8')).length;
+    }
+    expect(total).toBeGreaterThan(10);
+  });
+
+  it('names every glyph-only control in every component', () => {
+    const offenders: string[] = [];
+    for (const file of readdirSync(COMPONENT_DIR).filter((f) => f.endsWith('.tsx'))) {
+      const src = readFileSync(resolve(COMPONENT_DIR, file), 'utf-8');
+      for (const [openTag, content] of buttons(src)) {
+        // Content carrying a JSX expression renders text this check cannot read;
+        // only bare glyph literals are judged.
+        if (content.includes('{')) continue;
+        if (!GLYPH_ONLY.test(content.trim())) continue;
+        if (/aria-label=|aria-labelledby=/.test(openTag)) continue;
+        offenders.push(`${file}: <button>${content.trim()}</button>`);
+      }
+    }
+    expect(offenders, `glyph-only controls with no accessible name:\n${offenders.join('\n')}`).toEqual([]);
   });
 });

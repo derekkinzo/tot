@@ -1,18 +1,8 @@
 {
   "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "printf '%s' \"$TOOL_OUTPUT\" | grep -qiE '(error|exception|traceback|segfault|SIGABRT|panic|fatal|FAILED|Error:)' && echo '[tot-mcp] Detected a failure pattern. Consider using /tot-reason to systematically investigate with Tree of Thought reasoning.' || true"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
+        "matcher": "startup|resume",
         "hooks": [
           {
             "type": "command",
@@ -21,10 +11,11 @@
         ]
       },
       {
+        "matcher": "startup|resume",
         "hooks": [
           {
             "type": "command",
-            "command": "CLI=\"${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js\"; [ -f \"$CLI\" ] && node \"$CLI\" status 2>/dev/null | grep -qE '^[[:space:]]*\\[\\*\\]' && echo '[tot-mcp] Active reasoning session detected. Use /tot-inspect to view or /tot-reason to continue.' || true"
+            "command": "CLI=\"${CLAUDE_PLUGIN_DATA}/build/packages/server/dist/cli.js\"; [ -f \"$CLI\" ] && node \"$CLI\" status 2>/dev/null | grep -qE '^[[:space:]]*\\[\\*\\]' && echo '[tot-mcp] An open reasoning session exists for this project. The tot-inspect skill views it; tot-reason continues it.' || true"
           }
         ]
       }

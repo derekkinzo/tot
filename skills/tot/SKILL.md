@@ -18,15 +18,18 @@ fixed address.
    ```
    Visualization: http://localhost:<port>
    ```
-   - If the line is present, that `http://localhost:<port>` is the dashboard
-     URL. Use it verbatim in the next step. The dashboard renders the
-     project's most recent tree and offers a Sessions selector for the rest,
-     so the URL is valid whether or not an investigation is still in progress.
-   - If `get_status` reports `No open session`, no tree exists for this
-     project yet — tell the user to run `/tot-reason` to start one, then stop.
-   - If `get_status` returns no `Visualization:` line, the in-process HTTP
-     server did not start. Tell the user the dashboard is unavailable and
-     offer `/tot-inspect` for a text read-out.
+   - Present → that `http://localhost:<port>` is the dashboard URL; use it
+     verbatim in the next step. It opens on the project's most recent open
+     tree, or its most recent tree when none is open, with a Sessions selector
+     for the rest — so the URL is valid whether or not an investigation is
+     still in progress, and shows an empty state when the project has no tree
+     yet.
+   - Absent → the in-process HTTP server did not start. Tell the user the
+     dashboard is unavailable and offer the `tot-inspect` skill for a text
+     read-out.
+   - `No session yet for this project` alongside the URL means the project has
+     no tree; the dashboard still opens. Mention that the `tot-reason` skill
+     starts one.
 
 2. **Open the browser** to that URL, substituting the port you read:
    ```bash
@@ -42,8 +45,8 @@ fixed address.
 ## Notes
 
 - If no tree exists yet for this project, the dashboard shows an empty
-  state. Run `/tot-reason` to start a session.
+  state. The `tot-reason` skill starts a session.
 - On a headless or SSH host, forward the port the dashboard reported:
   `ssh -L <port>:localhost:<port> <host>`, then open `http://localhost:<port>`.
-- `/tot-inspect` returns a textual summary in chat without opening a
+- The `tot-inspect` skill returns a textual summary in chat without opening a
   browser; useful for a quick read-out without context-switching.
