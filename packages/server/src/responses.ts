@@ -66,6 +66,7 @@ export function formatCreateTree(sessionId: string, rootId: string, problem: str
     `── Decomposition ──\n` +
     `Once you understand the domain, decompose into 2-5 sibling hypotheses.\n` +
     `Choose a framing axis that suits the domain — by mechanism, by location, by stage, by actor, by time, or by population. Whichever axis you pick, make the siblings comparable along it.\n` +
+    `Pick it adversarially rather than taking the first that fits: name another axis that could have divided this space, say why this one separates the evidence better, and name what would show it was the wrong choice. A split cannot be redrawn once its children exist.\n` +
     `Aim for (the underlying set-partition property — overlap is acceptable when it reflects domain co-occurrence):\n` +
     `  Non-overlapping siblings: each hypothesis covers a distinct possibility unless the domain genuinely co-instantiates them.\n` +
     `  Collective coverage: together they cover the plausible space; an explicit catch-all branch is first-class.\n` +
@@ -101,7 +102,11 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   if (isRootDecomposition) {
     result += `── Initial Structure (Critical) ──\n`;
     result += `This is the foundational decomposition. Its quality determines the entire investigation.\n`;
-    result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n\n`;
+    result += `Review thoroughly: Did you investigate the domain BEFORE decomposing?\n`;
+    // A structure reviewed only by its author inherits the blind spot that made
+    // it. The questions are the same either way; what changes is who answers
+    // them, and re-reading one's own answers is not answering them.
+    result += `Get an independent read before gathering evidence — a reviewer that did not write this decomposition. Failing that, re-derive each question below from its definition rather than from the answers you already have.\n\n`;
   }
 
   // The declared split: what the children divide, and what follows from how
@@ -125,6 +130,10 @@ export function formatDecompose(children: Hypothesis[], check: StructuralCheck, 
   }
   if (check.catchAllLabels.length === 0) {
     result += `Note: no label reads as a residual — is anything missing?\n`;
+  }
+  if (check.clauseShapedLabels.length > 0) {
+    result += `label-shape-advisory: "${check.clauseShapedLabels.join('", "')}" carries a finite auxiliary, so it reads as prose in a slot the canvas renders as a name. `
+      + `Move the claim into \`statement\` and leave a label here?\n`;
   }
 
   // Names what was actually examined. An unqualified "no structural issues"
@@ -453,6 +462,7 @@ export function formatValidateDecomposition(
   if (check.substringOverlaps.length > 0) advisories.push('overlap-advisory');
   if (check.duplicateLabels.length > 0) advisories.push('overlap-advisory');
   if (check.catchAllLabels.length === 0) advisories.push('coverage-gap-advisory');
+  if (check.clauseShapedLabels.length > 0) advisories.push('label-shape-advisory');
   // Names what was examined rather than declaring the decomposition sound. This
   // check speaks to overlap and coverage; whether siblings sit at one level of
   // abstraction is not something it can establish, so an unqualified all-clear
@@ -498,6 +508,11 @@ export function formatValidateDecomposition(
     ? `"${check.catchAllLabels.join('", "')}" reads as a residual branch — is that what it holds?\n`
     : `coverage-gap-advisory: no label reads as a residual, so this set states closure by enumeration.\n`;
 
+
+  if (check.clauseShapedLabels.length > 0) {
+    result += `label-shape-advisory: "${check.clauseShapedLabels.join('", "')}" carries a finite clause where a noun phrase was asked for. `
+      + `Whether a phrase names a thing is not decidable from the words, so this reports only the marker it found.\n`;
+  }
 
   result += `\n── Review Questions ──\n`;
   result += `\n(testability-advisory cases — unfalsifiable hypotheses — require semantic review of each child's refutability.)\n`;

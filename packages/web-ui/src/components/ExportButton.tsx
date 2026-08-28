@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { TEXT } from '../theme';
 import type { Hypothesis, Session } from '../types';
 import { generateMarkdown } from '../tree/exportMarkdown';
 
@@ -41,7 +42,7 @@ export default function ExportButton({ session, hypotheses }: Props) {
         onClick={() => setShowMenu(!showMenu)}
         style={{
           background: 'none', border: '1px solid #30363d', borderRadius: 4,
-          color: '#8b949e', fontSize: 11, padding: '3px 8px', cursor: 'pointer',
+          color: TEXT.secondary, fontSize: 11, padding: '3px 8px', cursor: 'pointer',
         }}
       >
         Export ▾
@@ -62,6 +63,6 @@ export default function ExportButton({ session, hypotheses }: Props) {
 
 const menuItemStyle: React.CSSProperties = {
   display: 'block', width: '100%', padding: '8px 14px',
-  background: 'none', border: 'none', color: '#e1e4e8',
+  background: 'none', border: 'none', color: TEXT.primary,
   fontSize: 13, cursor: 'pointer', textAlign: 'left',
 };

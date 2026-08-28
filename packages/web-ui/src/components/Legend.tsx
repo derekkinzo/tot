@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LEGEND_MAX_WIDTH } from '../geometry';
-import { STATUS_COLORS, STATUS_LABELS, STATUS_NODE_STYLES } from '../theme';
+import { STATUS_COLORS, STATUS_LABELS, STATUS_NODE_STYLES, TEXT } from '../theme';
 
 export default function Legend() {
   const [dismissed, setDismissed] = useState(false);
@@ -16,7 +16,7 @@ export default function Legend() {
         title="Show the legend and canvas shortcuts"
         style={{
           background: '#1c1f26', border: '1px solid #30363d', borderRadius: 6,
-          color: '#8b949e', cursor: 'pointer', fontSize: 12, padding: '4px 9px',
+          color: TEXT.secondary, cursor: 'pointer', fontSize: 12, padding: '4px 9px',
         }}
       >?</button>
     );
@@ -27,12 +27,12 @@ export default function Legend() {
       fontSize: 12, maxWidth: LEGEND_MAX_WIDTH,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontWeight: 600, color: '#8b949e' }}>Legend</span>
+        <span style={{ fontWeight: 600, color: TEXT.secondary }}>Legend</span>
         <button
           onClick={() => setDismissed(true)}
           aria-label="Hide legend"
           title="Hide the legend"
-          style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14 }}
+          style={{ background: 'none', border: 'none', color: TEXT.secondary, cursor: 'pointer', fontSize: 14 }}
         >×</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -42,7 +42,7 @@ export default function Legend() {
         <LegendItem color={STATUS_COLORS.corroborated} icon={STATUS_NODE_STYLES.corroborated.icon} label={STATUS_LABELS.corroborated} />
         <LegendItem color={STATUS_COLORS['out-of-scope']} icon={STATUS_NODE_STYLES['out-of-scope'].icon} label={STATUS_LABELS['out-of-scope']} />
       </div>
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #30363d', color: '#6b7280', lineHeight: 1.4 }}>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #30363d', color: TEXT.secondary, lineHeight: 1.4 }}>
         Click: select • Alt+click: collapse<br/>
         ▼/▶ chevron: collapse/expand<br/>
         Right-click: context menu<br/>
@@ -57,7 +57,7 @@ function LegendItem({ color, icon, label }: { color: string; icon: string; label
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ width: 10, height: 10, borderRadius: 2, border: `2px solid ${color}`, display: 'inline-block' }} />
       <span style={{ fontSize: 13 }}>{icon}</span>
-      <span style={{ color: '#8b949e' }}>{label}</span>
+      <span style={{ color: TEXT.secondary }}>{label}</span>
     </div>
   );
 }

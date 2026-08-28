@@ -47,6 +47,10 @@ export interface StructuralCheck {
   /** Labels whose wording reads as a residual branch. Lexical: it says how the
    *  labels read, never that the set covers the space beneath its parent. */
   catchAllLabels: string[];
+  /** Labels carrying a finite clause where a noun phrase was asked for. The
+   *  canvas renders the label and nothing else, so prose in that slot is read
+   *  truncated. */
+  clauseShapedLabels: string[];
 }
 
 export interface TreeState {

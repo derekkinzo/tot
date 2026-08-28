@@ -1,3 +1,4 @@
+import { TEXT } from '../theme';
 interface Props {
   followMode: 'following' | 'paused';
   onToggle: () => void;
@@ -36,7 +37,7 @@ export default function FollowIndicator({ followMode, onToggle }: Props) {
         }}
       />
       <span>{isFollowing ? 'Following' : 'Follow'}</span>
-      <span style={{ color: '#6b7280', fontSize: 10, marginLeft: 2 }}>F</span>
+      <span style={{ color: TEXT.secondary, fontSize: 10, marginLeft: 2 }}>F</span>
     </button>
   );
 }

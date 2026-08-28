@@ -78,6 +78,29 @@ describe('declared splits at the tool surface', () => {
     expect(res.isError).toBe(true);
   });
 
+  it('asks about a label that carries a clause instead of naming a thing', async () => {
+    // The label is the only text the canvas renders, so prose there is read
+    // truncated. Reported as an advisory: whether a phrase names a thing is not
+    // decidable from the words.
+    const rootId = await tree();
+    const { text } = await call('decompose', {
+      parentId: rootId, axis: 'by cause',
+      children: ['The writer pool was exhausted overnight', 'Index bloat'],
+    });
+    expect(text).toMatch(/label-shape-advisory/);
+    expect(text).toContain('The writer pool was exhausted overnight');
+    expect(text).not.toContain('"Index bloat" reads as a clause');
+  });
+
+  it('says nothing about labels that are already noun phrases', async () => {
+    const rootId = await tree();
+    const { text } = await call('decompose', {
+      parentId: rootId, axis: 'by cause',
+      children: ['Writer pool exhaustion', 'Index bloat', 'Third-party payment latency'],
+    });
+    expect(text).not.toMatch(/label-shape-advisory/);
+  });
+
   it('does not report a combined child as redundancy with its own conjuncts', async () => {
     // A combined "A and B" child is the construct the tools advise for real
     // co-occurrence, and it contains each conjunct by construction. Flagging it

@@ -4,7 +4,7 @@ import { hierarchy } from 'd3-hierarchy';
 import { isPruned, nodeLabel, sessionIsGrounded, type Hypothesis, type HypothesisData, type SplitFace } from '../types';
 import { evidenceLedger } from '../tree/evidenceView';
 import { splitAttention, splitBadge } from '../tree/splitView';
-import { HIGHLIGHT_COLORS } from '../theme';
+import { HIGHLIGHT_COLORS, PRUNED_EDGE_DASH } from '../theme';
 import { NODE_WIDTH, NODE_HEIGHT, NODE_GAP_X, NODE_GAP_Y } from '../geometry';
 import { walkToRoot } from '../tree/walk';
 
@@ -150,6 +150,7 @@ export function computeLayout(
 
     if (h.parentId && visibleIds.has(h.parentId)) {
       const isEdgeOnPath = pathToRoot.has(id) && pathToRoot.has(h.parentId);
+      const pruned = isPruned(h.status);
       edges.push({
         id: `${h.parentId}-${id}`,
         source: h.parentId,
@@ -157,10 +158,13 @@ export function computeLayout(
         style: {
           stroke: isEdgeOnPath
             ? HIGHLIGHT_COLORS.pathEdge
-            : isPruned(h.status)
+            : pruned
               ? HIGHLIGHT_COLORS.prunedEdge
               : HIGHLIGHT_COLORS.defaultEdge,
           strokeWidth: isEdgeOnPath ? 2.5 : 1.5,
+          // A retired lineage is dashed rather than dimmed, so the distinction
+          // survives for a reader who cannot separate two greys.
+          ...(pruned && !isEdgeOnPath ? { strokeDasharray: PRUNED_EDGE_DASH } : {}),
         },
         animated: h.status === 'exploring',
       });

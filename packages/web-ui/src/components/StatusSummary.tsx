@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { Hypothesis, Session } from '../types';
 import ExportButton from './ExportButton';
 import { groundingMeter } from '../tree/evidenceView';
-import { STATUS_COLORS, STATUS_LABELS } from '../theme';
+import { STATUS_COLORS, STATUS_LABELS, TEXT } from '../theme';
 
 interface Props {
   hypotheses: Map<string, Hypothesis>;
@@ -43,7 +43,7 @@ export default function StatusSummary({ hypotheses, session }: Props) {
       {counts.eliminated > 0 && <Pill color={STATUS_COLORS.eliminated} label={STATUS_LABELS.eliminated} count={counts.eliminated} />}
       {counts.corroborated > 0 && <Pill color={STATUS_COLORS.corroborated} label={STATUS_LABELS.corroborated} count={counts.corroborated} />}
       {counts.outOfScope > 0 && <Pill color={STATUS_COLORS['out-of-scope']} label={STATUS_LABELS['out-of-scope']} count={counts.outOfScope} />}
-      <span style={{ color: '#6b7280', borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
+      <span style={{ color: TEXT.secondary, borderLeft: '1px solid #30363d', paddingLeft: 12 }}>
         {counts.total} total
       </span>
       {grounding.total > 0 && (
@@ -74,7 +74,7 @@ function Pill({ color, label, count }: { color: string; label: string; count: nu
         background: color,
         display: 'inline-block',
       }} />
-      <span style={{ color: '#8b949e' }}>{count} {label}</span>
+      <span style={{ color: TEXT.secondary }}>{count} {label}</span>
     </span>
   );
 }

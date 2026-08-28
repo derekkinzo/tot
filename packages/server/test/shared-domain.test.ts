@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isPruned, isLive, isTerminal, isOpen,
   countSupporting, countRefuting,
-  deriveTitle, TITLE_MAX_LENGTH, nodeLabel, splitProse, titleProblem,
+  deriveTitle, TITLE_MAX_LENGTH, nodeLabel, readsAsClause, splitProse, titleProblem,
   type Hypothesis, type HypothesisStatus,
 } from '@tot-mcp/shared';
 
@@ -210,5 +210,56 @@ describe('deriveTitle', () => {
       const once = deriveTitle(s);
       expect(deriveTitle(once)).toBe(once);
     }
+  });
+});
+
+describe('readsAsClause', () => {
+  // The tools ask for a noun phrase because the label is the only text the canvas
+  // renders. Whether a phrase is a noun phrase is a claim about what it means, so
+  // this reports only what it can see: a closed-class copula or auxiliary standing
+  // as its own word, or a sentence break inside the label. Both mark a clause.
+
+  it('accepts the noun phrases the tools ask for', () => {
+    for (const label of [
+      'Writer pool exhaustion',
+      'Source query returns nothing',
+      'Index bloat under nightly load',
+      'Third-party payment latency',
+      'Writer starvation and index bloat',
+      'Cache miss storm',
+      'Deploy config drift',
+      'Other cause not listed',
+    ]) {
+      expect(readsAsClause(label), label).toBe(false);
+    }
+  });
+
+  it('flags a label that carries a finite clause', () => {
+    for (const label of [
+      'The writer pool was exhausted overnight',
+      'The source query is returning no rows',
+      'Latency has doubled since the deploy',
+      'The transform will drop every row',
+      'Nothing here can explain the gap',
+    ]) {
+      expect(readsAsClause(label), label).toBe(true);
+    }
+  });
+
+  it('flags a label holding more than one sentence', () => {
+    expect(readsAsClause('Writer pool exhaustion. Queue filled first')).toBe(true);
+    expect(readsAsClause('Why did it fail? Nobody checked')).toBe(true);
+  });
+
+  it('does not flag a word that merely contains an auxiliary', () => {
+    // Substring matching would read "Disk" as "is" and "Cannibalized" as "can".
+    for (const label of ['Disk saturation', 'Cannibalized cache entries', 'Bewildering index plan', 'Hasty rollout']) {
+      expect(readsAsClause(label), label).toBe(false);
+    }
+  });
+
+  it('says nothing about an empty or blank label, which titleProblem already refuses', () => {
+    expect(readsAsClause('')).toBe(false);
+    expect(readsAsClause('   ')).toBe(false);
   });
 });

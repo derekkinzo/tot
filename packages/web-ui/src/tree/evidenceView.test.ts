@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { orderEvidenceRows, evidenceLedger, groundingMeter } from './evidenceView';
+import { orderEvidenceRows, evidenceLedger, groundingMeter, linkedGroupSizes } from './evidenceView';
 import type { Evidence, Hypothesis, HypothesisStatus } from '../types';
 
 const ts = '2024-01-01T00:00:00.000Z';
@@ -215,5 +215,44 @@ describe('groundingMeter', () => {
 
   it('reports zero of zero for a session with no settled leaves', () => {
     expect(groundingMeter([leaf('pending', 'transcription')])).toEqual({ grounded: 0, total: 0 });
+  });
+});
+
+describe('linkedGroupSizes', () => {
+  // A panel listing five records beside a tally of three is unreadable unless the
+  // grouping is stated: the reader has no way to see which records weigh once.
+
+  it('reports the size of each group that holds more than one record', () => {
+    const h = hyp([
+      ev({ type: 'supports', linkedGroupId: 'g1' }),
+      ev({ type: 'supports', linkedGroupId: 'g1' }),
+      ev({ type: 'supports', linkedGroupId: 'g1' }),
+      ev({ type: 'refutes', linkedGroupId: 'g2' }),
+      ev({ type: 'refutes', linkedGroupId: 'g2' }),
+      ev({ type: 'supports' }),
+    ]);
+    expect(linkedGroupSizes(h)).toEqual(new Map([['g1', 3], ['g2', 2]]));
+  });
+
+  it('omits a group of one, which already weighs once', () => {
+    const h = hyp([ev({ type: 'supports', linkedGroupId: 'solo' }), ev({ type: 'supports' })]);
+    expect(linkedGroupSizes(h)).toEqual(new Map());
+  });
+
+  it('accounts for exactly the difference between the record count and the weight', () => {
+    // The arithmetic a reader has to be able to do: records minus the records
+    // hidden inside groups equals the weight the node face shows.
+    const h = hyp([
+      ev({ type: 'supports', linkedGroupId: 'g1' }),
+      ev({ type: 'supports', linkedGroupId: 'g1' }),
+      ev({ type: 'supports', linkedGroupId: 'g1' }),
+      ev({ type: 'supports' }),
+    ]);
+    const collapsed = [...linkedGroupSizes(h).values()].reduce((sum, size) => sum + (size - 1), 0);
+    expect(h.evidence.length - collapsed).toBe(evidenceLedger(h, { sessionGrounded: false }).supporting);
+  });
+
+  it('has nothing to report when no record was linked', () => {
+    expect(linkedGroupSizes(hyp([ev({ type: 'supports' }), ev({ type: 'refutes' })]))).toEqual(new Map());
   });
 });

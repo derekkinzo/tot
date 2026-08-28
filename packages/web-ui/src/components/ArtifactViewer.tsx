@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { TEXT } from '../theme';
 import { rendersAsLines } from '../types';
 import type { ArtifactIntegrity, ArtifactLineWindow, ArtifactRef } from '../types';
 import {
@@ -166,13 +167,13 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
                 }}
               >verbatim</span>
               <span style={{
-                fontFamily: 'monospace', fontSize: 13, color: '#e1e4e8',
+                fontFamily: 'monospace', fontSize: 13, color: TEXT.primary,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>{artifactSummary(artifact)}</span>
             </div>
-            <div style={{ fontSize: 12, color: '#8b949e', marginTop: 4 }}>{claim}</div>
+            <div style={{ fontSize: 12, color: TEXT.secondary, marginTop: 4 }}>{claim}</div>
             {artifact.command && (
-              <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+              <div style={{ fontFamily: 'monospace', fontSize: 11, color: TEXT.secondary, marginTop: 4 }}>
                 $ {artifact.command}
               </div>
             )}
@@ -180,7 +181,7 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
           <a
             href={urls.raw} target="_blank" rel="noreferrer"
             style={{
-              fontSize: 12, color: '#8b949e', textDecoration: 'none',
+              fontSize: 12, color: TEXT.secondary, textDecoration: 'none',
               border: '1px solid #30363d', borderRadius: 4, padding: '4px 8px', whiteSpace: 'nowrap',
             }}
           >open raw</a>
@@ -188,7 +189,7 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
             onClick={onClose}
             aria-label="Close"
             style={{
-              background: '#21262d', border: '1px solid #30363d', color: '#8b949e',
+              background: '#21262d', border: '1px solid #30363d', color: TEXT.secondary,
               cursor: 'pointer', fontSize: 16, lineHeight: 1, borderRadius: 4,
               width: 28, height: 28, flexShrink: 0,
             }}
@@ -204,7 +205,7 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
         <div style={{ flex: 1, overflow: 'auto', background: '#0d1117' }}>
           {error && <div style={{ padding: 16, color: '#f85149', fontSize: 13 }}>{error}</div>}
           {!error && !isText && (
-            <div style={{ padding: 16, color: '#8b949e', fontSize: 13 }}>
+            <div style={{ padding: 16, color: TEXT.secondary, fontSize: 13 }}>
               {formatBytes(artifact.bytes)} of {artifact.mediaType}. Use “open raw” to download it.
             </div>
           )}
@@ -237,7 +238,7 @@ export default function ArtifactViewer({ artifact, claim, onClose }: Props) {
         {isText && <footer style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '10px 16px', borderTop: '1px solid #21262d', background: '#161b22',
-          fontSize: 12, color: '#8b949e',
+          fontSize: 12, color: TEXT.secondary,
         }}>
           <button
             onClick={() => turnPage(-1)} disabled={atStart}

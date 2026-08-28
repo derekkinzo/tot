@@ -49,6 +49,8 @@ Framing axes to choose from:
 
 Pass the chosen axis as `axis` — it is required. Siblings can only be judged for overlap and coverage against a stated dimension, and naming it makes a split along two dimensions at once visible: if the children divide different dimensions, split along one and decompose again below it.
 
+Choose the axis adversarially rather than taking the first that fits: name another axis that could have divided this space, say why the one you chose separates the evidence better, and name what would show it was the wrong choice. A split cannot be redrawn once its children exist. Where the domain has an established framing, start from it — `references/decomposition-templates.md` carries axes for debugging, differential diagnosis, failure analysis, and decision problems, with the anti-patterns each one invites.
+
 Also state `gate`, how the children relate to the claim above them:
 
 - `one-of` — rivals, at most one of which holds. Two corroborated rivals are then a contradiction to resolve.
@@ -61,7 +63,7 @@ The siblings form a partition of the explanation space (cf. Chamberlin's method 
 - **Distinct siblings**: each hypothesis covers a different possibility unless co-occurrence is real. `gate=one-of` is the claim that they are exclusive; declaring it means two corroborated siblings need reconciling.
 - **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain. Neither exclusivity nor exhaustiveness can be checked from the tree, so both stay advisory — what the tools report is a conflict between what was declared and what was found.
 
-After decomposing, STOP and review:
+After decomposing, STOP and review. The point of dispatching a reviewer is that it did not write the decomposition: a structure checked only by its author inherits the blind spot that produced it.
 - Dispatch the `decomposition-evaluator` subagent to advise on overlap, coverage, level of abstraction, and testability.
 - Dispatch the `hypothesis-challenger` subagent on each child to surface missing alternatives and hidden assumptions.
 - Could a single observation belong to two of these by accident? If yes, refine boundaries.
