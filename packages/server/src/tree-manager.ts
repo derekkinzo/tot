@@ -13,7 +13,7 @@ import type {
   TreeState,
 } from './types.js';
 import { STAGNATION_THRESHOLD_DEFAULT, MAX_DEPTH_DEFAULT, MAX_HYPOTHESES_DEFAULT } from './defaults.js';
-import { nodeLabel, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
+import { nodeLabel, readsAsClause, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
 
 /**
  * Wordings that read as a residual branch. Word-bounded so "another" is not read
@@ -625,6 +625,10 @@ export class TreeManager extends EventEmitter {
 
     const catchAllLabels = labels.filter((l) => CATCH_ALL_WORDING.some((p) => p.test(l)));
 
+    // Judged on the authored label, not the lowercased comparison form, so the
+    // advisory quotes back what the agent wrote.
+    const clauseShapedLabels = children.map((c) => nodeLabel(c)).filter((l) => readsAsClause(l));
+
     // Whether siblings sit at one level of abstraction is deliberately NOT
     // reported here. That is a property of what the labels denote, not of their
     // length, and no lexical statistic can establish it (ANSI/NISO Z39.19-2005
@@ -638,6 +642,7 @@ export class TreeManager extends EventEmitter {
       duplicateLabels,
       combinedLabels: [...combined],
       catchAllLabels,
+      clauseShapedLabels,
     };
   }
 

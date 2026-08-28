@@ -1,4 +1,5 @@
 import { nodeLabel } from '../types';
+import { TEXT } from '../theme';
 import type { Hypothesis } from '../types';
 import { walkToRoot } from '../tree/walk';
 
@@ -23,7 +24,7 @@ export default function Breadcrumb({ selectedId, hypotheses, onNavigate }: Props
     }}>
       {path.map((h, i) => (
         <span key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {i > 0 && <span style={{ color: '#6b7280' }}>›</span>}
+          {i > 0 && <span style={{ color: TEXT.secondary }}>›</span>}
           <button
             onClick={() => onNavigate(h.id)}
             style={{

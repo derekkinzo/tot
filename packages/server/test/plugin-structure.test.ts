@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { TOOL_SCHEMAS } from '../src/tools.js';
+import { buildChallengePrompt, buildInvestigatePrompt, buildReviewDecompositionPrompt } from '../src/prompts.js';
 import { TITLE_MAX_LENGTH } from '@tot-mcp/shared';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -178,6 +179,17 @@ describe('what the guidance tells an agent to call', () => {
   const toolsNamedIn = (text: string): string[] =>
     [...text.matchAll(NAMED_AS_TOOL)].map((m) => m[1] ?? m[2] ?? m[3]);
 
+  /**
+   * The protocol text the MCP prompt hands a client, which is the whole of the
+   * guidance for a client that loads no skills — so it is held to the same
+   * contract as the shipped markdown.
+   */
+  const promptText = (): string => [
+    buildInvestigatePrompt('why does the nightly export finish with no rows'),
+    buildReviewDecompositionPrompt('a-parent-id'),
+    buildChallengePrompt('a-hypothesis-id'),
+  ].join('\n');
+
   /** Markdown that ships as guidance: skills, agent briefs, references, README. */
   function guidanceFiles(): string[] {
     const files = [join(REPO_ROOT, 'README.md')];
@@ -202,13 +214,45 @@ describe('what the guidance tells an agent to call', () => {
   it('names only tools this server serves', () => {
     const served = new Set(Object.keys(TOOL_SCHEMAS));
     const unknown: string[] = [];
-    for (const file of guidanceFiles()) {
-      const text = readFileSync(file, 'utf-8');
+    for (const [file, text] of [
+      ...guidanceFiles().map((f) => [f, readFileSync(f, 'utf-8')] as const),
+      ['the tot-investigate prompt', promptText()] as const,
+    ]) {
       for (const name of toolsNamedIn(text)) {
-        if (!served.has(name)) unknown.push(`${file.slice(REPO_ROOT.length + 1)}: ${name}`);
+        if (!served.has(name)) unknown.push(`${file.replace(`${REPO_ROOT}/`, '')}: ${name}`);
       }
     }
     expect(unknown, `named as a tool but not served:\n${unknown.join('\n')}`).toEqual([]);
+  });
+
+
+  it('gives a client that loads no skills the whole protocol', () => {
+    // A client with no skills and no agent briefs sees only this text. Every tool
+    // it would need, and the review step, have to be in it.
+    const text = promptText();
+    for (const tool of Object.keys(TOOL_SCHEMAS)) {
+      expect(text, `the prompt never names ${tool}`).toMatch(new RegExp(`\`${tool}[\`(]`));
+    }
+  });
+
+
+  it('offers an independent review a client can run without subagents', () => {
+    // A client with no subagent machinery still needs a way to have a structure
+    // read by something that did not write it. Both briefs must say so and must
+    // name the read surfaces they depend on.
+    for (const [name, text] of [
+      ['tot-review-decomposition', buildReviewDecompositionPrompt('p1')],
+      ['tot-challenge-hypothesis', buildChallengePrompt('h1')],
+    ] as const) {
+      expect(text, name).toMatch(/`get_tree`/);
+      expect(text.length, name).toBeGreaterThan(400);
+    }
+    // The review states what it cannot settle rather than implying a verdict.
+    const review = buildReviewDecompositionPrompt('p1');
+    expect(review).toMatch(/never a pass\/fail|cannot be established/i);
+    expect(review).toMatch(/another axis/i);
+    // The challenge records its proposal in the tree, not only in its reply.
+    expect(buildChallengePrompt('h1')).toMatch(/`add_evidence`/);
   });
 
   it('states the label bound the tools actually enforce', () => {
@@ -229,7 +273,7 @@ describe('what the guidance tells an agent to call', () => {
   it('documents every tool it serves somewhere in the guidance', () => {
     // The other direction: a tool no guidance mentions is one an agent has to
     // discover from the schema list alone.
-    const guidance = guidanceFiles().map((f) => readFileSync(f, 'utf-8')).join('\n');
+    const guidance = [...guidanceFiles().map((f) => readFileSync(f, 'utf-8')), promptText()].join('\n');
     const undocumented = Object.keys(TOOL_SCHEMAS)
       .filter((tool) => !new RegExp(`\`${tool}[\`(]`).test(guidance));
     expect(undocumented, `served but never named in guidance: ${undocumented.join(', ')}`).toEqual([]);

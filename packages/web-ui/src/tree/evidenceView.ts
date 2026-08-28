@@ -40,6 +40,24 @@ export function orderEvidenceRows(h: Hypothesis): EvidenceRows {
   return rows;
 }
 
+/**
+ * How many records each linked group holds, keyed by group id.
+ *
+ * A group of records the agent declared to be one observation weighs once
+ * however many records it holds, so a reader seeing five rows and a tally of
+ * three needs the grouping stated to reconcile them. Groups of one are omitted:
+ * a lone record already weighs once, so naming it a group would say nothing.
+ */
+export function linkedGroupSizes(h: Hypothesis): Map<string, number> {
+  const sizes = new Map<string, number>();
+  for (const e of h.evidence) {
+    if (e.linkedGroupId === undefined) continue;
+    sizes.set(e.linkedGroupId, (sizes.get(e.linkedGroupId) ?? 0) + 1);
+  }
+  for (const [id, size] of sizes) if (size < 2) sizes.delete(id);
+  return sizes;
+}
+
 /** The marks a node face shows for its evidence. */
 export interface EvidenceLedger {
   refuting: number;

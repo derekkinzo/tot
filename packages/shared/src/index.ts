@@ -379,6 +379,39 @@ export interface HypothesisDraft {
  * a noun phrase, so a trailing sentence period is rejected along with blank text
  * and text past the length bound.
  */
+/**
+ * English's closed class of copulas and auxiliaries. A word from this list
+ * standing on its own turns a phrase into a clause, which is what distinguishes
+ * "the writer pool was exhausted" from "writer pool exhaustion". Closed because
+ * the language does not add to it, so this is the class itself rather than a
+ * sample of it.
+ */
+const FINITE_AUXILIARIES = [
+  'is', 'are', 'was', 'were', 'am', 'be', 'been', 'being',
+  'has', 'have', 'had', 'do', 'does', 'did',
+  'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must',
+];
+
+const CLAUSE_MARKERS = new RegExp(`(?:^|[^\\p{L}])(?:${FINITE_AUXILIARIES.join('|')})(?:[^\\p{L}]|$)`, 'iu');
+
+/**
+ * Whether a label reads as a clause rather than the noun phrase the tools ask
+ * for — because it carries a finite auxiliary, or because it runs to more than
+ * one sentence.
+ *
+ * Advisory only, and reported as such: a noun phrase is a claim about what the
+ * words denote, which no lexical test settles. What this does establish is that
+ * a clause marker is present, and a label carrying one is prose in a slot the
+ * canvas renders as a name.
+ */
+export function readsAsClause(label: string): boolean {
+  const flat = label.replace(/\s+/g, ' ').trim();
+  if (flat === '') return false;
+  // A sentence break inside the label: terminal punctuation with a word after it.
+  if (/[.!?]\s+\p{L}/u.test(flat)) return true;
+  return CLAUSE_MARKERS.test(flat);
+}
+
 export function titleProblem(title: string): string | null {
   const trimmed = title.trim();
   if (trimmed === '') return 'must not be empty or whitespace-only';

@@ -1,9 +1,9 @@
 import { nodeLabel, type ArtifactRef, type Evidence, type Hypothesis } from '../types';
-import { orderEvidenceRows } from '../tree/evidenceView';
+import { linkedGroupSizes, orderEvidenceRows } from '../tree/evidenceView';
 import { artifactSummary } from '../tree/artifactView';
 import { splitBadge, splitConflicts } from '../tree/splitView';
 import { DETAIL_PANEL_WIDTH } from '../geometry';
-import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS } from '../theme';
+import { EVIDENCE_TYPE_COLORS, STATUS_COLORS, STATUS_LABELS, TEXT } from '../theme';
 import { conclusionStatus } from '../tree/conclusion';
 
 interface Props {
@@ -26,6 +26,8 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
   // of throwing (it sits in its own ErrorBoundary, but degrading is friendlier).
   const evidence = hypothesis.evidence ?? [];
   const rows = orderEvidenceRows({ ...hypothesis, evidence });
+  const linked = linkedGroupSizes({ ...hypothesis, evidence });
+  const nodeTitle = nodeLabel(hypothesis);
   const childCount = hypothesis.children?.length ?? 0;
   const createdAt = new Date(hypothesis.metadata?.createdAt ?? '');
   const createdLabel = Number.isNaN(createdAt.getTime()) ? '—' : createdAt.toLocaleTimeString();
@@ -61,18 +63,25 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
           aria-label="Close details"
           title="Close the detail panel"
           style={{
-            background: '#21262d', border: '1px solid #30363d', color: '#8b949e',
+            background: '#21262d', border: '1px solid #30363d', color: TEXT.secondary,
             cursor: 'pointer', fontSize: 16, lineHeight: 1, borderRadius: 4,
             width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >×</button>
       </div>
 
-      {/* Content */}
+      {/* The label first, because it is what the canvas showed and so what the
+          reader clicked; the long-form claim below it, when one was authored and
+          says more than the label. */}
       <div>
-        <div style={{ fontSize: 18, fontWeight: 500, lineHeight: 1.4, color: '#e1e4e8' }}>
-          {hypothesis.statement ?? nodeLabel(hypothesis)}
+        <div style={{ fontSize: 18, fontWeight: 500, lineHeight: 1.4, color: TEXT.primary }}>
+          {nodeTitle}
         </div>
+        {hypothesis.statement && hypothesis.statement !== nodeTitle && (
+          <div style={{ fontSize: 14, lineHeight: 1.55, color: TEXT.secondary, marginTop: 8 }}>
+            {hypothesis.statement}
+          </div>
+        )}
       </div>
 
       {/* How this node was split: the dimension its children divide and what
@@ -82,12 +91,12 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
         <div style={{ background: '#1c1f26', borderRadius: 8, padding: '12px 14px' }}>
           <div style={{
             fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-            letterSpacing: 0.5, color: '#8b949e', marginBottom: 6,
+            letterSpacing: 0.5, color: TEXT.secondary, marginBottom: 6,
           }}>
             Split into {hypothesis.children.length}
           </div>
-          <div style={{ fontSize: 14, color: '#e1e4e8' }}>{split.axis}</div>
-          <div style={{ fontSize: 12, color: '#8b949e', marginTop: 6 }}>
+          <div style={{ fontSize: 14, color: TEXT.primary }}>{split.axis}</div>
+          <div style={{ fontSize: 12, color: TEXT.secondary, marginTop: 6 }}>
             {split.label
               ? <><strong style={{ color: '#c9d1d9' }}>{split.label}</strong> — {split.meaning}</>
               : split.meaning}
@@ -148,7 +157,7 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
             }}>
               {label}
             </div>
-            <div style={{ fontSize: 14, lineHeight: 1.5, color: '#e1e4e8' }}>
+            <div style={{ fontSize: 14, lineHeight: 1.5, color: TEXT.primary }}>
               {hypothesis.conclusion.reason}
             </div>
           </div>
@@ -164,23 +173,25 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
             fontWeight: 600,
             textTransform: 'uppercase',
             letterSpacing: 0.5,
-            color: '#8b949e',
+            color: TEXT.secondary,
             marginBottom: 10,
           }}>
             Evidence ({evidence.length})
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[...rows.refuters, ...rows.neutral, ...rows.supports].map((ev) => (
-              <EvidenceRow key={ev.id} ev={ev} onOpenArtifact={onOpenArtifact} />
+              <EvidenceRow key={ev.id} ev={ev} linked={linked} onOpenArtifact={onOpenArtifact} />
             ))}
           </div>
           {rows.tray.length > 0 && (
             <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, color: TEXT.secondary, marginBottom: 6 }}>
                 Considered, not discriminating ({rows.tray.length})
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, opacity: 0.65 }}>
-                {rows.tray.map((ev) => <EvidenceRow key={ev.id} ev={ev} onOpenArtifact={onOpenArtifact} />)}
+                {rows.tray.map((ev) => (
+                  <EvidenceRow key={ev.id} ev={ev} linked={linked} onOpenArtifact={onOpenArtifact} />
+                ))}
               </div>
             </div>
           )}
@@ -195,22 +206,22 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
         gridTemplateColumns: '1fr 1fr',
         gap: 8,
         fontSize: 12,
-        color: '#6b7280',
+        color: TEXT.secondary,
       }}>
         <div>
-          <div style={{ color: '#8b949e', fontWeight: 500 }}>ID</div>
+          <div style={{ color: TEXT.secondary, fontWeight: 500 }}>ID</div>
           <div style={{ fontFamily: 'monospace' }}>{hypothesis.id.slice(0, 8)}</div>
         </div>
         <div>
-          <div style={{ color: '#8b949e', fontWeight: 500 }}>Depth</div>
+          <div style={{ color: TEXT.secondary, fontWeight: 500 }}>Depth</div>
           <div>{hypothesis.depth}</div>
         </div>
         <div>
-          <div style={{ color: '#8b949e', fontWeight: 500 }}>Created</div>
+          <div style={{ color: TEXT.secondary, fontWeight: 500 }}>Created</div>
           <div>{createdLabel}</div>
         </div>
         <div>
-          <div style={{ color: '#8b949e', fontWeight: 500 }}>Children</div>
+          <div style={{ color: TEXT.secondary, fontWeight: 500 }}>Children</div>
           <div>{childCount}</div>
         </div>
       </div>
@@ -223,11 +234,14 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
  * because whether a claim rests on bytes or on a retelling is the first thing an
  * auditor needs to know.
  */
-function EvidenceRow({ ev, onOpenArtifact }: {
+function EvidenceRow({ ev, linked, onOpenArtifact }: {
   ev: Evidence;
+  /** Sizes of the linked groups on this node, so a grouped row can say so. */
+  linked: Map<string, number>;
   onOpenArtifact?: (artifact: ArtifactRef, claim: string) => void;
 }) {
-  const accent = EVIDENCE_TYPE_COLORS[ev.type] ?? '#8b949e';
+  const accent = EVIDENCE_TYPE_COLORS[ev.type] ?? TEXT.secondary;
+  const groupSize = ev.linkedGroupId === undefined ? undefined : linked.get(ev.linkedGroupId);
   return (
     <div style={{
       padding: '12px 14px',
@@ -252,8 +266,16 @@ function EvidenceRow({ ev, onOpenArtifact }: {
         {ev.decisive && (
           <span title="The verdict turns on this record" style={{ fontSize: 11, color: '#d29922' }}>▪ decisive</span>
         )}
+        {groupSize !== undefined && (
+          <span
+            title={`Declared one observation with ${groupSize - 1} other record(s); the group counts once toward a verdict, however many records it holds`}
+            style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, border: '1px solid #30363d', color: TEXT.secondary }}
+          >
+            one of {groupSize} · counts once
+          </span>
+        )}
       </div>
-      <div style={{ fontSize: 15, lineHeight: 1.5, color: '#e1e4e8' }}>{ev.content}</div>
+      <div style={{ fontSize: 15, lineHeight: 1.5, color: TEXT.primary }}>{ev.content}</div>
       {ev.artifact && (
         <button
           onClick={() => onOpenArtifact?.(ev.artifact!, ev.content)}
@@ -263,7 +285,7 @@ function EvidenceRow({ ev, onOpenArtifact }: {
             display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, width: '100%',
             background: '#0d1117', border: '1px solid #30363d', borderRadius: 6,
             padding: '6px 8px', cursor: onOpenArtifact ? 'pointer' : 'default',
-            color: '#8b949e', fontSize: 12, fontFamily: 'monospace', textAlign: 'left',
+            color: TEXT.secondary, fontSize: 12, fontFamily: 'monospace', textAlign: 'left',
           }}
         >
           <span aria-hidden>▤</span>
@@ -278,7 +300,7 @@ function EvidenceRow({ ev, onOpenArtifact }: {
         </button>
       )}
       {ev.source && (
-        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}>Source: {ev.source}</div>
+        <div style={{ fontSize: 12, color: TEXT.secondary, marginTop: 6 }}>Source: {ev.source}</div>
       )}
     </div>
   );

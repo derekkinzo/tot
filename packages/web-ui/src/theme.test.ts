@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { STATUS_COLORS, STATUS_NODE_STYLES, STATUS_LABELS, EVIDENCE_TYPE_COLORS } from './theme';
-import { isPruned, type HypothesisStatus } from './types';
+import { STATUS_COLORS, STATUS_NODE_STYLES, STATUS_LABELS, EVIDENCE_TYPE_COLORS, TEXT } from './theme';
+import type { HypothesisStatus } from './types';
 
 const STYLESHEET = readFileSync(resolve(__dirname, '../index.html'), 'utf-8');
 
@@ -124,13 +124,11 @@ describe('status palette', () => {
     }
   });
 
-  it('keeps a status border perceivable wherever the border is the cue', () => {
-    // WCAG 2.2 SC 1.4.11 floor for a user-interface component. A pruned node is
-    // exempt because its border is deliberately muted to retire the lineage
-    // visually; the glyph, the label, the strikethrough, and the reduced opacity
-    // carry its state instead.
+  it('keeps every status border perceivable against its own face', () => {
+    // WCAG 2.2 SC 1.4.11 floor for a user-interface component, with no status
+    // exempt: a pruned node is retired by its glyph, its strikethrough and its
+    // reduced opacity, so its ring does not also have to be too faint to see.
     for (const [status, style] of Object.entries(STATUS_NODE_STYLES)) {
-      if (isPruned(status as HypothesisStatus)) continue;
       expect(contrast(style.border, style.bg), status).toBeGreaterThanOrEqual(3);
     }
   });
@@ -162,11 +160,12 @@ describe('status palette', () => {
   });
 });
 
+const COMPONENT_DIR = resolve(__dirname, 'components');
+
 describe('a control that shows only a glyph still says what it does', () => {
   // A button whose whole content is a symbol is announced as "button" and nothing
   // else without an accessible name (WCAG 2.2 SC 4.1.2 Name, Role, Value). Checked
   // as the class over every component, so a new one cannot slip in unnamed.
-  const COMPONENT_DIR = resolve(__dirname, 'components');
   const GLYPH_ONLY = /^[\s×✕✖?▼▶◀▲←→↑↓·▪⚠◍✓✗○◉⊘+\-–—]{1,4}$/;
 
   /**
@@ -248,5 +247,115 @@ describe('a control that shows only a glyph still says what it does', () => {
       }
     }
     expect(offenders, `glyph-only controls with no accessible name:\n${offenders.join('\n')}`).toEqual([]);
+  });
+});
+
+
+describe('text is readable on the surface it sits on', () => {
+  // WCAG 2.2 SC 1.4.3, level AA: text below 18.66px bold / 24px needs 4.5:1.
+  // Every colour below labels something at 10-15px, so 4.5:1 is the floor for
+  // all of them — a hue chosen to read on white does not read at 12px here.
+  const AA_SMALL_TEXT = 4.5;
+
+  /** Surfaces the app paints text on. */
+  const SURFACES = {
+    panel: '#161b22',
+    card: '#1c1f26',
+    'node/pending': '#1e293b',
+    'node/dark': '#1c1917',
+    'node/corroborated': '#052e16',
+    'node/out-of-scope': '#1f1b3a',
+    canvas: CANVAS_BACKGROUND,
+    'raw bytes': '#0d1117',
+    button: '#21262d',
+  };
+
+  /** `color` composited over `background` at `alpha`, as CSS 8-digit hex does. */
+  function composite(color: string, background: string, alpha: number): string {
+    const channels = (hex: string) => [0, 2, 4].map((i) => parseInt(hex.replace('#', '').slice(i, i + 2), 16));
+    const mixed = channels(color).map((c, i) => Math.round(c * alpha + channels(background)[i] * (1 - alpha)));
+    return `#${mixed.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  it('names a status in a colour readable on the panel and on its own tint', () => {
+    // The detail panel writes the status word, and the conclusion heading, in the
+    // status colour over a 12.5% wash of that same colour — the tint lifts the
+    // background toward the text, which is the worst case for this pairing.
+    for (const [status, color] of Object.entries(STATUS_COLORS)) {
+      for (const surface of [SURFACES.panel, SURFACES.card]) {
+        expect(contrast(color, surface), `${status} ${color} on ${surface}`).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+        const tint = composite(color, surface, 0.125);
+        expect(contrast(color, tint), `${status} ${color} on its own tint over ${surface}`)
+          .toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+      }
+    }
+  });
+
+  it('names an evidence type in a colour readable on a card and on every node face', () => {
+    const faces = Object.values(STATUS_NODE_STYLES).map((s) => s.bg);
+    for (const [type, color] of Object.entries(EVIDENCE_TYPE_COLORS)) {
+      for (const surface of [SURFACES.card, ...faces]) {
+        expect(contrast(color, surface), `${type} ${color} on ${surface}`).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+      }
+    }
+  });
+
+  it('keeps both text tiers readable on every surface', () => {
+    for (const [tier, color] of Object.entries(TEXT)) {
+      for (const [name, surface] of Object.entries(SURFACES)) {
+        expect(contrast(color, surface), `TEXT.${tier} ${color} on ${name}`).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+      }
+    }
+  });
+
+  /**
+   * The object literal a match sits inside, found by walking back to the nearest
+   * unclosed `{` and forward to its partner. Exact rather than a window, so a
+   * neighbouring style block cannot be read as this one's.
+   */
+  function enclosingObject(src: string, at: number): string {
+    let depth = 0;
+    let start = -1;
+    for (let i = at; i >= 0; i--) {
+      if (src[i] === '}') depth++;
+      else if (src[i] === '{') {
+        if (depth === 0) { start = i; break; }
+        depth--;
+      }
+    }
+    if (start === -1) return '';
+    depth = 0;
+    for (let i = start; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}' && --depth === 0) return src.slice(start, i + 1);
+    }
+    return src.slice(start);
+  }
+
+  it('paints no text in a colour the shared surfaces cannot carry', () => {
+    // The class, over every component: a hard-coded text colour is readable on
+    // the panel and the card, or it declares the surface it sits on in the same
+    // style object (a banner supplies its own background, so it is judged
+    // against that instead).
+    const offenders: string[] = [];
+    for (const file of readdirSync(COMPONENT_DIR).filter((f) => f.endsWith('.tsx'))) {
+      const src = readFileSync(resolve(COMPONENT_DIR, file), 'utf-8');
+      for (const m of src.matchAll(/color: '(#[0-9a-fA-F]{3,8})'/g)) {
+        const scope = enclosingObject(src, m.index!);
+        if (/\bbackground(Color)?:/.test(scope)) continue;
+        const worst = Math.min(contrast(m[1], SURFACES.panel), contrast(m[1], SURFACES.card));
+        if (worst < AA_SMALL_TEXT) offenders.push(`${file}: ${m[1]} (${worst.toFixed(2)}:1)`);
+      }
+    }
+    expect(offenders, `text colours below ${AA_SMALL_TEXT}:1 with no surface of their own:\n${offenders.join('\n')}`).toEqual([]);
+  });
+
+  it('finds the declarations it is meant to judge', () => {
+    // Guards the guard: a scan that matched nothing would pass vacuously.
+    let seen = 0;
+    for (const file of readdirSync(COMPONENT_DIR).filter((f) => f.endsWith('.tsx'))) {
+      seen += [...readFileSync(resolve(COMPONENT_DIR, file), 'utf-8').matchAll(/color: '#[0-9a-fA-F]{3,8}'/g)].length;
+    }
+    expect(seen).toBeGreaterThan(5);
   });
 });

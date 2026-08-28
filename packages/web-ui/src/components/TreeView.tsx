@@ -19,7 +19,7 @@ import Legend from './Legend';
 import FollowIndicator from './FollowIndicator';
 import SessionSelector from './SessionSelector';
 import { nodeLabel, type Hypothesis, type Session } from '../types';
-import { STATUS_COLORS } from '../theme';
+import { STATUS_COLORS, TEXT } from '../theme';
 import { getPathToRoot, computeLayout, framableNodeIds } from '../hooks/treeLayout';
 import { nextNavTarget } from '../hooks/navTarget';
 import { canvasOwnsKey, type KeyTarget } from '../hooks/keyboardOwnership';
@@ -320,7 +320,7 @@ function TreeViewInner({ hypotheses, rootId, selectedId, onSelect, panelOpen, re
                     <SessionSelector currentSessionId={session.id} onSwitch={(id) => { onLoadSession(id); onSelect(null); }} />
                   </>
                 ) : (
-                  <span style={{ color: '#8b949e' }}>Waiting for session...</span>
+                  <span style={{ color: TEXT.secondary }}>Waiting for session...</span>
                 )}
               </div>
             </div>
@@ -426,13 +426,13 @@ function MenuItem({ label, shortcut, onClick }: { label: string; shortcut: strin
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         width: '100%', padding: '8px 14px', background: 'none', border: 'none',
-        color: '#e1e4e8', fontSize: 13, cursor: 'pointer', textAlign: 'left',
+        color: TEXT.primary, fontSize: 13, cursor: 'pointer', textAlign: 'left',
       }}
       onMouseEnter={(e) => { (e.target as HTMLElement).style.background = '#21262d'; }}
       onMouseLeave={(e) => { (e.target as HTMLElement).style.background = 'none'; }}
     >
       <span>{label}</span>
-      {shortcut && <span style={{ color: '#6b7280', fontSize: 11 }}>{shortcut}</span>}
+      {shortcut && <span style={{ color: TEXT.secondary, fontSize: 11 }}>{shortcut}</span>}
     </button>
   );
 }

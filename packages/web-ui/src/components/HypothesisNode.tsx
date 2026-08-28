@@ -1,6 +1,6 @@
 import { memo, useState, useRef } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { STATUS_NODE_STYLES, EVIDENCE_TYPE_COLORS } from '../theme';
+import { EVIDENCE_TYPE_COLORS, STATUS_NODE_STYLES, TEXT } from '../theme';
 import { NODE_WIDTH } from '../geometry';
 import { isPruned, type HypothesisData } from '../types';
 
@@ -46,7 +46,7 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
         {/* Status header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
           <span style={{ fontSize: 14 }}>{style.icon}</span>
-          <span style={{ fontSize: 12, color: '#8b949e', textTransform: 'capitalize' }}>
+          <span style={{ fontSize: 12, color: TEXT.secondary, textTransform: 'capitalize' }}>
             {d.status}
           </span>
         </div>
@@ -113,19 +113,19 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
           )}
           {d.ledger.supporting > 0 && (
             <span title={`Counts as ${d.ledger.supporting} supporting observation(s); records declared as one observation count once`}
-              style={{ fontSize: 11, color: '#8b949e' }}>
+              style={{ fontSize: 11, color: TEXT.secondary }}>
               ✓{d.ledger.supporting}
             </span>
           )}
           {d.ledger.neutral > 0 && (
-            <span title={`${d.ledger.neutral} neutral record(s)`} style={{ fontSize: 11, color: '#6b7280' }}>
+            <span title={`${d.ledger.neutral} neutral record(s)`} style={{ fontSize: 11, color: TEXT.secondary }}>
               ·{d.ledger.neutral}
             </span>
           )}
           {d.ledger.setAside > 0 && (
             <span
               title={`${d.ledger.setAside} record(s) declared not to discriminate between the live alternatives`}
-              style={{ fontSize: 11, color: '#6b7280' }}
+              style={{ fontSize: 11, color: TEXT.secondary }}
             >⊘{d.ledger.setAside}</span>
           )}
           {d.ledger.hasDecisive && (
@@ -167,7 +167,7 @@ function HypothesisNode({ id: nodeId, data }: NodeProps) {
               borderRadius: 6,
               padding: '8px 12px',
               fontSize: 12,
-              color: '#e1e4e8',
+              color: TEXT.primary,
               maxWidth: 320,
               whiteSpace: 'pre-wrap',
               lineHeight: 1.4,
