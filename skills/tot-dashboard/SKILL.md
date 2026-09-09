@@ -3,7 +3,7 @@ name: tot-dashboard
 description: Use this skill when the user asks to "open the dashboard", "show the visualization", "view the tree in the browser", or wants to launch the live tot-mcp web UI in the system browser.
 ---
 
-# /tot-dashboard
+# /tot-mcp:tot-dashboard
 
 Open the live Tree of Thought visualization in the default browser.
 

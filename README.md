@@ -118,24 +118,32 @@ tree. Each MCP server instance picks its own free port at startup.
 
 The repository ships markdown definitions under `skills/`, `agents/`, and
 `hooks/` for Claude Code users who want guided workflows on top of the raw
-MCP tools. Point Claude Code at the cloned directory to load them.
+MCP tools. They are part of the plugin, so installing it registers them —
+either from the published marketplace (**Quick Start** above) or from a clone:
+
+```
+/plugin marketplace add /path/to/your/clone
+/plugin install tot-mcp
+```
+
+Skills are namespaced by the plugin that provides them, so the commands are
+`/tot-mcp:tot-reason` and so on:
 
 | Slash command | Purpose |
 |-------|---------|
-| `/tot` | Open the live tree visualization for the current project in the browser |
-| `/tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
-| `/tot-inspect` | View current tree state, progress, and visualization |
-| `/tot-export` | Generate a Markdown investigation report from a completed tree |
-| `/tot-dashboard` | Open the live dashboard in the browser (URL reported by `get_status`) |
+| `/tot-mcp:tot` | Open the live tree visualization for the current project in the browser |
+| `/tot-mcp:tot-reason` | Full structured reasoning workflow — domain investigation, decomposition, evidence gathering, elimination |
+| `/tot-mcp:tot-inspect` | View current tree state, progress, and visualization |
+| `/tot-mcp:tot-export` | Generate a Markdown investigation report from a completed tree |
+| `/tot-mcp:tot-dashboard` | Open the live dashboard in the browser (URL reported by `get_status`) |
 
-Installed as a plugin, skills are namespaced — `/tot-mcp:tot-reason`. Loaded from
-a cloned directory, they keep their bare names.
+Subagents are namespaced the same way:
 
 | Agent | Purpose |
 |-------|---------|
-| `hypothesis-challenger` | Stress-tests a hypothesis from multiple angles, surfacing assumptions and missing alternatives |
-| `evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
-| `decomposition-evaluator` | Advises on decomposition structure: sibling overlap, coverage, level of abstraction, testability. Emits advisory categories, not pass/fail. |
+| `tot-mcp:hypothesis-challenger` | Stress-tests a hypothesis from multiple angles, surfacing assumptions and missing alternatives |
+| `tot-mcp:evidence-reviewer` | Audits evidence for directness, source diversity, and diagnosticity |
+| `tot-mcp:decomposition-evaluator` | Advises on decomposition structure: sibling overlap, coverage, level of abstraction, testability. Emits advisory categories, not pass/fail. |
 
 Hooks under `hooks/hooks.json` run at `SessionStart` (on start-up and resume):
 one builds the bundled MCP server when its sources differ from the last build,

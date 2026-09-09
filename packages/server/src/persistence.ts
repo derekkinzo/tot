@@ -32,15 +32,18 @@ export interface SessionIndex {
 export class Persistence {
   private filePath: string;
   private onError?: (err: Error) => void;
-  /** Whether the file may end mid-record, so the next append has to close that
-   *  record off before starting its own. See {@link endsMidRecord}. */
-  private unterminated: boolean;
+  private onRecovered?: () => void;
 
-  constructor(dataDir: string, sessionId: string, onError?: (err: Error) => void) {
+  constructor(
+    dataDir: string,
+    sessionId: string,
+    onError?: (err: Error) => void,
+    onRecovered?: () => void,
+  ) {
     ensureStoreDir(dataDir);
     this.filePath = join(dataDir, `${sessionId}.jsonl`);
     this.onError = onError;
-    this.unterminated = endsMidRecord(this.filePath);
+    this.onRecovered = onRecovered;
   }
 
   async append(type: string, payload: unknown): Promise<void> {
@@ -57,13 +60,20 @@ export class Persistence {
     // one, which the caller would still be told was written, because this append
     // itself succeeds. Closing the partial record first confines the damage to
     // the record that actually failed. Readers drop the resulting blank line.
-    const line = (this.unterminated ? '\n' : '') + JSON.stringify(entry) + '\n';
+    //
+    // Read from the file each time rather than remembered from the last append,
+    // because this journal is shared: a peer holding the same session can leave a
+    // partial record at any point, and a flag set from what THIS writer last did
+    // says nothing about that.
+    const line = (endsMidRecord(this.filePath) ? '\n' : '') + JSON.stringify(entry) + '\n';
     try {
       // Written through a handle so the bytes can be flushed to the device before
       // this resolves. `appendFile` alone returns once the kernel holds them,
       // which survives the process dying but not the machine doing so, and the
       // caller is told the mutation was saved either way. The sync closes that
-      // gap, so an acknowledgement means the same thing in both cases.
+      // gap, so an acknowledgement means the same thing in both cases. Awaited in
+      // this order: a sync that this does not wait for, or that runs before the
+      // write, leaves the same gap while looking closed.
       const handle = await open(this.filePath, 'a');
       try {
         await handle.appendFile(line);
@@ -71,9 +81,10 @@ export class Persistence {
       } finally {
         await handle.close();
       }
-      this.unterminated = false;
+      // Idempotent, and fired on every success rather than on a transition: a
+      // writer that has recovered cannot know whether anyone was told it failed.
+      this.onRecovered?.();
     } catch (err) {
-      this.unterminated = true;
       console.error(`[tot-mcp] Warning: failed to write JSONL: ${err}`);
       this.onError?.(err instanceof Error ? err : new Error(String(err)));
       // Propagate so the sink can flag the session unhealthy and the tool
@@ -127,6 +138,51 @@ export function pickActiveSession<T extends { status: string; createdAt: string 
   return sorted.find((s) => s.status === 'open') ?? sorted[0];
 }
 
+/** The journals of a store, in directory order; empty when there is no store. */
+function journalPaths(dataDir: string): string[] {
+  if (!existsSync(dataDir)) return [];
+  try {
+    return readdirSync(dataDir).filter((f) => f.endsWith('.jsonl')).map((f) => join(dataDir, f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Folds one journal into its index entry, or undefined when the file describes no
+ * session. Throws only what reading the file itself throws.
+ */
+function foldIndexEntry(filePath: string): SessionIndex | undefined {
+  const content = readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter((l) => l.trim());
+  if (lines.length === 0) return undefined;
+
+  const state = emptyReplayState();
+  let skipped = 0;
+  for (const line of lines) {
+    try {
+      applyEntry(state, JSON.parse(line) as JournalEntry);
+    } catch {
+      skipped++; // keep folding the rest
+    }
+  }
+
+  const session = foldedSession(state);
+  if (!session) return undefined; // nothing describing a session → not a session file
+  warnIfFromNewerWriter(state, filePath);
+  warnIfLinesSkipped(skipped, lines.length, filePath);
+
+  return {
+    id: session.id,
+    problem: session.problem,
+    status: deriveScanStatus(session, state.hypotheses, state.sawExplicitTerminal),
+    createdAt: session.createdAt,
+    filePath,
+    nodeCount: state.hypotheses.length,
+    unreadableLines: skipped,
+  };
+}
+
 /**
  * Scans session files and returns lightweight metadata. Folds every line
  * through the shared {@link applyEntry} reducer (so scan and full replay agree
@@ -134,56 +190,79 @@ export function pickActiveSession<T extends { status: string; createdAt: string 
  * Corrupt lines are skipped rather than discarding an otherwise-recoverable file.
  */
 export function scanSessions(dataDir: string): SessionIndex[] {
-  if (!existsSync(dataDir)) return [];
-
-  let files: string[];
-  try {
-    files = readdirSync(dataDir).filter((f) => f.endsWith('.jsonl'));
-  } catch {
-    return [];
-  }
-
   const index: SessionIndex[] = [];
-
-  for (const file of files) {
-    const filePath = join(dataDir, file);
+  for (const filePath of journalPaths(dataDir)) {
     try {
-      const content = readFileSync(filePath, 'utf-8');
-      const lines = content.split('\n').filter((l) => l.trim());
-      if (lines.length === 0) continue;
-
-      const state = emptyReplayState();
-      let skipped = 0;
-      for (const line of lines) {
-        try {
-          applyEntry(state, JSON.parse(line) as JournalEntry);
-        } catch {
-          skipped++; // keep folding the rest
-        }
-      }
-
-      const session = foldedSession(state);
-      if (!session) continue; // nothing describing a session → not a session file
-      warnIfFromNewerWriter(state, filePath);
-      warnIfLinesSkipped(skipped, lines.length, filePath);
-
-      index.push({
-        id: session.id,
-        problem: session.problem,
-        status: deriveScanStatus(session, state.hypotheses, state.sawExplicitTerminal),
-        createdAt: session.createdAt,
-        filePath,
-        nodeCount: state.hypotheses.length,
-        unreadableLines: skipped,
-      });
+      const entry = foldIndexEntry(filePath);
+      if (entry) index.push(entry);
     } catch (err) {
       // A file that cannot be read at all has no session to list, so the only
       // thing that can be said about it is that it was there and was skipped.
       console.error(`[tot-mcp] Warning: skipped unreadable session file ${filePath}: ${err}`);
     }
   }
-
   return index;
+}
+
+/** What a folded journal was folded from, so an unchanged one is not folded twice. */
+interface CachedEntry {
+  size: number;
+  mtimeMs: number;
+  /** Absent for a file that holds no session, so that answer is cached too. */
+  entry?: SessionIndex;
+}
+
+/**
+ * A repeatable scan of one store that re-folds only the journals whose bytes
+ * changed.
+ *
+ * The store is re-read on every enumeration, because a peer process can add to it
+ * at any time — but a fold costs a read and a parse of the whole file, and these
+ * files grow without bound while their content stops changing. On a store of a
+ * few megabytes an ungated re-fold is tens to hundreds of milliseconds of
+ * blocking work, paid on a timer by every open dashboard and again by every
+ * status read, almost always to produce the answer already in hand.
+ *
+ * Size and modification time decide: the journal is append-only, so any record
+ * that reaches it moves the size, and a rewrite that somehow preserved the size
+ * still moves the mtime. A file whose size and mtime both stand is byte-identical
+ * to the one already folded.
+ *
+ * Scoped to one caller, which keeps the cache out of {@link scanSessions} — the
+ * one-shot read stays a pure function of the directory.
+ */
+export function makeSessionScanner(dataDir: string): () => SessionIndex[] {
+  const cache = new Map<string, CachedEntry>();
+
+  return () => {
+    const index: SessionIndex[] = [];
+    const seen = new Set<string>();
+
+    for (const filePath of journalPaths(dataDir)) {
+      seen.add(filePath);
+      try {
+        const { size, mtimeMs } = statSync(filePath);
+        const cached = cache.get(filePath);
+        if (cached && cached.size === size && cached.mtimeMs === mtimeMs) {
+          if (cached.entry) index.push(cached.entry);
+          continue;
+        }
+        const entry = foldIndexEntry(filePath);
+        cache.set(filePath, { size, mtimeMs, ...(entry ? { entry } : {}) });
+        if (entry) index.push(entry);
+      } catch (err) {
+        // Not cached: a file that could not be read may be readable next time, and
+        // caching the failure would keep reporting it after the cause is gone.
+        cache.delete(filePath);
+        console.error(`[tot-mcp] Warning: skipped unreadable session file ${filePath}: ${err}`);
+      }
+    }
+
+    for (const filePath of cache.keys()) {
+      if (!seen.has(filePath)) cache.delete(filePath);
+    }
+    return index;
+  };
 }
 
 /**

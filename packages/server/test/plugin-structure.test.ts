@@ -211,6 +211,61 @@ describe('what the guidance tells an agent to call', () => {
     expect(files.some((f) => f.endsWith('SKILL.md'))).toBe(true);
   });
 
+  it('names a subagent an agent could actually dispatch', () => {
+    // A subagent shipped by a plugin registers under the plugin's namespace, so a
+    // brief that names the bare directory name sends the agent after something
+    // that does not resolve — and it cannot tell that from a subagent that simply
+    // declined. Checked as the class: any name shaped like one of these agents,
+    // wherever it appears in the guidance.
+    const plugin = JSON.parse(readFileSync(join(REPO_ROOT, '.claude-plugin', 'plugin.json'), 'utf-8')).name;
+    const shipped = readdirSync(join(REPO_ROOT, 'agents'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.replace(/\.md$/, ''));
+    expect(shipped.length).toBeGreaterThan(0);
+
+    // The bare name in backticks. The namespaced form puts the plugin between the
+    // backtick and the name, so it does not contain this substring.
+    const bare = (name: string) => `\`${name}\``;
+    const namespaced = (name: string) => `\`${plugin}:${name}\``;
+
+    const wrong: string[] = [];
+    let named = 0;
+    for (const file of guidanceFiles()) {
+      const text = readFileSync(file, 'utf-8');
+      for (const name of shipped) {
+        if (text.includes(namespaced(name))) named += 1;
+        if (text.includes(bare(name))) {
+          wrong.push(`${file.replace(REPO_ROOT, '')}: ${bare(name)} should be ${namespaced(name)}`);
+        }
+      }
+    }
+    // Guards the guard: a scan that found no reference either way would pass
+    // without having checked anything.
+    expect(named, 'the guidance names no subagent at all').toBeGreaterThan(0);
+    expect(wrong, `subagent names that do not resolve:\n${wrong.join('\n')}`).toEqual([]);
+  });
+
+  it('names a slash command a user could actually type', () => {
+    // Same for the commands: a plugin's skills are namespaced, so a bare
+    // `/tot-reason` in the guidance is a command that does not exist.
+    const plugin = JSON.parse(readFileSync(join(REPO_ROOT, '.claude-plugin', 'plugin.json'), 'utf-8')).name;
+    const skills = readdirSync(join(REPO_ROOT, 'skills'))
+      .filter((s) => existsSync(join(REPO_ROOT, 'skills', s, 'SKILL.md')));
+    expect(skills.length).toBeGreaterThan(0);
+
+    const wrong: string[] = [];
+    for (const file of guidanceFiles()) {
+      const text = readFileSync(file, 'utf-8');
+      for (const skill of skills) {
+        // `/<skill>` with no namespace ahead of it, and not the tail of a
+        // namespaced name.
+        const bare = new RegExp('(?<![\\w:/-])/' + skill + '(?![\\w:-])', 'g');
+        if (bare.test(text)) wrong.push(`${file.replace(REPO_ROOT, '')}: /${skill} should be /${plugin}:${skill}`);
+      }
+    }
+    expect(wrong, `slash commands that do not resolve:\n${wrong.join('\n')}`).toEqual([]);
+  });
+
   it('names only tools this server serves', () => {
     const served = new Set(Object.keys(TOOL_SCHEMAS));
     const unknown: string[] = [];

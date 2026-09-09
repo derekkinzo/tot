@@ -4,7 +4,7 @@ description: Use this skill when the user asks to "show the tree", "check tot st
 argument-hint: [sessionId]
 ---
 
-# /tot-inspect
+# /tot-mcp:tot-inspect
 
 View and interpret the current hypothesis tree state.
 

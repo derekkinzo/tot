@@ -16,7 +16,7 @@ import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { TreeManager } from './tree-manager.js';
-import { scanSessions, loadSession, pickActiveSession, type SessionIndex } from './persistence.js';
+import { makeSessionScanner, loadSession, pickActiveSession, type SessionIndex } from './persistence.js';
 import { registerTools } from './tools.js';
 import { registerPrompts } from './prompts.js';
 import { startHttpServer } from './http.js';
@@ -78,7 +78,10 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   });
 
   // Lazy index; eager-load only the most-recent-open (else most-recent) session.
-  const sessionIndex = scanSessions(dataDir);
+  // Re-read through one scanner for the life of this server, so an enumeration
+  // folds only the journals whose bytes moved since the last one.
+  const rescan = makeSessionScanner(dataDir);
+  const sessionIndex = rescan();
   const target = pickActiveSession(sessionIndex);
   if (target) {
     const loaded = loadSession(target.filePath);
@@ -114,7 +117,7 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
     let entry = find();
     if (!entry) {
       // In place: the dashboard and the session catalog hold this same array.
-      sessionIndex.splice(0, sessionIndex.length, ...scanSessions(dataDir));
+      sessionIndex.splice(0, sessionIndex.length, ...rescan());
       entry = find();
       if (!entry) return false;
     }
@@ -133,6 +136,20 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   // tool response — this process is the only one that knows its ephemeral port.
   let dashboardUrl: string | null = null;
 
+  /**
+   * Re-reads the store, so an enumeration describes what is there now.
+   *
+   * The index is built once at boot and this project's store is shared: another
+   * process can add a session to it at any time. Left unread, a session opened
+   * elsewhere is absent from every list this project offers, and its id appears
+   * on no surface — so there is nothing a reader could name to reach it.
+   *
+   * In place, because the dashboard and the session catalog hold this same array.
+   */
+  function refreshSessionIndex(): void {
+    sessionIndex.splice(0, sessionIndex.length, ...rescan());
+  }
+
   const projectState: ProjectState = {
     projectDir,
     dataDir,
@@ -140,6 +157,7 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
     tm,
     sessionIndex,
     ensureSessionLoaded,
+    refreshSessionIndex,
     persistenceHealthy: true,
   };
 
@@ -149,8 +167,12 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
     ensureSessionLoaded,
     listSessions: () => sessionCatalog(projectState),
     // A failed journal append flips the project's health flag, surfaced via
-    // /api/info so the dashboard can show that writes are not landing.
+    // /api/info so the dashboard can show that writes are not landing. An append
+    // that lands afterwards clears it: the notice says the tree is not being
+    // written, and once one is, a notice that cannot be cleared is saying
+    // something untrue — and teaches the reader to disregard the next one.
     onPersistenceError: () => { projectState.persistenceHealthy = false; },
+    onPersistenceRecovered: () => { projectState.persistenceHealthy = true; },
   });
   registerPrompts(server);
 

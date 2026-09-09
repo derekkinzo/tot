@@ -511,6 +511,43 @@ describe('deriveScanStatus (scan projection)', () => {
     expect(deriveScanStatus(session({ status: 'abandoned' }), [], true)).toBe('abandoned');
   });
 
+  it('reads a closed session as open while a top-level branch is still undisposed', () => {
+    // Closure requires every top-level branch to be disposed of, and the process
+    // that closed the session decided that from its own copy of the root. A peer
+    // holding the same session can have added a branch that copy never listed;
+    // the fold keeps it, so the recorded verdict arrives over a tree that does not
+    // satisfy the gate it claimed. Honouring it would retire an investigation
+    // nobody finished, and the branch would be unreachable inside a resolved tree.
+    const hyps = [
+      hyp('root', { children: ['a', 'peer'], status: 'exploring' }),
+      hyp('a', { parentId: 'root', status: 'corroborated' }),
+      hyp('peer', { parentId: 'root', status: 'pending' }),
+    ];
+    expect(deriveScanStatus(session({ status: 'resolved' }), hyps, true)).toBe('open');
+  });
+
+  it('still honours the verdict once every top-level branch is disposed of', () => {
+    const hyps = [
+      hyp('root', { children: ['a', 'b'], status: 'exploring' }),
+      hyp('a', { parentId: 'root', status: 'corroborated' }),
+      hyp('b', { parentId: 'root', status: 'eliminated' }),
+    ];
+    expect(deriveScanStatus(session({ status: 'resolved' }), hyps, true)).toBe('resolved');
+  });
+
+  it('does not count a branch under a pruned lineage as open', () => {
+    // A pruned branch's descendants are mooted by the pruning, so leaving them
+    // pending is not an open question — the engine's own gate says so, and this
+    // reads the same gate rather than a second rule that could disagree.
+    const hyps = [
+      hyp('root', { children: ['a', 'dead'], status: 'exploring' }),
+      hyp('a', { parentId: 'root', status: 'corroborated' }),
+      hyp('dead', { parentId: 'root', status: 'eliminated', children: ['orphan'] }),
+      hyp('orphan', { parentId: 'dead', status: 'pending' }),
+    ];
+    expect(deriveScanStatus(session({ status: 'resolved' }), hyps, true)).toBe('resolved');
+  });
+
   it('without an explicit terminalStatus, derives resolved when a corroborated node survives on a non-pruned lineage', () => {
     const hyps = [
       hyp('root', { children: ['a'], status: 'exploring' }),

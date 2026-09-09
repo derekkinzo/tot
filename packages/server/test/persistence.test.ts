@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, chmodSync, rmSync, readFileSync, readdirSync, writeFileSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TreeManager } from '../src/tree-manager.js';
 import { registerTools } from '../src/tools.js';
-import { scanSessions, loadSession, pickActiveSession, Persistence, type SessionIndex } from '../src/persistence.js';
+import { scanSessions, makeSessionScanner, loadSession, pickActiveSession, Persistence, type SessionIndex } from '../src/persistence.js';
 import { JOURNAL_SCHEMA_VERSION } from '../src/replay.js';
 import type { Session, Hypothesis } from '../src/types.js';
 
@@ -722,6 +722,33 @@ describe('a journal left ending mid-record', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it('does not swallow a record appended after ANOTHER writer left it torn', async () => {
+    // The journal is shared. A peer holding the same session can be killed
+    // part-way through a write at any moment, including long after this writer
+    // was constructed — so what this writer last did says nothing about whether
+    // the file ends mid-record now. Reading it from the file each time is what
+    // makes the guard hold for a partial record it did not write.
+    writeFileSync(journal(), header + root);
+    const p = new Persistence(dataDir, sessionId);
+    await p.append('hypothesis-added', {
+      id: 'mine', parentId: 'root', sessionId, depth: 1, title: 'mine', status: 'pending',
+      evidence: [], children: [], metadata: { createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z', source: 'agent' },
+    });
+
+    // A peer's append dies half-written, after this writer's own last success.
+    writeFileSync(journal(), readFileSync(journal(), 'utf-8') + node('torn').slice(0, 40), 'utf-8');
+
+    await p.append('hypothesis-added', {
+      id: 'after', parentId: 'root', sessionId, depth: 1, title: 'after', status: 'pending',
+      evidence: [], children: [], metadata: { createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z', source: 'agent' },
+    });
+
+    // Both of this writer's records survive; only the peer's torn one is lost.
+    const loaded = loadSession(journal());
+    expect(loaded!.hypotheses.map((h) => h.id)).toEqual(['root', 'mine', 'after']);
+    expect(loaded!.unreadableLines).toBe(1);
+  });
+
   it('does not swallow the next record appended to it', async () => {
     // Truncate the last record mid-way, exactly as a failed append leaves it.
     writeFileSync(journal(), header + root + node('kept').slice(0, 40));
@@ -802,20 +829,78 @@ describe('an acknowledged append', () => {
   beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'tot-durable-')); });
   afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
 
+  /**
+   * The FileHandle prototype, which every `open()` hands back, so what a writer
+   * does with its handle is observable however it obtained one.
+   */
+  async function handleProto(): Promise<{ datasync: () => Promise<void>; appendFile: (d: string) => Promise<void> }> {
+    const probe = await open(join(dataDir, 'probe'), 'a');
+    const proto = Object.getPrototypeOf(probe);
+    await probe.close();
+    return proto;
+  }
+
   it('has reached the device, not merely the kernel', async () => {
     // The caller is told its mutation was saved. Bytes the kernel is holding
     // survive this process dying but not the machine doing so, and the
     // acknowledgement does not distinguish the two — so the same words would
     // stand for a record that is on disk and one that is about to not exist.
-    // Spied on the FileHandle prototype, which every open() hands back, so what
-    // the writer does with its handle is observable however it obtained it.
-    const probe = await open(join(dataDir, 'probe'), 'a');
-    const proto = Object.getPrototypeOf(probe) as { datasync: () => Promise<void> };
-    await probe.close();
+    const proto = await handleProto();
     const datasync = vi.spyOn(proto, 'datasync');
     try {
       await new Persistence(dataDir, sessionId).append('session-created', { id: sessionId });
       expect(datasync).toHaveBeenCalled();
+    } finally {
+      datasync.mockRestore();
+    }
+  });
+
+  it('syncs the record it just wrote, not the file as it stood before', async () => {
+    // A sync that runs first flushes a file that does not hold the record yet, so
+    // the record is left in exactly the state the sync exists to rule out while
+    // every observation of "datasync was called" still holds.
+    const proto = await handleProto();
+    const datasync = vi.spyOn(proto, 'datasync');
+    const appendFile = vi.spyOn(proto, 'appendFile');
+    try {
+      await new Persistence(dataDir, sessionId).append('session-created', { id: sessionId });
+      expect(appendFile).toHaveBeenCalled();
+      expect(datasync.mock.invocationCallOrder[0])
+        .toBeGreaterThan(appendFile.mock.invocationCallOrder[0]);
+    } finally {
+      datasync.mockRestore();
+      appendFile.mockRestore();
+    }
+  });
+
+  it('does not resolve until the sync it started has finished', async () => {
+    // Starting the sync without waiting for it leaves the acknowledgement exactly
+    // as premature as it was without any sync at all: the caller is told the
+    // record is on the device while the flush is still in flight.
+    const proto = await handleProto();
+    let releaseSync: (() => void) | undefined;
+    const datasync = vi.spyOn(proto, 'datasync').mockImplementation(
+      () => new Promise<void>((resolve) => { releaseSync = resolve; }),
+    );
+    try {
+      let resolved = false;
+      const appended = new Persistence(dataDir, sessionId)
+        .append('session-created', { id: sessionId })
+        .then(() => { resolved = true; });
+
+      // Opening and writing are real I/O, so wait for the append to arrive at
+      // the sync before judging what it does there.
+      for (let i = 0; i < 200 && datasync.mock.calls.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(datasync, 'the append never reached the sync').toHaveBeenCalled();
+      // Now nothing but the sync completing may let it through.
+      await new Promise((r) => setTimeout(r, 25));
+      expect(resolved, 'the append resolved while the sync was still in flight').toBe(false);
+
+      releaseSync!();
+      await appended;
+      expect(resolved).toBe(true);
     } finally {
       datasync.mockRestore();
     }
@@ -842,5 +927,256 @@ describe('an acknowledged append', () => {
     expect(lines).toHaveLength(25);
     expect(lines.map((l) => (JSON.parse(l) as { payload: { id: string } }).payload.id))
       .toEqual(Array.from({ length: 25 }, (_, i) => `h${i}`));
+  });
+});
+
+describe('a session file that cannot be read at all', () => {
+  // There is no session in it to list, so the only thing that can be said is
+  // that it was there and was left out. Said on stderr, because a project
+  // reporting one fewer session than it holds, in silence, reads as a project
+  // that never had it.
+  let dataDir: string;
+  const ts = '2024-01-01T00:00:00.000Z';
+  const line = (type: string, payload: unknown) =>
+    JSON.stringify({ v: JOURNAL_SCHEMA_VERSION, timestamp: ts, type, payload }) + '\n';
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'tot-unreadable-'));
+    // A readable session, so the scan has something to keep.
+    writeFileSync(join(dataDir, 'good.jsonl'), [
+      line('session-created', { id: 'good', problem: 'a readable session', rootNodeId: 'root', status: 'open', createdAt: ts }),
+      line('hypothesis-added', {
+        id: 'root', parentId: null, sessionId: 'good', depth: 0, title: 'root', status: 'pending',
+        evidence: [], children: [], metadata: { createdAt: ts, updatedAt: ts, source: 'agent' },
+      }),
+    ].join(''));
+    // A name the scan accepts that cannot be read as a file at all.
+    mkdirSync(join(dataDir, 'unreadable.jsonl'));
+  });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  /** Runs `fn`, returning everything it wrote to stderr. */
+  function captureStderr(fn: () => void): string {
+    const seen: string[] = [];
+    const original = console.error;
+    console.error = (msg?: unknown) => { seen.push(String(msg)); };
+    try { fn(); } finally { console.error = original; }
+    return seen.join('\n');
+  }
+
+  it('names the file it could not read', () => {
+    const warnings = captureStderr(() => scanSessions(dataDir));
+    expect(warnings).toContain('unreadable.jsonl');
+  });
+
+  it('still lists every session it could read', () => {
+    let index: SessionIndex[] = [];
+    captureStderr(() => { index = scanSessions(dataDir); });
+    expect(index.map((s) => s.id)).toEqual(['good']);
+  });
+
+  it('says nothing when every file was readable, so the warning is only shown when earned', () => {
+    rmSync(join(dataDir, 'unreadable.jsonl'), { recursive: true });
+    expect(captureStderr(() => scanSessions(dataDir))).toBe('');
+  });
+});
+
+describe('a journal that becomes writable again', () => {
+  // The notice a failed append raises says the tree is not being written to
+  // disk. Once one is, a notice that cannot be withdrawn is saying something
+  // untrue — and teaches the reader to disregard the next one.
+  let dataDir: string;
+  const sessionId = 'sess-recover';
+
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'tot-recover-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  it('reports that an append landed, not only that one failed', async () => {
+    const events: string[] = [];
+    const p = new Persistence(
+      dataDir, sessionId,
+      () => events.push('failed'),
+      () => events.push('landed'),
+    );
+    await p.append('session-created', { id: sessionId });
+    expect(events).toEqual(['landed']);
+  });
+
+  it('reports the landing after a failure, in that order', async () => {
+    const events: string[] = [];
+    const journal = join(dataDir, `${sessionId}.jsonl`);
+    writeFileSync(journal, '');
+    chmodSync(journal, 0o444);
+    const p = new Persistence(
+      dataDir, sessionId,
+      () => events.push('failed'),
+      () => events.push('landed'),
+    );
+    await expect(p.append('session-created', { id: sessionId })).rejects.toThrow();
+    chmodSync(journal, 0o644);
+    await p.append('hypothesis-added', { id: 'root' });
+    expect(events).toEqual(['failed', 'landed']);
+  });
+});
+
+describe('a repeated scan of one store', () => {
+  // Every enumeration re-reads the store, because a peer can add to it at any
+  // time. A fold costs a read and a parse of the whole journal, and journals grow
+  // without bound while their content stops changing — so an enumeration on a
+  // timer would spend that on producing the answer it already had.
+  let dataDir: string;
+  const ts = '2024-01-01T00:00:00.000Z';
+  const line = (type: string, payload: unknown) =>
+    JSON.stringify({ v: JOURNAL_SCHEMA_VERSION, timestamp: ts, type, payload }) + '\n';
+
+  const session = (id: string, problem: string) =>
+    line('session-created', { id, problem, rootNodeId: `${id}-root`, status: 'open', createdAt: ts })
+    + line('hypothesis-added', {
+      id: `${id}-root`, parentId: null, sessionId: id, depth: 0, title: problem, status: 'exploring',
+      evidence: [], children: [], metadata: { createdAt: ts, updatedAt: ts, source: 'agent' },
+    });
+  const node = (sessionId: string, id: string) => line('hypothesis-added', {
+    id, parentId: `${sessionId}-root`, sessionId, depth: 1, title: id, status: 'pending',
+    evidence: [], children: [], metadata: { createdAt: ts, updatedAt: ts, source: 'agent' },
+  });
+  const journal = (id: string) => join(dataDir, `${id}.jsonl`);
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'tot-rescan-'));
+    writeFrozen(journal('a'), session('a', 'the first investigation'));
+  });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  /** A modification time this suite pins, so two writes are indistinguishable to
+   *  anything reading size and mtime. */
+  const FROZEN = new Date(1700000000000);
+
+  /**
+   * Writes `content` and stamps the frozen time, so the gate's two signals are
+   * whatever the caller arranges rather than whatever the clock said.
+   */
+  function writeFrozen(path: string, content: string): void {
+    writeFileSync(path, content);
+    utimesSync(path, FROZEN, FROZEN);
+  }
+
+  /**
+   * Replaces a journal's bytes with different content of the same length, under
+   * the same modification time — so both of the gate's signals stand while the
+   * content does not. Whether the new content is reported says whether the file
+   * was folded again.
+   *
+   * A real journal cannot reach this state: it is only ever appended to, so any
+   * record that lands moves its size. That is the premise the gate rests on, and
+   * this is how the gate itself is observed.
+   */
+  function rewriteInPlace(path: string, content: string): void {
+    expect(Buffer.byteLength(content), 'the replacement must be the same length')
+      .toBe(statSync(path).size);
+    writeFrozen(path, content);
+  }
+
+  it('reports the same sessions on a second scan', () => {
+    const rescan = makeSessionScanner(dataDir);
+    const first = rescan();
+    const second = rescan();
+    expect(second).toEqual(first);
+    expect(second.map((s) => s.id)).toEqual(['a']);
+  });
+
+  it('does not read a journal again while its size and time stand', () => {
+    const rescan = makeSessionScanner(dataDir);
+    expect(rescan()[0].problem).toBe('the first investigation');
+    rewriteInPlace(journal('a'), session('a', 'THE FIRST INVESTIGATION'));
+    expect(rescan()[0].problem, 'the journal was folded again').toBe('the first investigation');
+  });
+
+  it('re-reads a journal that grew, and reports what was appended', () => {
+    const rescan = makeSessionScanner(dataDir);
+    expect(rescan()[0].nodeCount).toBe(1);
+    writeFileSync(journal('a'), readFileSync(journal('a'), 'utf-8') + node('a', 'a-child'));
+    const again = rescan();
+    expect(again[0].nodeCount).toBe(2);
+  });
+
+  it('re-reads a journal whose time moved, even at the same size', () => {
+    // Size alone is not the signal: a writer can replace a record with one of the
+    // same length, and only the modification time distinguishes that from the file
+    // already folded.
+    const rescan = makeSessionScanner(dataDir);
+    expect(rescan()[0].problem).toBe('the first investigation');
+    writeFileSync(journal('a'), session('a', 'THE FIRST INVESTIGATION'));
+    utimesSync(journal('a'), new Date(FROZEN.getTime() + 60_000), new Date(FROZEN.getTime() + 60_000));
+    expect(rescan()[0].problem).toBe('THE FIRST INVESTIGATION');
+  });
+
+  it('forgets a journal that went away, so its replacement is read afresh', () => {
+    // A long-lived server enumerates many times; what it remembers about files
+    // that are gone would otherwise accumulate, and a new file landing on a
+    // recycled name would be answered for by the old one.
+    const rescan = makeSessionScanner(dataDir);
+    expect(rescan()[0].problem).toBe('the first investigation');
+    rmSync(journal('a'));
+    expect(rescan()).toEqual([]);
+    writeFrozen(journal('a'), session('a', 'THE FIRST INVESTIGATION'));
+    expect(rescan()[0].problem, 'answered from what was remembered about the old file')
+      .toBe('THE FIRST INVESTIGATION');
+  });
+
+  it('picks up a session another process added', () => {
+    const rescan = makeSessionScanner(dataDir);
+    expect(rescan().map((s) => s.id)).toEqual(['a']);
+    writeFileSync(journal('b'), session('b', 'a second investigation'));
+    expect(rescan().map((s) => s.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('drops a session whose journal is gone', () => {
+    const rescan = makeSessionScanner(dataDir);
+    rescan();
+    rmSync(journal('a'));
+    expect(rescan()).toEqual([]);
+  });
+
+  it('agrees with a scan that keeps nothing', () => {
+    // The gate is an optimisation, so its answer has to be the one the plain read
+    // gives — including the count of records it could not read.
+    writeFileSync(journal('b'), session('b', 'a second investigation') + 'this line is not json\n');
+    const rescan = makeSessionScanner(dataDir);
+    const byGate = rescan();
+    rescan(); // a second pass, now answering from the cache
+    expect(rescan()).toEqual(scanSessions(dataDir));
+    expect(byGate).toEqual(scanSessions(dataDir));
+    expect(byGate.find((s) => s.id === 'b')!.unreadableLines).toBe(1);
+  });
+
+  it('remembers that a file describes no session, rather than folding it every time', () => {
+    const notASession = join(dataDir, 'not-a-session.jsonl');
+    const filler = session('b', 'a second investigation');
+    writeFrozen(notASession, 'x'.repeat(filler.length - 1) + '\n');
+    const rescan = makeSessionScanner(dataDir);
+    expect(rescan().map((s) => s.id)).toEqual(['a']);
+    rewriteInPlace(notASession, filler);
+    expect(rescan().map((s) => s.id), 'the file was folded again').toEqual(['a']);
+  });
+
+  it('tries again after a read failure rather than caching it', () => {
+    // A file unreadable now may be readable next time; caching the failure would
+    // keep reporting a session as absent after the cause is gone.
+    const unreadable = join(dataDir, 'locked.jsonl');
+    writeFileSync(unreadable, session('locked', 'a session behind a permission'));
+    chmodSync(unreadable, 0o000);
+    const rescan = makeSessionScanner(dataDir);
+    const warned: string[] = [];
+    const original = console.error;
+    console.error = (m?: unknown) => { warned.push(String(m)); };
+    try {
+      expect(rescan().map((s) => s.id)).toEqual(['a']);
+      chmodSync(unreadable, 0o644);
+      expect(rescan().map((s) => s.id).sort()).toEqual(['a', 'locked']);
+    } finally {
+      console.error = original;
+      chmodSync(unreadable, 0o644);
+    }
+    expect(warned.join('\n')).toContain('locked.jsonl');
   });
 });
