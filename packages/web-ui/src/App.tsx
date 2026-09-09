@@ -62,11 +62,17 @@ export default function App() {
   }, [toggleFollow, overlayCount]);
 
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative' }}>
-      {/* Stacked so a second notice appears under the first instead of behind it,
-          and absent entirely when there is nothing to say. */}
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+      {/* A row above the workspace rather than a layer over it. A notice that
+          overlays the canvas covers the controls along its top edge — including
+          the sessions list this one tells the reader to open — and covers more of
+          them the more there is to say. Taking the height out of the workspace
+          instead keeps every control reachable whatever is showing.
+
+          Stacked, so a second notice appears under the first rather than behind
+          it, and absent entirely when there is nothing to say. */}
       {(!persistenceHealthy || unreadableLines > 0) && (
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2000 }}>
+        <div style={{ flexShrink: 0 }}>
           {!persistenceHealthy && (
             <div style={{ ...NOTICE, background: NOTICE_COLORS.failure.bg, color: NOTICE_COLORS.failure.fg }}>
               ⚠ Saving failed — this tree is not being written to disk. Check the server logs and disk space.
@@ -81,75 +87,75 @@ export default function App() {
           )}
         </div>
       )}
-      <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-        {hypotheses.size > 0 ? (
-          <ErrorBoundary>
-            <TreeView
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, position: 'relative' }}>
+        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+          {hypotheses.size > 0 ? (
+            <ErrorBoundary>
+              <TreeView
+                hypotheses={hypotheses}
+                rootId={session?.rootNodeId ?? null}
+                selectedId={selectedId}
+                onSelect={handleSelect}
+                panelOpen={selected !== null}
+                recentlyChanged={recentlyChanged}
+                lastAddedId={lastAddedId}
+                connected={connected}
+                session={session}
+                followMode={followMode}
+                onToggleFollow={toggleFollow}
+                onLoadSession={loadSession}
+                newerSession={newerSession}
+                overlayCount={overlayCount}
+              />
+            </ErrorBoundary>
+          ) : (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              height: '100%', color: '#8b949e',
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <h2 style={{ marginBottom: 8, fontWeight: 500 }}>tot-mcp</h2>
+                {connected ? (
+                  // No gesture is taught here: there is nothing to perform one
+                  // on, and the legend teaches them beside the tree they act on —
+                  // where a second list of them could name a different key.
+                  <p>Waiting for agent to create a tree...</p>
+                ) : (
+                  // An unreachable server looks exactly like an idle agent from
+                  // here, so the one that is actually known is what gets said.
+                  <>
+                    <p style={{ color: '#f85149' }}>Not connected to the server</p>
+                    <p style={{ fontSize: 12, marginTop: 12, color: '#6b7280' }}>
+                      Retrying. Whether a tree exists cannot be known until the
+                      connection is back.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {selected && (
+          <ErrorBoundary
+            fallback={
+              <div style={{
+                width: DETAIL_PANEL_WIDTH, borderLeft: '1px solid #30363d', background: '#161b22',
+                padding: 24, color: '#8b949e',
+              }}>
+                Failed to render detail panel.
+              </div>
+            }
+          >
+            <DetailPanel
+              hypothesis={selected}
               hypotheses={hypotheses}
-              rootId={session?.rootNodeId ?? null}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              panelOpen={selected !== null}
-              recentlyChanged={recentlyChanged}
-              lastAddedId={lastAddedId}
-              connected={connected}
-              session={session}
-              followMode={followMode}
-              onToggleFollow={toggleFollow}
-              onLoadSession={loadSession}
-              newerSession={newerSession}
-              overlayCount={overlayCount}
+              onClose={() => handleSelect(null)}
+              onOpenArtifact={(artifact, claim) => setOpenArtifact({ artifact, claim })}
             />
           </ErrorBoundary>
-        ) : (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            height: '100%', color: '#8b949e',
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <h2 style={{ marginBottom: 8, fontWeight: 500 }}>tot-mcp</h2>
-              {connected ? (
-                <>
-                  <p>Waiting for agent to create a tree...</p>
-                  <p style={{ fontSize: 12, marginTop: 12, color: '#6b7280' }}>
-                    Double-click nodes to collapse/expand subtrees
-                  </p>
-                </>
-              ) : (
-                // An unreachable server looks exactly like an idle agent from
-                // here, so the one that is actually known is what gets said.
-                <>
-                  <p style={{ color: '#f85149' }}>Not connected to the server</p>
-                  <p style={{ fontSize: 12, marginTop: 12, color: '#6b7280' }}>
-                    Retrying. Whether a tree exists cannot be known until the
-                    connection is back.
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
         )}
       </div>
-
-      {selected && (
-        <ErrorBoundary
-          fallback={
-            <div style={{
-              width: DETAIL_PANEL_WIDTH, borderLeft: '1px solid #30363d', background: '#161b22',
-              padding: 24, color: '#8b949e',
-            }}>
-              Failed to render detail panel.
-            </div>
-          }
-        >
-          <DetailPanel
-            hypothesis={selected}
-            hypotheses={hypotheses}
-            onClose={() => handleSelect(null)}
-            onOpenArtifact={(artifact, claim) => setOpenArtifact({ artifact, claim })}
-          />
-        </ErrorBoundary>
-      )}
 
       {openArtifact && (
         <ErrorBoundary>

@@ -4,7 +4,7 @@ description: Use this skill when investigating a problem with multiple competing
 argument-hint: [problem-description]
 ---
 
-# /tot-reason
+# /tot-mcp:tot-reason
 
 Initiate structured Tree of Thought reasoning for systematic investigation of a problem with rival explanations.
 
@@ -64,8 +64,8 @@ The siblings form a partition of the explanation space (cf. Chamberlin's method 
 - **Collective coverage**: together they cover the plausible space; an explicit catch-all branch is first-class when exhaustiveness is uncertain. Neither exclusivity nor exhaustiveness can be checked from the tree, so both stay advisory — what the tools report is a conflict between what was declared and what was found.
 
 After decomposing, STOP and review. The point of dispatching a reviewer is that it did not write the decomposition: a structure checked only by its author inherits the blind spot that produced it.
-- Dispatch the `decomposition-evaluator` subagent to advise on overlap, coverage, level of abstraction, and testability.
-- Dispatch the `hypothesis-challenger` subagent on each child to surface missing alternatives and hidden assumptions.
+- Dispatch the `tot-mcp:decomposition-evaluator` subagent to advise on overlap, coverage, level of abstraction, and testability.
+- Dispatch the `tot-mcp:hypothesis-challenger` subagent on each child to surface missing alternatives and hidden assumptions.
 - Could a single observation belong to two of these by accident? If yes, refine boundaries.
 - Is there a plausible explanation NOT covered by any sibling or catch-all? If yes, add it.
 
@@ -78,7 +78,7 @@ For EACH hypothesis, seek REFUTING evidence (falsification-first per Popper):
 3. Call `add_evidence` with type `supports`, `refutes`, or `neutral`.
    - When the observation came from a file or a command, save the output and pass `artifactPath` (plus `command`, `exitCode`, and the `excerptStartLine`/`excerptEndLine` the claim rests on). The bytes are stored verbatim and can be re-read; `content` then states what they show rather than repeating them.
    - Mark `decisive: true` on a record the verdict turns on, so it is read first.
-4. Fan out subagents to investigate from independent data sources, then dispatch the `evidence-reviewer` subagent to audit directness, source diversity, and diagnosticity before relying on the result.
+4. Fan out subagents to investigate from independent data sources, then dispatch the `tot-mcp:evidence-reviewer` subagent to audit directness, source diversity, and diagnosticity before relying on the result.
 
 Key principles:
 - Seek evidence that DISCRIMINATES between hypotheses, not just confirms a favored one.

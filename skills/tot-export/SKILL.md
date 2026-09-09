@@ -4,7 +4,7 @@ description: Use this skill when the user asks to "summarize the investigation",
 argument-hint: [sessionId]
 ---
 
-# /tot-export
+# /tot-mcp:tot-export
 
 Export a completed (or in-progress) hypothesis tree as a structured Markdown report.
 

@@ -1,4 +1,4 @@
-import { subtreeContainsCorroborated } from './closure.js';
+import { subtreeContainsCorroborated, topLevelBranchesDisposed } from './closure.js';
 import {
   normalizeEvidenceRecord, normalizeHypothesisPayload, normalizeSessionPayload,
   terminalSessionStatus,
@@ -298,10 +298,26 @@ export function deriveScanStatus(
   sawExplicitTerminal: boolean,
 ): 'open' | 'resolved' | 'abandoned' {
   if (session.status === 'open') return 'open';
+  const byId = new Map(hypotheses.map((h) => [h.id, h]));
+  const lookup = (id: string) => byId.get(id);
+  // A closure is a conclusion, and the merged tree is what its premise has to
+  // hold against: closure requires every top-level branch to be disposed of, and
+  // the process that closed this session decided that from its own copy of the
+  // root. A peer holding the same session can have added a branch that copy never
+  // listed, and the fold keeps it — so the recorded verdict can arrive over a tree
+  // that does not satisfy the gate it claimed. Reading such a session as open
+  // leaves the branch reachable and the session reopenable, where honouring the
+  // verdict would retire an investigation nobody finished. The gate is the
+  // engine's own, so a session that legitimately closed is unaffected.
+  //
+  // Only when the root is among the nodes given: without it there is no tree to
+  // contradict the verdict with, and absent nodes are not an open branch.
+  if (byId.has(session.rootNodeId) && !topLevelBranchesDisposed(session.rootNodeId, lookup)) {
+    return 'open';
+  }
   if (sawExplicitTerminal && (session.status === 'resolved' || session.status === 'abandoned')) {
     return session.status;
   }
-  const byId = new Map(hypotheses.map((h) => [h.id, h]));
-  const hasCorroborated = subtreeContainsCorroborated(session.rootNodeId, (id) => byId.get(id));
+  const hasCorroborated = subtreeContainsCorroborated(session.rootNodeId, lookup);
   return hasCorroborated ? 'resolved' : 'abandoned';
 }

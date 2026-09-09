@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { NOTICE_COLORS, TEXT } from '../theme';
+import { useDismissable } from '../hooks/useDismissable';
 
 interface SessionSummary {
   id: string;
@@ -21,6 +22,8 @@ export default function SessionSelector({ currentSessionId, onSwitch }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const close = useCallback(() => setOpen(false), []);
+  const boundary = useDismissable(open, close);
 
   useEffect(() => {
     if (!open) return;
@@ -36,7 +39,7 @@ export default function SessionSelector({ currentSessionId, onSwitch }: Props) {
   if (!currentSessionId) return null;
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
+    <div ref={boundary} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         onClick={() => setOpen(!open)}
         style={{

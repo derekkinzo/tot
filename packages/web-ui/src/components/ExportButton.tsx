@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { TEXT } from '../theme';
+import { useDismissable } from '../hooks/useDismissable';
 import type { Hypothesis, Session } from '../types';
 import { generateMarkdown } from '../tree/exportMarkdown';
 
@@ -10,6 +11,8 @@ interface Props {
 
 export default function ExportButton({ session, hypotheses }: Props) {
   const [showMenu, setShowMenu] = useState(false);
+  const close = useCallback(() => setShowMenu(false), []);
+  const boundary = useDismissable(showMenu, close);
 
   if (!session || hypotheses.size === 0) return null;
 
@@ -37,7 +40,7 @@ export default function ExportButton({ session, hypotheses }: Props) {
   };
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
+    <div ref={boundary} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         onClick={() => setShowMenu(!showMenu)}
         style={{

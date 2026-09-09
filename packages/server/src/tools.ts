@@ -198,6 +198,7 @@ export function getToolHandlers(
   getDashboardUrl?: () => string | null,
   ensureSessionLoaded?: (sessionId?: string) => boolean,
   listSessions?: () => SessionSummary[],
+  onPersistenceRecovered?: () => void,
 ): ToolHandlers {
   // Bytes live beside the journals that cite them, so the store follows the data
   // directory rather than being pointed at separately.
@@ -207,7 +208,7 @@ export function getToolHandlers(
   function getPersistence(sessionId: string): Persistence {
     let p = persistenceMap.get(sessionId);
     if (!p) {
-      p = new Persistence(getDataDir(), sessionId, onPersistenceError);
+      p = new Persistence(getDataDir(), sessionId, onPersistenceError, onPersistenceRecovered);
       persistenceMap.set(sessionId, p);
     }
     return p;
@@ -538,6 +539,8 @@ export function getToolHandlers(
  * @param getDataDir - Thunk returning the persistence directory
  * @param opts.getDashboardUrl - Optional thunk returning the live dashboard URL, surfaced in get_status
  * @param opts.onPersistenceError - Optional callback fired when a journal append fails
+ * @param opts.onPersistenceRecovered - Optional callback fired when an append lands, so a
+ *   reported failure can be withdrawn once writes are working again
  */
 export function registerTools(
   server: McpServer,
@@ -546,6 +549,9 @@ export function registerTools(
   opts: {
     getDashboardUrl?: () => string | null;
     onPersistenceError?: (err: Error) => void;
+    /** Fired when an append lands. Paired with onPersistenceError so a health
+     *  flag it set can be cleared rather than latching for the process. */
+    onPersistenceRecovered?: () => void;
     /** Loads a session that is on disk but not yet in memory, so a read can reach
      *  a tree the boot did not eager-load. */
     ensureSessionLoaded?: (sessionId?: string) => boolean;
@@ -556,7 +562,7 @@ export function registerTools(
 ): { drainAll: () => Promise<void> } {
   const { handlers, drainAll } = getToolHandlers(
     tm, getDataDir, opts.onPersistenceError, opts.getDashboardUrl,
-    opts.ensureSessionLoaded, opts.listSessions,
+    opts.ensureSessionLoaded, opts.listSessions, opts.onPersistenceRecovered,
   );
 
   for (const [name, schema] of Object.entries(TOOL_SCHEMAS)) {

@@ -16,6 +16,8 @@ export interface ProjectState {
   /** Loads a session from disk on demand — the named one, or the project's
    *  active one when none is named. True when a session is loaded afterwards. */
   ensureSessionLoaded: (sessionId?: string) => boolean;
+  /** Re-reads the store into {@link sessionIndex}, in place. */
+  refreshSessionIndex: () => void;
   persistenceHealthy: boolean;
 }
 
@@ -33,13 +35,18 @@ export interface SessionSummary {
 /**
  * Every session this project has, newest first.
  *
- * The union of what is in memory and what the boot scan found on disk: the
- * index alone misses sessions created since the scan, and memory alone misses
- * the ones never loaded. A loaded session wins the tie because its node count
- * is live. Every surface that enumerates sessions reads this, so a count and a
- * list of the same project cannot disagree.
+ * The union of what is in memory and what is on disk: the store alone misses a
+ * session created in this process, and memory alone misses the ones never
+ * loaded. A loaded session wins the tie because its node count is live. Every
+ * surface that enumerates sessions reads this, so a count and a list of the same
+ * project cannot disagree.
+ *
+ * The store is re-read here rather than trusted from boot, because it is shared:
+ * a session another process opened is otherwise absent from every list, and its
+ * id is printed nowhere, so a reader has nothing to name to reach it.
  */
 export function sessionCatalog(project: ProjectState): SessionSummary[] {
+  project.refreshSessionIndex();
   const { tm, sessionIndex } = project;
   // How much of a journal folded is a property of the file, not of the engine, so
   // it comes from the scan even for a session memory otherwise answers for. A

@@ -378,3 +378,96 @@ describe('text is readable on the surface it sits on', () => {
     expect(seen).toBeGreaterThan(5);
   });
 });
+
+describe('a notice about the tree does not cover the controls it refers to', () => {
+  // The canvas carries its controls along its own top edge — the sessions list,
+  // the follow toggle, the status tallies. A notice drawn as a layer over the
+  // canvas sits on top of them, and covers more of them the more notices there
+  // are to show, so the reader is told to open a list the notice itself is
+  // blocking. A notice takes its height out of the workspace instead.
+  const APP = readFileSync(resolve(__dirname, 'App.tsx'), 'utf-8');
+
+  /** The style object of the element wrapping the notices. */
+  const noticeRegion = (): string => {
+    const at = APP.indexOf('NOTICE_COLORS.failure.bg');
+    expect(at, 'App.tsx renders no failure notice').toBeGreaterThan(-1);
+    // Walk back to the opening tag of the element that encloses the notices.
+    const openings = [...APP.slice(0, at).matchAll(/<div style=\{\{[^}]*\}\}>/g)];
+    return openings[openings.length - 1]?.[0] ?? '';
+  };
+
+  it('gives the notices a place in the layout rather than a layer above it', () => {
+    // The class, not one value: any positioning that takes the band out of the
+    // column's flow puts it back over the canvas, and a stacking order is only
+    // needed by something that paints over what it is stacked against.
+    const region = noticeRegion();
+    expect(region, 'the notice band is positioned out of the layout').not.toMatch(/position:/);
+    expect(region, 'the notice band declares a stacking order').not.toMatch(/zIndex:/);
+  });
+
+  it('lays the workspace out as a column, so the notices sit above it', () => {
+    // Without this the notices would share a row with the canvas and squeeze it
+    // sideways instead of sitting over its full width.
+    const root = APP.slice(APP.indexOf('return ('));
+    expect(root).toMatch(/flexDirection:\s*'column'/);
+  });
+
+  it('finds the region it is meant to judge', () => {
+    // Guards the guard: a walk that found no enclosing element would pass both
+    // assertions above vacuously.
+    expect(noticeRegion()).toMatch(/^<div style=\{\{/);
+  });
+});
+
+describe('a menu that opens over the canvas can be dismissed', () => {
+  // The artifact overlay and the node context menu both close on Escape. A menu
+  // that closes only by clicking its own trigger again is a dead end for anyone
+  // who reached for Escape, and while it is open it covers the controls beside
+  // it. Checked as the class over every component, so a menu added later cannot
+  // ship without it.
+  const componentSources = () => readdirSync(COMPONENT_DIR)
+    .filter((f) => f.endsWith('.tsx'))
+    .map((f) => [f, readFileSync(resolve(COMPONENT_DIR, f), 'utf-8')] as const);
+
+  /**
+   * Components that render something only while a piece of their own state is set
+   * — a menu, a popover, a disclosure over the canvas — paired with the name of
+   * that state, which is what the dismissal has to be wired to.
+   */
+  const withToggledLayer = () => componentSources()
+    .map(([file, src]) => {
+      const m = /const \[(open|showMenu|menuOpen)\b/.exec(src);
+      return m ? { file, src, state: m[1] } : null;
+    })
+    .filter((x): x is { file: string; src: string; state: string } => x !== null);
+
+  it('finds the menus it is meant to check', () => {
+    // Guards the guard: a filter that matched nothing would pass vacuously.
+    expect(withToggledLayer().map((m) => m.file).sort()).toEqual(['ExportButton.tsx', 'SessionSelector.tsx']);
+  });
+
+  it('closes every one of them on Escape and on a press outside', () => {
+    const missing = withToggledLayer()
+      .filter((m) => !/useDismissable\(/.test(m.src))
+      .map((m) => m.file);
+    expect(missing, `menus with no dismissal:\n${missing.join('\n')}`).toEqual([]);
+  });
+
+  it('wires the dismissal to the state that opens it', () => {
+    // The hook only listens while it is told the menu is open. Handed anything
+    // other than that state — a literal, or a different flag — it is present and
+    // inert, and nothing dismisses.
+    const wrong = withToggledLayer()
+      .filter((m) => !new RegExp(`useDismissable(?:<[^>]*>)?\\(\\s*${m.state}\\s*,`).test(m.src))
+      .map((m) => `${m.file}: not passed its own \`${m.state}\``);
+    expect(wrong, `menus whose dismissal is not wired to their open state:\n${wrong.join('\n')}`).toEqual([]);
+  });
+
+  it('gives each one a boundary to measure "outside" against', () => {
+    // The hook can only tell inside from outside through the ref it returns.
+    const unattached = withToggledLayer()
+      .filter((m) => !/ref=\{boundary\}/.test(m.src))
+      .map((m) => m.file);
+    expect(unattached, `menus whose boundary ref is not attached:\n${unattached.join('\n')}`).toEqual([]);
+  });
+});

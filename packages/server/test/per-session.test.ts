@@ -100,6 +100,33 @@ describe('per-session server', () => {
     }
   });
 
+  it('withdraws the report once an append lands again', async () => {
+    // The notice says the tree is not being written to disk. A notice that
+    // cannot be withdrawn goes on saying that after writes recover, so it is
+    // saying something untrue — and teaches the reader to disregard the next one.
+    const projForRecovery = mkdtempSync(join(tmpdir(), 'tot-projrecover-'));
+    const s = await createSessionServer({ projectDir: projForRecovery });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+    const health = async () =>
+      ((await (await fetch(`http://localhost:${s.port}/api/info`)).json()) as any).persistenceHealthy;
+
+    mkdirSync(s.dataDir, { recursive: true });
+    chmodSync(s.dataDir, 0o555);
+    try {
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'a tree written while the store is read-only' } });
+      expect(await health(), 'a failed append was not reported').toBe(false);
+
+      chmodSync(s.dataDir, 0o755);
+      await client.callTool({ name: 'create_tree', arguments: { problem: 'a tree written once the store is writable' } });
+      expect(await health()).toBe(true);
+    } finally {
+      chmodSync(s.dataDir, 0o755);
+      rmSync(projForRecovery, { recursive: true, force: true });
+    }
+  });
+
   it('close() tears down the MCP server so further tool calls fail', async () => {
     // Graceful shutdown must close the MCP protocol layer, not just the HTTP
     // server — otherwise the transport lingers. After close(), the connected
@@ -750,5 +777,166 @@ describe('a tree whose journal did not fold whole', () => {
     expect(status).not.toMatch(/could not be read/);
     const info = await (await fetch(`http://localhost:${s.port}/api/info`)).json() as any;
     expect(info.unreadableLines).toBe(0);
+  });
+});
+
+describe('a tree opened by another process holding the same store', () => {
+  // Two agents in one project each run their own server over one store. A
+  // session one of them opens after the other booted is in neither the other's
+  // memory nor its boot scan, so unless the store is re-read the second server
+  // answers about a project it can see the trees of.
+  let stateDir: string;
+  let projectDir: string;
+  const open: SessionServer[] = [];
+  const clients: Client[] = [];
+  const savedDataDir = process.env['TOT_DATA_DIR'];
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'tot-sib-state-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'tot-sib-proj-'));
+    process.env['TOT_DATA_DIR'] = stateDir;
+  });
+  afterEach(async () => {
+    for (const c of clients.splice(0)) { try { await c.close(); } catch { /* ignore */ } }
+    for (const s of open.splice(0)) { try { await s.close(); } catch { /* ignore */ } }
+    if (savedDataDir === undefined) delete process.env['TOT_DATA_DIR'];
+    else process.env['TOT_DATA_DIR'] = savedDataDir;
+    for (const d of [stateDir, projectDir]) rmSync(d, { recursive: true, force: true });
+  });
+
+  /**
+   * Boots a reader over an empty store, then has a sibling open a tree in it.
+   * Nothing is asked of the reader in between, so what it answers is whatever it
+   * reads at the time of the question.
+   */
+  async function readerAndSiblingsTree(): Promise<{ reader: SessionServer; problem: string }> {
+    const reader = await createSessionServer({ projectDir });
+    open.push(reader);
+    const sibling = await createSessionServer({ projectDir });
+    open.push(sibling);
+    const siblingClient = await connect(sibling);
+    clients.push(siblingClient);
+    const problem = 'a tree opened by another process';
+    await siblingClient.callTool({ name: 'create_tree', arguments: { problem, rootTitle: 'Opened elsewhere' } });
+    return { reader, problem };
+  }
+
+  it('is counted by the dashboard, not reported as a project with no tree', async () => {
+    const { reader, problem } = await readerAndSiblingsTree();
+    const info = await (await fetch(`http://localhost:${reader.port}/api/info`)).json() as any;
+    expect(info.sessionCount).toBe(1);
+    expect(info.activeProblem).toBe(problem);
+  });
+
+  it('is listed, so a reader has an id to switch to', async () => {
+    // The list is the only surface that prints a session id. One missing from it
+    // cannot be reached by any other means.
+    const { reader, problem } = await readerAndSiblingsTree();
+    const listed = await (await fetch(`http://localhost:${reader.port}/api/sessions`)).json() as any;
+    expect((listed.sessions as any[]).map((s) => s.problem)).toContain(problem);
+  });
+
+  it('is what the dashboard draws for an un-named read', async () => {
+    const { reader, problem } = await readerAndSiblingsTree();
+    const state = await (await fetch(`http://localhost:${reader.port}/api/state`)).json() as any;
+    expect(state.session?.problem).toBe(problem);
+    expect(state.hypotheses).toHaveLength(1);
+  });
+
+  it('is in the snapshot the live stream opens with', async () => {
+    const { reader, problem } = await readerAndSiblingsTree();
+    const resp = await fetch(`http://localhost:${reader.port}/sse`, { headers: { Accept: 'text/event-stream' } });
+    const rdr = resp.body!.getReader();
+    const { value } = await rdr.read();
+    await rdr.cancel();
+    const frame = new TextDecoder().decode(value);
+    const snapshot = JSON.parse(frame.split('\n').find((l) => l.startsWith('data:'))!.slice('data:'.length).trim());
+    expect(snapshot.type).toBe('snapshot');
+    expect(snapshot.session?.problem).toBe(problem);
+  });
+
+  it('agrees with what this process own status read-out names', async () => {
+    // The status read-out hands the agent this server's dashboard URL. The two
+    // describing different trees is how a caller is shown an empty canvas for a
+    // tree it was just told about.
+    const { reader, problem } = await readerAndSiblingsTree();
+    const client = await connect(reader);
+    clients.push(client);
+    const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+    const info = await (await fetch(`http://localhost:${reader.port}/api/info`)).json() as any;
+    expect(status).toContain(problem);
+    expect(info.activeProblem).toBe(problem);
+  });
+});
+
+describe('the live stream carries what a tool call changed', () => {
+  // The dashboard renders one snapshot on connect and everything after it from
+  // this stream. If the engine's events do not reach a connected client, the view
+  // is a still picture of the moment it loaded, and nothing says so.
+  let stateDir: string;
+  let projectDir: string;
+  const open: SessionServer[] = [];
+  const clients: Client[] = [];
+  const savedDataDir = process.env['TOT_DATA_DIR'];
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'tot-live-state-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'tot-live-proj-'));
+    process.env['TOT_DATA_DIR'] = stateDir;
+  });
+  afterEach(async () => {
+    for (const c of clients.splice(0)) { try { await c.close(); } catch { /* ignore */ } }
+    for (const s of open.splice(0)) { try { await s.close(); } catch { /* ignore */ } }
+    if (savedDataDir === undefined) delete process.env['TOT_DATA_DIR'];
+    else process.env['TOT_DATA_DIR'] = savedDataDir;
+    for (const d of [stateDir, projectDir]) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('delivers the nodes a decompose added, after the snapshot', async () => {
+    const s = await createSessionServer({ projectDir });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+    const tree = parseResult(await client.callTool({
+      name: 'create_tree', arguments: { problem: 'what the stream carries', rootTitle: 'Root' },
+    }));
+
+    const resp = await fetch(`http://localhost:${s.port}/sse`, { headers: { Accept: 'text/event-stream' } });
+    const reader = resp.body!.getReader();
+    const decoder = new TextDecoder();
+    // Frame 0 is the snapshot, written before this client is registered.
+    const first = decoder.decode((await reader.read()).value);
+    expect(first).toContain('"snapshot"');
+
+    // Mutate AFTER the stream is open: these events only arrive if the engine's
+    // stream is actually wired to the connected client.
+    await client.callTool({
+      name: 'decompose',
+      arguments: { parentId: tree.rootId, axis: 'by cause', children: ['Alpha', 'Beta'] },
+    });
+
+    const types: string[] = [];
+    const titles: string[] = [];
+    // Bounded, so a stream that never delivers fails promptly and says so rather
+    // than hanging until the runner gives up.
+    const nextChunk = async () => Promise.race([
+      reader.read(),
+      new Promise<{ value: undefined; done: true }>((r) => setTimeout(() => r({ value: undefined, done: true }), 2000)),
+    ]);
+    for (let i = 0; i < 20 && !(titles.includes('Alpha') && titles.includes('Beta')); i++) {
+      const { value, done } = await nextChunk();
+      if (done || !value) break;
+      for (const l of decoder.decode(value).split('\n')) {
+        if (!l.startsWith('data:')) continue;
+        const event = JSON.parse(l.slice('data:'.length).trim());
+        types.push(event.type);
+        if (event.hypothesis?.title) titles.push(event.hypothesis.title);
+      }
+    }
+    await reader.cancel();
+
+    expect(types, 'no live event reached the connected client').toContain('hypothesis-added');
+    expect(titles).toContain('Alpha');
+    expect(titles).toContain('Beta');
   });
 });

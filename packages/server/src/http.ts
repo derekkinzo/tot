@@ -184,8 +184,11 @@ function handleSSE(
 ): void {
   writeSseHeaders(res);
   // A reconnecting dashboard re-requests the session it is viewing; load it
-  // (lazy) so the snapshot describes that session rather than the default.
-  if (requestedSessionId) project.ensureSessionLoaded(requestedSessionId);
+  // (lazy) so the snapshot describes that session rather than the default. With
+  // none named, resolve the project's own — the tree may have been opened by
+  // another process holding this store, and a snapshot of nothing renders as a
+  // project with no tree while its status read-out names one.
+  project.ensureSessionLoaded(requestedSessionId ?? undefined);
   // Send the initial snapshot, then register for live events.
   res.write(`id: 0\ndata: ${JSON.stringify(snapshotEvent(project.tm, requestedSessionId))}\n\n`);
   hub.addClient(res);
@@ -200,9 +203,9 @@ async function handleStateAPI(res: ServerResponse, url: URL, project: ProjectSta
   // cannot read the engine's session state part-way through a load.
   try {
     const payload = await lock(async () => {
-      if (requestedSessionId) {
-        project.ensureSessionLoaded(requestedSessionId);
-      }
+      // Either way: a read that names no session still has one to resolve, and it
+      // may only exist on disk — see {@link handleSSE}.
+      project.ensureSessionLoaded(requestedSessionId ?? undefined);
 
       const session: Session | null = requestedSessionId
         ? tm.getAllSessions().find((s) => s.id === requestedSessionId) ?? null
@@ -224,21 +227,26 @@ async function handleStateAPI(res: ServerResponse, url: URL, project: ProjectSta
 
 function handleSessionsAPI(res: ServerResponse, project: ProjectState): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
+  // sessionCatalog re-reads the store, so a session another process opened is
+  // listed here — this is the surface a reader switches sessions from, and one
+  // that is missing from it cannot be reached by any other means.
   res.end(JSON.stringify({ sessions: sessionCatalog(project) }));
 }
 
 function handleInfoAPI(res: ServerResponse, project: ProjectState): void {
   res.writeHead(200, { 'Content-Type': 'application/json' });
 
-  const openSessions = project.tm.getAllSessions().filter((s) => s.status === 'open');
-  const latestOpen = openSessions.sort((a, b) =>
-    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  )[0];
+  // The tree this dashboard shows, resolved the way every other surface resolves
+  // it — see {@link TreeManager.getDefaultSession} — after giving a session that
+  // is only on disk a chance to load. Naming the problem of one session while the
+  // canvas draws another would describe two different investigations at once.
+  project.ensureSessionLoaded();
+  const shown = pickDefaultSession(project.tm);
 
   const catalog = sessionCatalog(project);
   res.end(JSON.stringify({
     projectDir: project.projectDir,
-    activeProblem: latestOpen?.problem ?? null,
+    activeProblem: shown?.problem ?? null,
     sessionCount: catalog.length,
     persistenceHealthy: project.persistenceHealthy,
     // Records of this project's journals that could not be read, summed over its

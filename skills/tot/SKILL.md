@@ -1,9 +1,9 @@
 ---
 name: tot
-description: Use this skill when the user says "open tot", "show the tree", "open my tree", or simply "/tot" to open the live tree visualization for the current project in the browser.
+description: Use this skill when the user says "open tot", "show the tree", "open my tree", or simply "/tot-mcp:tot" to open the live tree visualization for the current project in the browser.
 ---
 
-# /tot
+# /tot-mcp:tot
 
 Open the live Tree of Thought visualization for the current project.
 
