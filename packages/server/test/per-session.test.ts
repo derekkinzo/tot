@@ -663,3 +663,92 @@ describe('a session another process opened on the same project', () => {
     expect(status).not.toContain('Investigating: a later tree from elsewhere');
   });
 });
+
+describe('a tree whose journal did not fold whole', () => {
+  // Every record that could not be read is a node, a piece of evidence, or a
+  // verdict missing from what is drawn. The result is a smaller tree that is
+  // entirely plausible on its own, so no surface that renders one can leave the
+  // count out: the reader has no other way to tell a narrowed tree from a
+  // complete one.
+  let stateDir: string;
+  let projectDir: string;
+  const open: SessionServer[] = [];
+  const clients: Client[] = [];
+  const savedDataDir = process.env['TOT_DATA_DIR'];
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'tot-short-state-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'tot-short-proj-'));
+    process.env['TOT_DATA_DIR'] = stateDir;
+  });
+  afterEach(async () => {
+    for (const c of clients.splice(0)) { try { await c.close(); } catch { /* ignore */ } }
+    for (const s of open.splice(0)) { try { await s.close(); } catch { /* ignore */ } }
+    if (savedDataDir === undefined) delete process.env['TOT_DATA_DIR'];
+    else process.env['TOT_DATA_DIR'] = savedDataDir;
+    for (const d of [stateDir, projectDir]) rmSync(d, { recursive: true, force: true });
+  });
+
+  /**
+   * Builds a real tree, damages `count` of its records on disk, and restarts the
+   * server over them. Returns the server serving the narrowed tree.
+   */
+  async function narrowedTree(count = 1): Promise<{ s: SessionServer; client: Client; sessionId: string }> {
+    const first = await createSessionServer({ projectDir });
+    const firstClient = await connect(first);
+    const tree = parseResult(await firstClient.callTool({
+      name: 'create_tree', arguments: { problem: 'why the deploy stalls', rootTitle: 'Deploy stalls' },
+    }));
+    await firstClient.callTool({
+      name: 'decompose',
+      arguments: { parentId: tree.rootId, axis: 'by stage', children: ['Build', 'Upload', 'Health check'] },
+    });
+    await firstClient.close();
+    await first.close();
+
+    // Damage records the fold would otherwise apply, leaving the session itself
+    // readable — a journal whose opening record is gone has no session to list.
+    const path = join(getCentralSessionsDir(projectDir), `${tree.sessionId}.jsonl`);
+    const lines = readFileSync(path, 'utf-8').split('\n').filter((l) => l !== '');
+    for (let i = 0; i < count; i++) lines[lines.length - 1 - i] = 'this line is not json';
+    writeFileSync(path, lines.join('\n') + '\n');
+
+    const s = await createSessionServer({ projectDir });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+    return { s, client, sessionId: tree.sessionId };
+  }
+
+  it('attributes the count to the session it came from, so the short tree can be identified', async () => {
+    const { s, sessionId } = await narrowedTree(2);
+    const listed = await (await fetch(`http://localhost:${s.port}/api/sessions`)).json() as any;
+    const entry = (listed.sessions as any[]).find((x) => x.id === sessionId);
+    expect(entry.unreadableLines).toBe(2);
+  });
+
+  it('reports the project total, so a dashboard can say so before a session is chosen', async () => {
+    const { s } = await narrowedTree(2);
+    const info = await (await fetch(`http://localhost:${s.port}/api/info`)).json() as any;
+    expect(info.unreadableLines).toBe(2);
+  });
+
+  it('says so in the status a caller reads, beside the tree it qualifies', async () => {
+    const { client } = await narrowedTree();
+    const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).toMatch(/1 record of this session could not be read/);
+  });
+
+  it('leaves the caveat off a tree that folded whole, so it is only shown when earned', async () => {
+    const s = await createSessionServer({ projectDir });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+    await client.callTool({ name: 'create_tree', arguments: { problem: 'an undamaged investigation' } });
+
+    const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).not.toMatch(/could not be read/);
+    const info = await (await fetch(`http://localhost:${s.port}/api/info`)).json() as any;
+    expect(info.unreadableLines).toBe(0);
+  });
+});

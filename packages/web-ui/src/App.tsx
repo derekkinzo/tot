@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type CSSProperties } from 'react';
 import { useTreeStream } from './hooks/useTreeStream';
 import { useFollowMode } from './hooks/useFollowMode';
 import TreeView from './components/TreeView';
@@ -8,11 +8,15 @@ import { canvasOwnsKey, type KeyTarget } from './hooks/keyboardOwnership';
 import { DETAIL_PANEL_WIDTH } from './geometry';
 import type { ArtifactRef } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { NOTICE_COLORS } from './theme';
+
+/** Shared shape of a full-width notice across the top of the canvas. */
+const NOTICE: CSSProperties = { textAlign: 'center', padding: '6px 12px', fontSize: 13 };
 
 export default function App() {
   const {
     session, hypotheses, connected, newerSession, loadSession,
-    recentlyChanged, lastAddedId, lastActivityId, persistenceHealthy,
+    recentlyChanged, lastAddedId, lastActivityId, persistenceHealthy, unreadableLines,
   } = useTreeStream();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // The captured evidence being read, if any. Held here rather than in the
@@ -59,13 +63,22 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', position: 'relative' }}>
-      {!persistenceHealthy && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2000,
-          background: '#7f1d1d', color: '#fecaca', textAlign: 'center',
-          padding: '6px 12px', fontSize: 13,
-        }}>
-          ⚠ Saving failed — this tree is not being written to disk. Check the server logs and disk space.
+      {/* Stacked so a second notice appears under the first instead of behind it,
+          and absent entirely when there is nothing to say. */}
+      {(!persistenceHealthy || unreadableLines > 0) && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2000 }}>
+          {!persistenceHealthy && (
+            <div style={{ ...NOTICE, background: NOTICE_COLORS.failure.bg, color: NOTICE_COLORS.failure.fg }}>
+              ⚠ Saving failed — this tree is not being written to disk. Check the server logs and disk space.
+            </div>
+          )}
+          {unreadableLines > 0 && (
+            <div style={{ ...NOTICE, background: NOTICE_COLORS.caution.bg, color: NOTICE_COLORS.caution.fg }}>
+              ⚠ {unreadableLines} saved record{unreadableLines === 1 ? '' : 's'} of this project could not be
+              read back. A tree that lost records is shown without them, so it may be missing nodes, evidence,
+              or verdicts — check the Sessions list for which one.
+            </div>
+          )}
         </div>
       )}
       <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>

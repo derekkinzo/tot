@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { STATUS_COLORS, STATUS_NODE_STYLES, STATUS_LABELS, EVIDENCE_TYPE_COLORS, TEXT } from './theme';
+import { STATUS_COLORS, STATUS_NODE_STYLES, STATUS_LABELS, EVIDENCE_TYPE_COLORS, NOTICE_COLORS, TEXT } from './theme';
 import type { HypothesisStatus } from './types';
 
 const STYLESHEET = readFileSync(resolve(__dirname, '../index.html'), 'utf-8');
@@ -305,6 +305,25 @@ describe('text is readable on the surface it sits on', () => {
       for (const [name, surface] of Object.entries(SURFACES)) {
         expect(contrast(color, surface), `TEXT.${tier} ${color} on ${name}`).toBeGreaterThanOrEqual(AA_SMALL_TEXT);
       }
+    }
+  });
+
+  it('writes a notice in a colour readable on the band it paints', () => {
+    // A notice is the one message that appears because something is wrong with
+    // the tree, so it is the worst one to render unreadable. Each band supplies
+    // its own background, which is what its foreground has to clear.
+    for (const [kind, pair] of Object.entries(NOTICE_COLORS)) {
+      expect(contrast(pair.fg, pair.bg), `${kind} ${pair.fg} on ${pair.bg}`)
+        .toBeGreaterThanOrEqual(AA_SMALL_TEXT);
+    }
+  });
+
+  it('marks a list row with the caution colour readable on the row', () => {
+    // The same qualification appears against one entry in the sessions list,
+    // which keeps its own background rather than painting a band.
+    for (const surface of [SURFACES.card, SURFACES.button]) {
+      expect(contrast(NOTICE_COLORS.caution.fg, surface), `caution on ${surface}`)
+        .toBeGreaterThanOrEqual(AA_SMALL_TEXT);
     }
   });
 

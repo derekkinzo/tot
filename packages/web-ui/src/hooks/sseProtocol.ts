@@ -14,6 +14,33 @@ export function nextBackoff(prev: number): number {
   return Math.min(prev * 2, MAX_BACKOFF_MS);
 }
 
+/** What the dashboard shows about the state of a project's saved trees. */
+export interface ProjectInfo {
+  /** False once a journal write has failed, so saved state is behind the view. */
+  persistenceHealthy: boolean;
+  /** Saved records that could not be read back, summed over the project's sessions. */
+  unreadableLines: number;
+}
+
+/**
+ * Reads a project's health out of an /api/info body.
+ *
+ * Both readings are absence-tolerant, and neither defaults to the alarming
+ * value: a field the server did not send says nothing about the store, and a
+ * notice raised on a missing field would be permanent and unactionable. A
+ * non-numeric count reads as none for the same reason — a banner reporting a
+ * count of nothing is worse than no banner.
+ */
+export function readProjectInfo(body: unknown): ProjectInfo {
+  const d = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  return {
+    persistenceHealthy: d['persistenceHealthy'] !== false,
+    unreadableLines: typeof d['unreadableLines'] === 'number' && Number.isFinite(d['unreadableLines'])
+      ? Math.max(0, Math.trunc(d['unreadableLines']))
+      : 0,
+  };
+}
+
 /**
  * Parses one raw SSE payload and maps the wire {@link TreeEvent} to its reducer
  * {@link Action}, or null for keepalive comments / unparseable input / unknown

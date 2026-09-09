@@ -64,6 +64,20 @@ export const TEXT = {
   secondary: '#8b949e',
 } as const;
 
+/**
+ * A notice about the state of the tree, by what it asks of the reader: a failure
+ * they have to act on, and a caution that qualifies what they are looking at.
+ *
+ * Each pair is read as small prose on a band that paints its own background, so
+ * it clears 4.5:1 there (WCAG 2.2 SC 1.4.3) rather than on the canvas. The
+ * caution foreground doubles as the mark on a list row that carries the same
+ * qualification, where it clears the floor on the row's background too.
+ */
+export const NOTICE_COLORS = {
+  failure: { bg: '#7f1d1d', fg: '#fecaca' },
+  caution: { bg: '#78350f', fg: '#fde68a' },
+} as const;
+
 export const HIGHLIGHT_COLORS = {
   pathEdge: '#58a6ff',
   // An edge carries the tree's structure, so it holds the 3:1 graphic floor

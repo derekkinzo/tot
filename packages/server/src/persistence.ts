@@ -1,8 +1,9 @@
-import { appendFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import {
-  closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync,
+  closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { ensureStoreDir } from './storage-paths.js';
 import {
   applyEntry, deriveScanStatus, emptyReplayState, foldedSession, JOURNAL_SCHEMA_VERSION,
   type JournalEntry, type ReplayState,
@@ -19,6 +20,13 @@ export interface SessionIndex {
   filePath: string;
   /** Hypotheses reconstructed by folding the file. */
   nodeCount: number;
+  /**
+   * Lines of the journal that could not be folded, so the tree is narrower than
+   * what was recorded. Carried on the index because a partial fold is otherwise
+   * indistinguishable from a complete one: what replays is a smaller, entirely
+   * plausible tree, and a reader who is not told cannot know to doubt it.
+   */
+  unreadableLines: number;
 }
 
 export class Persistence {
@@ -29,7 +37,7 @@ export class Persistence {
   private unterminated: boolean;
 
   constructor(dataDir: string, sessionId: string, onError?: (err: Error) => void) {
-    mkdirSync(dataDir, { recursive: true });
+    ensureStoreDir(dataDir);
     this.filePath = join(dataDir, `${sessionId}.jsonl`);
     this.onError = onError;
     this.unterminated = endsMidRecord(this.filePath);
@@ -51,7 +59,18 @@ export class Persistence {
     // the record that actually failed. Readers drop the resulting blank line.
     const line = (this.unterminated ? '\n' : '') + JSON.stringify(entry) + '\n';
     try {
-      await appendFile(this.filePath, line);
+      // Written through a handle so the bytes can be flushed to the device before
+      // this resolves. `appendFile` alone returns once the kernel holds them,
+      // which survives the process dying but not the machine doing so, and the
+      // caller is told the mutation was saved either way. The sync closes that
+      // gap, so an acknowledgement means the same thing in both cases.
+      const handle = await open(this.filePath, 'a');
+      try {
+        await handle.appendFile(line);
+        await handle.datasync();
+      } finally {
+        await handle.close();
+      }
       this.unterminated = false;
     } catch (err) {
       this.unterminated = true;
@@ -93,9 +112,12 @@ function endsMidRecord(filePath: string): boolean {
 /**
  * Picks the "active" entry from a set of sessions: the most recently created
  * open one, falling back to the most recent overall; undefined when empty.
- * Generic over anything carrying a status + createdAt, so the server's eager
- * load (SessionIndex), the dashboard default (Session), and `status` all share
- * one definition of "which session is current".
+ *
+ * Generic over anything carrying a status + createdAt, so the scan of what is on
+ * disk ({@link SessionIndex}) and the engine's own resolution
+ * ({@link TreeManager.getDefaultSession}, which every read surface goes through)
+ * share one definition of "which session is current" — a boot that loads one
+ * session and a read that answers about another describe different trees.
  */
 export function pickActiveSession<T extends { status: string; createdAt: string }>(items: T[]): T | undefined {
   if (items.length === 0) return undefined;
@@ -152,9 +174,12 @@ export function scanSessions(dataDir: string): SessionIndex[] {
         createdAt: session.createdAt,
         filePath,
         nodeCount: state.hypotheses.length,
+        unreadableLines: skipped,
       });
-    } catch {
-      // Skip files that can't be read or parsed
+    } catch (err) {
+      // A file that cannot be read at all has no session to list, so the only
+      // thing that can be said about it is that it was there and was skipped.
+      console.error(`[tot-mcp] Warning: skipped unreadable session file ${filePath}: ${err}`);
     }
   }
 
@@ -163,9 +188,12 @@ export function scanSessions(dataDir: string): SessionIndex[] {
 
 /**
  * Loads a single session file by replaying all its events.
- * Returns the session and its hypotheses fully reconstructed.
+ * Returns the session and its hypotheses fully reconstructed, with a count of
+ * the lines that could not be folded — see {@link SessionIndex.unreadableLines}.
  */
-export function loadSession(filePath: string): { session: Session; hypotheses: Hypothesis[] } | null {
+export function loadSession(
+  filePath: string,
+): { session: Session; hypotheses: Hypothesis[]; unreadableLines: number } | null {
   try {
     const content = readFileSync(filePath, 'utf-8');
     const lines = content.split('\n').filter((l) => l.trim());
@@ -194,6 +222,7 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
         status: deriveScanStatus(session, state.hypotheses, state.sawExplicitTerminal),
       },
       hypotheses: state.hypotheses,
+      unreadableLines: skipped,
     };
   } catch {
     return null;

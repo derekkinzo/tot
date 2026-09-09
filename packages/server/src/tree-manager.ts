@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { v4 as uuid } from 'uuid';
 import { isTerminal, subtreeContainsCorroborated, topLevelBranchesDisposed } from './closure.js';
+import { pickActiveSession } from './persistence.js';
 import type {
   ArtifactRef,
   Decomposition,
@@ -741,12 +742,32 @@ export class TreeManager extends EventEmitter {
       .filter(Boolean);
   }
 
+  /**
+   * The open session being worked on, or undefined when none is open.
+   *
+   * The tracked one when it is still open, else the most recently created open
+   * one — ordered rather than taken in insertion order, so two processes holding
+   * the same project agree on which session that is.
+   */
   getActiveSession(): Session | undefined {
     if (this.currentSessionId) {
       const tracked = this.sessions.get(this.currentSessionId);
       if (tracked && tracked.status === 'open') return tracked;
     }
-    return Array.from(this.sessions.values()).find((s) => s.status === 'open');
+    return pickActiveSession(this.getAllSessions().filter((s) => s.status === 'open'));
+  }
+
+  /**
+   * The session a caller who named none is asking about.
+   *
+   * The active one while an investigation is in progress, and otherwise the most
+   * recent, so a tree whose branches have all reached a terminal state stays
+   * readable instead of answering as though the project had none. Every surface
+   * that resolves an unnamed session reads this, so a status read-out and the
+   * dashboard beside it cannot describe different trees.
+   */
+  getDefaultSession(): Session | undefined {
+    return this.getActiveSession() ?? pickActiveSession(this.getAllSessions());
   }
 
   /**

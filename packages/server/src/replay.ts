@@ -85,18 +85,44 @@ function mergedChildren(prior: string[], next: string[]): string[] {
  * Merges a hypothesis' evidence, matching records by id.
  *
  * Same append-only reasoning as {@link mergedChildren}, with one difference:
- * qualifiers are applied to a record in place, so a record the snapshot carries
- * is the newer of the two and wins. A record with no id cannot be matched
+ * qualifiers are applied to a record in place, so where both accounts carry a
+ * record, the one from the later account wins — `preferPrior` says which that
+ * is. Order follows `prior`, which was folded first, so a record does not move
+ * because a second account of it arrived. A record with no id cannot be matched
  * against anything and is always kept, rather than folding every such record
  * onto one entry.
  */
-function mergedEvidence(prior: Evidence[], next: Evidence[]): Evidence[] {
+function mergedEvidence(prior: Evidence[], next: Evidence[], preferPrior: boolean): Evidence[] {
   const incoming = new Map(next.filter((e) => e.id).map((e) => [e.id, e]));
   const priorIds = new Set(prior.map((e) => e.id).filter(Boolean));
   return [
-    ...prior.map((e) => incoming.get(e.id) ?? e),
+    ...prior.map((e) => (preferPrior ? e : incoming.get(e.id) ?? e)),
     ...next.filter((e) => !e.id || !priorIds.has(e.id)),
   ];
+}
+
+/**
+ * Whether the node already folded records a later moment than the snapshot being
+ * folded onto it — that is, whether the snapshot is an older account of the node.
+ *
+ * Every mutation stamps `metadata.updatedAt`, so for one writer the snapshots of
+ * a node arrive in stamp order and this is never true. It becomes true when two
+ * processes hold the same session: each writes whole-node snapshots built from
+ * its own copy, and the one that appends last is not necessarily the one that
+ * knows the most. Without this, the fields a snapshot substitutes — a status, a
+ * conclusion and its reason — take whichever account landed last, so a peer that
+ * had not seen a verdict silently reverts it while its own tool call reports
+ * success. The append-only collections are merged either way and are unaffected.
+ *
+ * A stamp that is missing or cannot be parsed compares as absent rather than as
+ * older, leaving the plain last-account-wins fold: a journal that never carried
+ * usable stamps has nothing to order its accounts by, and a record that carries
+ * none still folds rather than counting as one that could not be read.
+ */
+function isOlderAccount(prior: Hypothesis, next: Hypothesis): boolean {
+  const a = Date.parse(prior.metadata?.updatedAt ?? '');
+  const b = Date.parse(next.metadata?.updatedAt ?? '');
+  return a > b;
 }
 
 /**
@@ -117,18 +143,21 @@ export function applyEntry(state: ReplayState, entry: JournalEntry): void {
   // Upsert a hypothesis by id in O(1): fold onto the known node if there is one,
   // else append and record its index. Shared by add (writer never re-adds an id,
   // but upsert is safe) and update (order-tolerant: an update with no prior add
-  // lands it). A snapshot's scalar fields win outright; its append-only
-  // collections are merged rather than substituted — see {@link mergedChildren}.
-  // On first appearance, any evidence buffered out-of-order ahead of the node is
-  // flushed onto it (without dropping evidence the snapshot itself carries).
+  // lands it). The fields a snapshot substitutes are taken from whichever account
+  // of the node is the later one — see {@link isOlderAccount} — and its
+  // append-only collections are merged rather than substituted — see
+  // {@link mergedChildren}. On first appearance, any evidence buffered
+  // out-of-order ahead of the node is flushed onto it (without dropping evidence
+  // the snapshot itself carries).
   const upsertHypothesis = (h: Hypothesis): void => {
     const idx = hypothesisIndex.get(h.id);
     if (idx !== undefined) {
       const prior = hypotheses[idx];
+      const stale = isOlderAccount(prior, h);
       hypotheses[idx] = {
-        ...h,
+        ...(stale ? prior : h),
         children: mergedChildren(prior.children, h.children),
-        evidence: mergedEvidence(prior.evidence, h.evidence),
+        evidence: mergedEvidence(prior.evidence, h.evidence, stale),
       };
     } else {
       const buffered = pendingEvidence.get(h.id);

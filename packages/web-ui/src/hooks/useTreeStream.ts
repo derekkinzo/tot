@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useReducer, useRef, useState } from 'react';
 import { reducer, initialTreeState } from './treeReducer';
-import { wireEventToAction, nextBackoff, INITIAL_BACKOFF_MS } from './sseProtocol';
+import { wireEventToAction, nextBackoff, readProjectInfo, INITIAL_BACKOFF_MS } from './sseProtocol';
 
 /**
  * Subscribes the dashboard to its server's live tree: an SSE stream that
@@ -11,6 +11,7 @@ import { wireEventToAction, nextBackoff, INITIAL_BACKOFF_MS } from './sseProtoco
 export function useTreeStream() {
   const [state, dispatch] = useReducer(reducer, undefined, initialTreeState);
   const [persistenceHealthy, setPersistenceHealthy] = useState(true);
+  const [unreadableLines, setUnreadableLines] = useState(0);
   const esRef = useRef<EventSource | null>(null);
   const connectionGenRef = useRef(0);
   // The session the dashboard is displaying. The SSE stream re-requests it on
@@ -18,15 +19,21 @@ export function useTreeStream() {
   // than snapping back to the server's default.
   const viewedSessionIdRef = useRef<string | null>(null);
 
-  // Poll the server's persistence health so the dashboard can warn the user
-  // when journal writes are failing (disk full / permissions) and their tree
-  // is not being saved.
+  // Poll the server for what it knows about this project's saved trees: whether
+  // journal writes are landing at all (disk full / permissions), and whether any
+  // saved records could not be read back, which would make a tree render
+  // narrower than it was recorded.
   useEffect(() => {
     let cancelled = false;
     const check = () => {
       fetch('/api/info')
         .then((r) => r.json())
-        .then((d) => { if (!cancelled) setPersistenceHealthy(d.persistenceHealthy !== false); })
+        .then((body) => {
+          if (cancelled) return;
+          const info = readProjectInfo(body);
+          setPersistenceHealthy(info.persistenceHealthy);
+          setUnreadableLines(info.unreadableLines);
+        })
         .catch(() => {});
     };
     check();
@@ -119,5 +126,5 @@ export function useTreeStream() {
     } catch {}
   }, []);
 
-  return { ...state, loadSession, persistenceHealthy };
+  return { ...state, loadSession, persistenceHealthy, unreadableLines };
 }

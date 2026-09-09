@@ -625,6 +625,94 @@ describe('a snapshot folds onto the node it updates rather than substituting it'
   });
 });
 
+describe('two accounts of one node are read in the order they were recorded', () => {
+  // The fields a snapshot substitutes — a status, a conclusion and its reason —
+  // cannot be merged, so one account has to win. Taking whichever landed last
+  // makes that the append order, and two processes holding the same session each
+  // write whole-node snapshots from their own copy: the one that appends last is
+  // not necessarily the one that knows the most. A peer that never saw a verdict
+  // would revert it while its own call reported success.
+
+  const ev = (id: string, over: Partial<Evidence> = {}): Evidence => ({
+    id, type: 'supports', kind: 'transcription', content: `record ${id}`, timestamp: ts, ...over,
+  });
+  const early = '2024-01-01T00:00:00.000Z';
+  const late = '2024-01-01T00:05:00.000Z';
+  /** A node whose last recorded mutation is stamped `at`. */
+  const stamped = (at: string, over: Partial<Hypothesis> = {}): Hypothesis =>
+    hyp('h1', { ...over, metadata: { createdAt: early, updatedAt: at, source: 'agent' } });
+
+  it('keeps the verdict of the later account when an older one is folded after it', () => {
+    const s = fold(
+      entry('hypothesis-added', stamped(early)),
+      entry('hypothesis-updated', stamped(late, {
+        status: 'eliminated',
+        conclusion: { verdict: 'eliminated', reason: 'the log refutes it', timestamp: late },
+      })),
+      // A peer that never saw the elimination writes its own copy of the node.
+      entry('hypothesis-updated', stamped(early, { status: 'exploring' })),
+    );
+    expect(s.hypotheses[0].status).toBe('eliminated');
+    expect(s.hypotheses[0].conclusion?.reason).toBe('the log refutes it');
+  });
+
+  it('takes the later account when it is the one folded last, which is every single-writer journal', () => {
+    const s = fold(
+      entry('hypothesis-added', stamped(early, { status: 'exploring' })),
+      entry('hypothesis-updated', stamped(late, { status: 'eliminated' })),
+    );
+    expect(s.hypotheses[0].status).toBe('eliminated');
+  });
+
+  it('still merges what an older account appended, which loses nothing by arriving late', () => {
+    // Order is only about the fields that substitute. children and evidence only
+    // ever grow, so a record is kept whichever account carried it.
+    const s = fold(
+      entry('hypothesis-added', stamped(early)),
+      entry('hypothesis-updated', stamped(late, {
+        status: 'eliminated', children: ['b'], evidence: [ev('e-b')],
+      })),
+      entry('hypothesis-updated', stamped(early, { children: ['a'], evidence: [ev('e-a')] })),
+    );
+    expect(s.hypotheses[0].children).toEqual(['b', 'a']);
+    expect(s.hypotheses[0].evidence.map((e) => e.id)).toEqual(['e-b', 'e-a']);
+    expect(s.hypotheses[0].status).toBe('eliminated');
+  });
+
+  it('does not let an older account undo a qualifier the later one recorded on the same record', () => {
+    const s = fold(
+      entry('hypothesis-added', stamped(early, { evidence: [ev('e-a')] })),
+      entry('hypothesis-updated', stamped(late, { evidence: [ev('e-a', { decisive: true })] })),
+      entry('hypothesis-updated', stamped(early, { evidence: [ev('e-a')] })),
+    );
+    expect(s.hypotheses[0].evidence).toHaveLength(1);
+    expect(s.hypotheses[0].evidence[0].decisive).toBe(true);
+  });
+
+  it('falls back to the last account when the stamps cannot be ordered', () => {
+    // A journal that never carried usable stamps has nothing to order its
+    // accounts by, so inventing an order would be worse than reading it as written.
+    const s = fold(
+      entry('hypothesis-added', stamped('not a timestamp', { status: 'eliminated' })),
+      entry('hypothesis-updated', stamped('not a timestamp', { status: 'exploring' })),
+    );
+    expect(s.hypotheses[0].status).toBe('exploring');
+  });
+
+  it('folds a record that carries no stamp at all rather than counting it unreadable', () => {
+    // A hand-authored journal need not carry metadata. Failing to read the record
+    // would drop it AND everything the account held, which is the loss ordering
+    // exists to prevent. The in-memory type requires metadata; a file does not.
+    const undated = { ...hyp('h1', { status: 'eliminated' }), metadata: undefined } as unknown as Hypothesis;
+    const s = fold(
+      entry('hypothesis-added', hyp('h1', { status: 'exploring' })),
+      entry('hypothesis-updated', undated),
+    );
+    expect(s.hypotheses).toHaveLength(1);
+    expect(s.hypotheses[0].status).toBe('eliminated');
+  });
+});
+
 describe('the session a journal describes survives a damaged header', () => {
   // The header is one line among many, and no session means no index entry and
   // nothing to load — so a reader that knows only the header loses every node in

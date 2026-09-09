@@ -6,15 +6,15 @@ import { readFile } from 'node:fs/promises';
 import type { TreeManager } from './tree-manager.js';
 import type { Session, TreeEvent } from './types.js';
 import { sessionCatalog, type ProjectState } from './project-state.js';
-import { pickActiveSession } from './persistence.js';
 import { checkIntegrity, readLineWindow, resolveArtifactPath } from './artifacts.js';
 import { rendersAsLines } from './types.js';
 import { findArtifactRef, parseArtifactRoute, type ArtifactRoute } from './artifact-routes.js';
 import { SseHub } from './sse-hub.js';
 
-/** Most recently created open session, falling back to the most recent overall. */
+/** See {@link TreeManager.getDefaultSession}; null rather than undefined, for the
+ *  JSON payloads these routes serve. */
 function pickDefaultSession(tm: TreeManager): Session | null {
-  return pickActiveSession(tm.getAllSessions()) ?? null;
+  return tm.getDefaultSession() ?? null;
 }
 
 /** Runs `fn` under the project's read/mutate mutex. */
@@ -235,11 +235,17 @@ function handleInfoAPI(res: ServerResponse, project: ProjectState): void {
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   )[0];
 
+  const catalog = sessionCatalog(project);
   res.end(JSON.stringify({
     projectDir: project.projectDir,
     activeProblem: latestOpen?.problem ?? null,
-    sessionCount: sessionCatalog(project).length,
+    sessionCount: catalog.length,
     persistenceHealthy: project.persistenceHealthy,
+    // Records of this project's journals that could not be read, summed over its
+    // sessions. Reported so the dashboard can say that a tree it renders may be
+    // narrower than what was recorded; /api/sessions attributes the count to the
+    // sessions it came from.
+    unreadableLines: catalog.reduce((sum, s) => sum + s.unreadableLines, 0),
   }));
 }
 
