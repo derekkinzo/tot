@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -236,6 +236,34 @@ describe('artifact capture', () => {
     const ref = await captureArtifact({ artifactsDir, sessionId, content: 'stdout line\n', filename: 'stdout.txt' });
     expect(readFileSync(resolveArtifactPath(artifactsDir, ref), 'utf-8')).toBe('stdout line\n');
     expect(await checkIntegrity(artifactsDir, ref)).toBe('verified');
+  });
+
+  it('refuses a capture that stored nothing, rather than recording a citation of no bytes', async () => {
+    // A record citing zero bytes passes every later integrity check, because the
+    // digest of nothing matches the digest of nothing. It would read as verbatim,
+    // verified evidence holding no observation at all. Not every readable path
+    // yields its bytes to a copy, so this is reached without anyone asking for it.
+    await expect(captureArtifact({ artifactsDir, sessionId, sourcePath: source('empty.log', '') }))
+      .rejects.toThrow(ArtifactError);
+  });
+
+  it('refuses empty bytes handed over directly on the same terms', async () => {
+    await expect(captureArtifact({ artifactsDir, sessionId, content: '', filename: 'stdout.txt' }))
+      .rejects.toThrow(ArtifactError);
+  });
+
+  it('leaves nothing behind for a capture refused as empty, not even a temp file', async () => {
+    await expect(captureArtifact({ artifactsDir, sessionId, sourcePath: source('empty.log', '') }))
+      .rejects.toThrow(ArtifactError);
+    const dir = join(artifactsDir, sessionId);
+    expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
+  });
+
+  it('tells the caller what to record instead, so the observation is not simply lost', async () => {
+    // A refusal that only names the rule leaves the agent with a failed call and
+    // no route to filing what it saw.
+    await expect(captureArtifact({ artifactsDir, sessionId, sourcePath: source('empty.log', '') }))
+      .rejects.toThrow(/evidence content/i);
   });
 });
 

@@ -26,6 +26,8 @@ export interface SessionSummary {
   status: string;
   createdAt: string;
   nodeCount: number;
+  /** See {@link SessionIndex.unreadableLines}. */
+  unreadableLines: number;
 }
 
 /**
@@ -39,12 +41,18 @@ export interface SessionSummary {
  */
 export function sessionCatalog(project: ProjectState): SessionSummary[] {
   const { tm, sessionIndex } = project;
+  // How much of a journal folded is a property of the file, not of the engine, so
+  // it comes from the scan even for a session memory otherwise answers for. A
+  // session this process created has no scan entry yet and nothing was skipped
+  // writing it, so its absence reads as none.
+  const unreadableById = new Map(sessionIndex.map((e) => [e.id, e.unreadableLines]));
   const summaries: SessionSummary[] = tm.getAllSessions().map((s) => ({
     id: s.id,
     problem: s.problem,
     status: s.status,
     createdAt: s.createdAt,
     nodeCount: tm.getHypothesesBySession(s.id).length,
+    unreadableLines: unreadableById.get(s.id) ?? 0,
   }));
   const loadedIds = new Set(summaries.map((s) => s.id));
   for (const entry of sessionIndex) {
@@ -55,6 +63,7 @@ export function sessionCatalog(project: ProjectState): SessionSummary[] {
       status: entry.status,
       createdAt: entry.createdAt,
       nodeCount: entry.nodeCount,
+      unreadableLines: entry.unreadableLines,
     });
   }
   return summaries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

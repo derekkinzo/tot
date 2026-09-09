@@ -50,7 +50,6 @@ import {
   readsAsRetypedOutput,
 } from './advisories.js';
 import { nodeLabel, supportingWeight, refutingWeight, gateLabel, gateMeaning, gateFindings } from '@tot-mcp/shared';
-import { pickActiveSession } from './persistence.js';
 import type { Decomposition, DecompositionGate, Hypothesis, StructuralCheck } from './types.js';
 import type { TreeManager } from './tree-manager.js';
 import type { SessionSummary } from './project-state.js';
@@ -583,14 +582,13 @@ export interface StatusContext {
 
 export function formatStatus(tm: TreeManager, context: StatusContext = {}): string {
   const { dashboardUrl = null, listSessions, sessionId } = context;
-  // Summarize the same session the dashboard renders: the active one when an
-  // investigation is in progress, otherwise the most recent. This keeps the
-  // status read-out — and the dashboard URL it carries — available for a tree
-  // whose branches have all reached a terminal state, not just a live one.
+  // Summarize the same session the dashboard renders — see
+  // {@link TreeManager.getDefaultSession} — so the status read-out and the
+  // dashboard URL it carries describe one tree.
   const allSessions = tm.getAllSessions();
   const session = sessionId !== undefined
     ? allSessions.find((s) => s.id === sessionId)
-    : pickActiveSession(allSessions);
+    : tm.getDefaultSession();
   if (!session) {
     // A named session that is absent is a different condition from a project
     // with no tree, and saying the latter would deny trees this project has.
@@ -604,10 +602,25 @@ export function formatStatus(tm: TreeManager, context: StatusContext = {}): stri
 
   const { counts, stagnant, unexplored } = tm.getStatus(session.id);
   const breakdown = computeProgressBreakdown(counts);
+  // Sessions this project holds, for the caveat below and the list at the end.
+  const catalog = listSessions?.() ?? allSessions.map((s) => ({
+    id: s.id, problem: s.problem, status: s.status, createdAt: s.createdAt,
+    nodeCount: 0, unreadableLines: 0,
+  }));
 
   let result = `Session: ${session.id.slice(0, 8)} (${session.status})\n` +
     `Problem: "${truncate(session.problem, 70)}"\n` +
     `Progress: ${breakdown.terminal}/${breakdown.total} resolved (${breakdown.resolvedParts.join(', ')})\n`;
+
+  // Said before any tally is acted on: a journal that only partly folded replays
+  // as a smaller but entirely plausible tree, so a reader who is not told has no
+  // way to know that a branch, a record, or a verdict is missing from the counts
+  // above.
+  const unreadable = catalog.find((s) => s.id === session.id)?.unreadableLines ?? 0;
+  if (unreadable > 0) {
+    result += `⚠ ${unreadable} record${unreadable === 1 ? '' : 's'} of this session could not be read; `
+      + `it may be missing nodes, evidence, or verdicts it once had.\n`;
+  }
 
   // Live-work clauses (active counts, unexplored branches, stagnation) apply
   // only while the session is open. A terminal session can still carry pending
@@ -629,12 +642,7 @@ export function formatStatus(tm: TreeManager, context: StatusContext = {}): stri
   // catalog rather than from memory, because only one session is loaded at
   // start-up: without it, a finished investigation has no id a caller could
   // discover, and nothing to pass to get_tree.
-  result += formatOtherSessions(
-    listSessions?.() ?? allSessions.map((s) => ({
-      id: s.id, problem: s.problem, status: s.status, createdAt: s.createdAt, nodeCount: 0,
-    })),
-    session.id,
-  );
+  result += formatOtherSessions(catalog, session.id);
 
   if (dashboardUrl) {
     result += `\nVisualization: ${dashboardUrl}`;

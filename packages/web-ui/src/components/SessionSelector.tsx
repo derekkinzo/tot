@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TEXT } from '../theme';
+import { NOTICE_COLORS, TEXT } from '../theme';
 
 interface SessionSummary {
   id: string;
@@ -7,6 +7,8 @@ interface SessionSummary {
   status: string;
   createdAt: string;
   nodeCount: number;
+  /** Records of this session's journal that could not be read back. */
+  unreadableLines: number;
 }
 
 interface Props {
@@ -82,6 +84,11 @@ export default function SessionSelector({ currentSessionId, onSwitch }: Props) {
               </div>
               <div style={{ fontSize: 11, color: TEXT.secondary, marginTop: 3 }}>
                 {s.nodeCount} nodes • {new Date(s.createdAt).toLocaleString()}
+                {s.unreadableLines > 0 && (
+                  <span style={{ color: NOTICE_COLORS.caution.fg }}>
+                    {' '}• ⚠ {s.unreadableLines} record{s.unreadableLines === 1 ? '' : 's'} unreadable
+                  </span>
+                )}
               </div>
             </button>
           ))}

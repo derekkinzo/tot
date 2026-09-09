@@ -1442,6 +1442,65 @@ describe('TreeManager', () => {
       expect(() => tm.addEvidence(rootB.id, 'supports', 'more')).toThrow();
       expect(tm.getActiveSession()?.id).toBe(activeBefore);
     });
+
+    it('picks the most recently created open session, not the first one loaded', () => {
+      // Two processes holding the same project load its sessions in whatever order
+      // the directory yields. Taking the first open one makes "which session is
+      // current" depend on that order, so the two disagree about the same project.
+      const older = {
+        id: '00000000-0000-4000-8000-0000000000a1', problem: 'the older one',
+        rootNodeId: '00000000-0000-4000-8000-0000000000a2', status: 'open' as const,
+        createdAt: new Date(2024, 0, 1).toISOString(),
+      };
+      const newer = { ...older, id: '00000000-0000-4000-8000-0000000000b1', problem: 'the newer one',
+        rootNodeId: '00000000-0000-4000-8000-0000000000b2', createdAt: new Date(2024, 0, 2).toISOString() };
+      tm.loadState([older, newer], []);
+      expect(tm.getActiveSession()?.id).toBe(newer.id);
+
+      const reversed = new TreeManager();
+      reversed.loadState([newer, older], []);
+      expect(reversed.getActiveSession()?.id).toBe(newer.id);
+    });
+  });
+
+  describe('getDefaultSession', () => {
+    // What a caller who named no session is asking about. Every surface that
+    // resolves an unnamed session reads this one resolver, so a status read-out
+    // and the dashboard beside it cannot describe different trees.
+
+    it('is the open session while one is open', () => {
+      const { session: a, root: rootA } = tm.createSession('Problem A');
+      tm.addEvidence(rootA.id, 'supports', 'a clue');
+      expect(tm.getDefaultSession()?.id).toBe(a.id);
+      expect(tm.getDefaultSession()?.id).toBe(tm.getActiveSession()?.id);
+    });
+
+    it('is the most recent session once every branch has reached a terminal state', () => {
+      // A finished investigation is still the one to read. Resolving to nothing
+      // would answer as though the project had no tree at all.
+      const { session, root } = tm.createSession('Problem');
+      tm.corroborateHypothesis(root.id, 'this is the answer');
+      expect(session.status).toBe('resolved');
+      expect(tm.getActiveSession()).toBeUndefined();
+      expect(tm.getDefaultSession()?.id).toBe(session.id);
+    });
+
+    it('prefers an open session over a more recently created finished one', () => {
+      const open = {
+        id: '00000000-0000-4000-8000-0000000000c1', problem: 'still going',
+        rootNodeId: '00000000-0000-4000-8000-0000000000c2', status: 'open' as const,
+        createdAt: new Date(2024, 0, 1).toISOString(),
+      };
+      const finishedLater = { ...open, id: '00000000-0000-4000-8000-0000000000d1', problem: 'finished later',
+        rootNodeId: '00000000-0000-4000-8000-0000000000d2', status: 'resolved' as const,
+        createdAt: new Date(2024, 0, 2).toISOString() };
+      tm.loadState([open, finishedLater], []);
+      expect(tm.getDefaultSession()?.id).toBe(open.id);
+    });
+
+    it('resolves to nothing only when the project holds no session', () => {
+      expect(new TreeManager().getDefaultSession()).toBeUndefined();
+    });
   });
 
   describe('eliminateHypothesis abandons fully-pruned sessions', () => {

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { v4 as uuid } from 'uuid';
+import { ensureStoreDir } from './storage-paths.js';
 import type { ArtifactIntegrity, ArtifactLineWindow, ArtifactRef } from './types.js';
 
 /**
@@ -176,7 +177,7 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
   const id = uuid();
   const filename = req.filename ?? (sourcePath ? basename(sourcePath) : 'capture.txt');
   const sessionDir = join(artifactsDir, sessionId);
-  mkdirSync(sessionDir, { recursive: true });
+  ensureStoreDir(sessionDir);
 
   const finalPath = join(sessionDir, id);
   const tempPath = `${finalPath}.partial`;
@@ -186,6 +187,28 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
 
     // Digest and measure the stored copy, not the source.
     const stored = await readFile(tempPath);
+    // The limit again, against what was actually stored. The check before the
+    // copy trusts a size the filesystem reported beforehand, which a file still
+    // being written has already grown past, so the store would end up holding
+    // bytes over the limit under a record that looks ordinary.
+    if (stored.byteLength > ARTIFACT_MAX_BYTES) {
+      throw new ArtifactError(
+        `The capture is ${stored.byteLength} bytes, over the ${ARTIFACT_MAX_BYTES}-byte capture limit. ` +
+        'Capture the relevant portion instead of the whole file.',
+      );
+    }
+    // Nothing stored is refused rather than recorded. Not every readable path
+    // yields its bytes to a copy — a synthetic file the kernel materializes on
+    // read reports no size and can copy as nothing — and a record citing zero
+    // bytes still passes every later integrity check, because the digest of
+    // nothing matches the digest of nothing. It would read as verbatim, verified
+    // evidence holding no observation at all.
+    if (stored.byteLength === 0) {
+      throw new ArtifactError(
+        'The capture came out empty, so there are no bytes for the record to cite. ' +
+        'Capture output that exists, or describe the observation in the evidence content instead.',
+      );
+    }
     const digest = { alg: 'sha-256' as const, value: createHash('sha256').update(stored).digest('hex') };
     // The extension decides when it is one this store knows; otherwise the bytes
     // themselves do, so output captured under an arbitrary name is still readable

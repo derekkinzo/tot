@@ -1,10 +1,10 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { hashProjectDir, getCentralProjectDir, getCentralSessionsDir, writeProjectMeta } from '../src/central-storage.js';
-import { getTotDir } from '../src/storage-paths.js';
+import { hashProjectDir, getCentralProjectDir, getCentralSessionsDir, readProjectMeta, writeProjectMeta } from '../src/central-storage.js';
+import { ensureStoreDir, getTotDir } from '../src/storage-paths.js';
 
 const savedEnv = { ...process.env };
 afterEach(() => {
@@ -107,5 +107,86 @@ describe('writeProjectMeta', () => {
     const first = readFileSync(path, 'utf-8');
     writeProjectMeta(project);
     expect(readFileSync(path, 'utf-8')).toBe(first);
+  });
+});
+
+describe('readProjectMeta', () => {
+  // The store directory is named by a digest, so the name cannot be read back
+  // into a path. meta.json is the only account of which project the trees inside
+  // belong to, and two paths can hash to one directory.
+
+  let root: string;
+  const project = '/home/alice/widget';
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'tot-meta-read-'));
+    process.env['TOT_DATA_DIR'] = root;
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('reads back the path the store was written for', () => {
+    writeProjectMeta(project);
+    expect(readProjectMeta(project)).toBe(resolve(project));
+  });
+
+  it('reports no recorded path when the store holds no meta.json', () => {
+    expect(readProjectMeta(project)).toBeUndefined();
+  });
+
+  it('reports no recorded path when meta.json is unreadable or names none', () => {
+    // Absent, corrupt, and describing something that is not a path all say the
+    // same thing to a caller: this store does not name its project. Handing back
+    // whatever the file held would have a caller compare a real path against a
+    // number, and report a mismatch nobody can act on.
+    const dir = getCentralProjectDir(project);
+    mkdirSync(dir, { recursive: true });
+    for (const body of ['not json at all', 'null', '{}', '{"projectDir":""}', '{"projectDir":42}']) {
+      writeFileSync(join(dir, 'meta.json'), body);
+      expect(readProjectMeta(project), body).toBeUndefined();
+    }
+  });
+});
+
+describe('ensureStoreDir', () => {
+  // A stored tree holds whatever the investigation looked at, captured verbatim
+  // from the machine it ran on. The store's path is derivable rather than secret,
+  // so a default-mode directory is readable by every account on the host in
+  // practice and not merely in principle.
+
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'tot-mode-'));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const mode = (dir: string) => statSync(dir).mode & 0o777;
+
+  it('creates a directory only its owner can read', () => {
+    const dir = join(root, 'projects', 'abc', 'sessions');
+    ensureStoreDir(dir);
+    expect(mode(dir)).toBe(0o700);
+  });
+
+  it('closes every parent it creates on the way, not only the leaf', () => {
+    // An open parent is enough: its children are listable, and a name reached by
+    // hashing a project path is the whole of what guards it.
+    ensureStoreDir(join(root, 'projects', 'abc', 'sessions'));
+    expect(mode(join(root, 'projects'))).toBe(0o700);
+    expect(mode(join(root, 'projects', 'abc'))).toBe(0o700);
+  });
+
+  it('leaves an existing directory the mode its owner gave it', () => {
+    // A user who widened it did so deliberately; re-tightening on every startup
+    // would silently undo that.
+    const dir = join(root, 'shared');
+    mkdirSync(dir, { mode: 0o755 });
+    chmodSync(dir, 0o755);
+    ensureStoreDir(dir);
+    expect(mode(dir)).toBe(0o755);
   });
 });

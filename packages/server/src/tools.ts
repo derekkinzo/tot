@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { TreeError, type TreeManager } from './tree-manager.js';
-import { Persistence, pickActiveSession } from './persistence.js';
+import { Persistence } from './persistence.js';
 import { JournalSink } from './journal-sink.js';
 import * as fmt from './responses.js';
 import { STATUS_ICONS } from './types.js';
@@ -227,12 +227,11 @@ export function getToolHandlers(
    *
    * Only one session is loaded when the server starts, so a named one may still
    * be on disk — it is loaded on demand rather than reported as non-existent.
-   * With no session named, this resolves the way the status read-out does: the
-   * most recent open session, falling back to the most recent overall, so a
-   * finished investigation stays readable and the two surfaces cannot disagree
-   * about which tree is current. When the engine holds no session at all, one is
-   * loaded from disk first, so a project whose tree was started elsewhere reads
-   * as having one.
+   * With no session named, this resolves the way every other surface does — see
+   * {@link TreeManager.getDefaultSession} — so a finished investigation stays
+   * readable and no two surfaces disagree about which tree is current. When the
+   * engine holds no session at all, one is loaded from disk first, so a project
+   * whose tree was started elsewhere reads as having one.
    */
   function readableTree(sessionId?: string): ReturnType<TreeManager['getTree']> {
     if (sessionId !== undefined) {
@@ -240,7 +239,7 @@ export function getToolHandlers(
       return tm.getTree(sessionId);
     }
     ensureSessionLoaded?.();
-    const chosen = pickActiveSession(tm.getAllSessions());
+    const chosen = tm.getDefaultSession();
     return chosen ? tm.getTree(chosen.id) : null;
   }
 

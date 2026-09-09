@@ -9,10 +9,10 @@
  * storage would be copied back from it at the next startup, and the deletion
  * would not hold.
  */
-import { existsSync, mkdirSync, readdirSync, copyFileSync, constants as fsConstants } from 'node:fs';
+import { existsSync, readdirSync, copyFileSync, constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
 import { getCentralProjectDir, getCentralSessionsDir } from './central-storage.js';
-import { atomicWrite } from './storage-paths.js';
+import { atomicWrite, ensureStoreDir } from './storage-paths.js';
 
 /** Records that the legacy directory has already been read, so it is read once. */
 function markerPath(projectDir: string): string {
@@ -33,7 +33,7 @@ export function migrateLegacySessions(projectDir: string): void {
   if (files.length === 0) return;
 
   const centralDir = getCentralSessionsDir(projectDir);
-  mkdirSync(centralDir, { recursive: true });
+  ensureStoreDir(centralDir);
 
   let copiedAll = true;
   for (const file of files) {

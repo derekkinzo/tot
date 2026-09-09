@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -665,7 +666,7 @@ describe('Persistence Roundtrip', () => {
 describe('pickActiveSession', () => {
   const idx = (over: Partial<SessionIndex>): SessionIndex => ({
     id: 'id', problem: 'p', status: 'open', createdAt: '2024-01-01T00:00:00.000Z',
-    filePath: '/x.jsonl', nodeCount: 1, ...over,
+    filePath: '/x.jsonl', nodeCount: 1, unreadableLines: 0, ...over,
   });
 
   it('returns undefined for an empty index', () => {
@@ -771,5 +772,75 @@ describe('a journal left ending mid-record', () => {
     writeFileSync(journal(), '{"v":2,"type":"session-created","paylo' + '\n' + root + node('kept'));
     expect(scanSessions(dataDir).map((s) => ({ id: s.id, nodeCount: s.nodeCount })))
       .toEqual([{ id: sessionId, nodeCount: 2 }]);
+  });
+
+  it('carries the count of unread records, so a surface can say the tree may be short', () => {
+    // The warning goes to a log nobody reading the tree will see. Every surface
+    // that renders the tree needs the count with it, or the smaller tree it draws
+    // is indistinguishable from the whole one.
+    writeFileSync(journal(), header + root + 'this line is not json\n' + node('kept'));
+    expect(scanSessions(dataDir)[0].unreadableLines).toBe(1);
+    expect(loadSession(journal())!.unreadableLines).toBe(1);
+  });
+
+  it('reports none when every record was read, so the caveat is only shown when earned', () => {
+    writeFileSync(journal(), header + root + node('kept'));
+    expect(scanSessions(dataDir)[0].unreadableLines).toBe(0);
+    expect(loadSession(journal())!.unreadableLines).toBe(0);
+  });
+
+  it('counts every unread record, not merely that there was one', () => {
+    writeFileSync(journal(), header + root + 'garbage one\n' + node('kept') + 'garbage two\n');
+    expect(loadSession(journal())!.unreadableLines).toBe(2);
+  });
+});
+
+describe('an acknowledged append', () => {
+  let dataDir: string;
+  const sessionId = 'sess-durable';
+
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'tot-durable-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  it('has reached the device, not merely the kernel', async () => {
+    // The caller is told its mutation was saved. Bytes the kernel is holding
+    // survive this process dying but not the machine doing so, and the
+    // acknowledgement does not distinguish the two — so the same words would
+    // stand for a record that is on disk and one that is about to not exist.
+    // Spied on the FileHandle prototype, which every open() hands back, so what
+    // the writer does with its handle is observable however it obtained it.
+    const probe = await open(join(dataDir, 'probe'), 'a');
+    const proto = Object.getPrototypeOf(probe) as { datasync: () => Promise<void> };
+    await probe.close();
+    const datasync = vi.spyOn(proto, 'datasync');
+    try {
+      await new Persistence(dataDir, sessionId).append('session-created', { id: sessionId });
+      expect(datasync).toHaveBeenCalled();
+    } finally {
+      datasync.mockRestore();
+    }
+  });
+
+  it.skipIf(!existsSync('/proc/self/fd'))(
+    'gives back the handle it opened, so a long session cannot run out of descriptors',
+    async () => {
+      const count = () => readdirSync('/proc/self/fd').length;
+      const p = new Persistence(dataDir, sessionId);
+      await p.append('session-created', { id: sessionId });
+      const before = count();
+      for (let i = 0; i < 40; i++) await p.append('hypothesis-added', { id: `h${i}` });
+      // One descriptor per append would be 40; a handful of slack absorbs whatever
+      // else the runtime opened while these ran.
+      expect(count() - before).toBeLessThan(10);
+    },
+  );
+
+  it('is still readable as one record per line after many appends', async () => {
+    const p = new Persistence(dataDir, sessionId);
+    for (let i = 0; i < 25; i++) await p.append('hypothesis-added', { id: `h${i}` });
+    const lines = readFileSync(join(dataDir, `${sessionId}.jsonl`), 'utf-8').split('\n').filter((l) => l.trim());
+    expect(lines).toHaveLength(25);
+    expect(lines.map((l) => (JSON.parse(l) as { payload: { id: string } }).payload.id))
+      .toEqual(Array.from({ length: 25 }, (_, i) => `h${i}`));
   });
 });
