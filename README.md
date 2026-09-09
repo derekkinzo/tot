@@ -149,6 +149,7 @@ the other reports whether this project has an open reasoning session.
 4. Hypotheses that fail the evidence test are **eliminated**
 5. Surviving hypotheses are decomposed further (deeper levels)
 6. When a hypothesis has survived the refutation tests applied to it, it is **corroborated** (Popper) — provisional retention, not verification
+7. Every verdict stays revisable: evidence that cuts against one **reopens** the branch, and the session with it, while the superseded verdict remains in the audit trail
 
 The tool responses guide the agent through this process — prompting for refuting evidence, flagging confirmation bias, and suggesting discriminating tests.
 

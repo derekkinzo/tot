@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { v4 as uuid } from 'uuid';
-import { isPruned, isTerminal, subtreeContainsCorroborated, topLevelBranchesDisposed } from './closure.js';
+import { isTerminal, subtreeContainsCorroborated, topLevelBranchesDisposed } from './closure.js';
 import type {
   ArtifactRef,
   Decomposition,
@@ -13,7 +13,7 @@ import type {
   TreeState,
 } from './types.js';
 import { STAGNATION_THRESHOLD_DEFAULT, MAX_DEPTH_DEFAULT, MAX_HYPOTHESES_DEFAULT } from './defaults.js';
-import { nodeLabel, readsAsClause, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
+import { nodeLabel, readsAsClause, reopensVerdict, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
 
 /**
  * Wordings that read as a residual branch. Word-bounded so "another" is not read
@@ -28,6 +28,15 @@ const CATCH_ALL_WORDING = [
 /** The parts of a label joined by "and", as a combined hypothesis states them. */
 function conjunctsOf(label: string): string[] {
   return label.split(/\s+and\s+/).map((part) => part.trim()).filter((part) => part !== '');
+}
+
+/**
+ * A word with its indefinite article. Status names are interpolated into
+ * refusals, and several of them begin with a vowel, so the article is chosen
+ * from the word rather than fixed in the sentence.
+ */
+function withArticle(word: string): string {
+  return `${/^[aeiou]/i.test(word) ? 'an' : 'a'} ${word}`;
 }
 
 export class TreeManager extends EventEmitter {
@@ -125,7 +134,7 @@ export class TreeManager extends EventEmitter {
 
     this.assertSessionOpen(parent.sessionId, 'decompose');
     if (isTerminal(parent.status)) {
-      throw new TreeError(`Cannot decompose a ${parent.status} hypothesis`);
+      throw new TreeError(`Cannot decompose ${withArticle(parent.status)} hypothesis`);
     }
     if (children_.length < 2) {
       throw new TreeError('Decomposition requires at least 2 sub-hypotheses');
@@ -214,7 +223,7 @@ export class TreeManager extends EventEmitter {
     // child can appear under a terminal ancestor, leaving structural debt
     // that the closure predicate would silently overlook.
     if (isTerminal(parent.status)) {
-      throw new TreeError(`Cannot add hypothesis to a ${parent.status} node`);
+      throw new TreeError(`Cannot add hypothesis to ${withArticle(parent.status)} node`);
     }
     if (parent.depth + 1 > this.maxDepth) {
       throw new TreeError(`Tree depth limit (${this.maxDepth}) exceeded`);
@@ -253,9 +262,16 @@ export class TreeManager extends EventEmitter {
 
   /**
    * Attaches evidence to a hypothesis. Auto-transitions 'pending' to
-   * 'exploring'. A refute against a corroborated hypothesis demotes it to
-   * 'exploring', cascades up corroborated ancestors (also demoted), and
-   * reopens the session if it was terminal.
+   * 'exploring'. A record that cuts against a settled verdict
+   * ({@link reopensVerdict}) returns the node to 'exploring', cascades up
+   * corroborated ancestors (also demoted), and reopens the session if it was
+   * terminal.
+   *
+   * Reopening a node under a pruned ancestor leaves the branch moot: the
+   * closure walk stops at the pruned ancestor, whose own verdict this record
+   * says nothing about. Reopen the ancestor to bring the lineage back into the
+   * investigation.
+   *
    * @param hypothesisId - ID of the target hypothesis
    * @param type - Relationship of evidence to the hypothesis
    * @param content - Description of the evidence
@@ -264,8 +280,8 @@ export class TreeManager extends EventEmitter {
    * @param artifact - Reference to already-captured bytes; makes the record verbatim
    * @returns The created evidence record plus the cascade-demoted ancestors
    *   so callers can journal each ancestor's hypothesis-updated entry.
-   * @throws TreeError if hypothesis is eliminated/out-of-scope, or if
-   *   supports/neutral evidence is added to a corroborated leaf.
+   * @throws TreeError if the record agrees with a verdict already settled on
+   *   the node, so it could neither change nor reopen it.
    */
   addEvidence(
     hypothesisId: string,
@@ -280,21 +296,28 @@ export class TreeManager extends EventEmitter {
     if (content.trim().length === 0) {
       throw new TreeError('Evidence content cannot be empty or whitespace-only');
     }
-    if (isPruned(hypothesis.status)) {
-      throw new TreeError(`Cannot add evidence to a ${hypothesis.status} hypothesis`);
+    // Every verdict is provisional, so a record that cuts against one is
+    // admitted and reopens the branch (see {@link reopensVerdict}). A record
+    // that agrees with a settled verdict is not: accumulating agreement on a
+    // question already answered is the satisficing move eliminative method
+    // exists to prevent, and it cannot change the disposition either way.
+    if (isTerminal(hypothesis.status) && !reopensVerdict(hypothesis.status, type)) {
+      // out-of-scope admits every type, so only the two grounded verdicts reach here.
+      const admitted = hypothesis.status === 'corroborated' ? 'refuting' : 'supporting';
+      throw new TreeError(
+        `Only ${admitted} evidence is admitted on ${withArticle(hypothesis.status)} hypothesis, `
+        + 'because it withdraws the grounds the verdict rests on and reopens the branch. '
+        + 'A record that agrees with the verdict leaves it where it stands.',
+      );
     }
-    // Corroboration is provisional: a refuting observation may legitimately
-    // arrive later and reopen the verdict. Only refutes is admitted on a
-    // corroborated leaf — supports/neutral on a settled verdict would be
-    // accumulating positive evidence, the satisficing trap Popper rejects.
-    if (hypothesis.status === 'corroborated' && type !== 'refutes') {
-      throw new TreeError('Only refuting evidence is admitted on a corroborated hypothesis');
-    }
-    // A closed session accepts no new evidence EXCEPT a refute on a corroborated
-    // branch, which is the sanctioned way to reopen it (handled below). Any other
-    // evidence on a leaked pending/exploring descendant of a pruned branch would
-    // mutate a completed investigation without re-running closure.
-    if (!(type === 'refutes' && hypothesis.status === 'corroborated')) {
+    // Past that guard, any evidence on a settled node is evidence against it.
+    const reopensBranch = isTerminal(hypothesis.status);
+
+    // A closed session accepts no other evidence: pruning never cascades, so a
+    // closed session can retain pending/exploring descendants under a pruned
+    // branch, and evidence on one of those would mutate a completed
+    // investigation without re-running closure.
+    if (!reopensBranch) {
       this.assertSessionOpen(hypothesis.sessionId, 'add evidence');
     }
 
@@ -315,28 +338,27 @@ export class TreeManager extends EventEmitter {
     hypothesis.evidence.push(evidence);
     hypothesis.metadata.updatedAt = now;
 
-    // A refute against a corroborated hypothesis demotes it to 'exploring'
-    // (the historical conclusion stays in the audit trail) and, when the
-    // session was terminal, reopens it. Both terminal states reflect a
-    // claimed closure that fresh refutation challenges. The demotion
-    // cascades up corroborated ancestors because corroboration's contract
-    // requires every direct child to be terminal — once a descendant
-    // becomes non-terminal, the ancestor's verdict is no longer earned.
+    // Reopening returns the node to 'exploring' (the historical conclusion stays
+    // in the audit trail) and, when the session was terminal, reopens that too:
+    // a closed session is a claimed closure, and the record just filed cuts
+    // against one of the verdicts it was claimed on. The demotion cascades up
+    // corroborated ancestors because corroboration's contract requires every
+    // direct child to be terminal — once a descendant becomes non-terminal, the
+    // ancestor's verdict is no longer earned.
     const session = this.sessions.get(hypothesis.sessionId);
-    const demotesCorroborated = type === 'refutes' && hypothesis.status === 'corroborated';
-    const reopensSession = demotesCorroborated && session !== undefined && session.status !== 'open';
+    const reopensSession = reopensBranch && session !== undefined && session.status !== 'open';
 
-    if (hypothesis.status === 'pending' || demotesCorroborated) {
+    if (hypothesis.status === 'pending' || reopensBranch) {
       hypothesis.status = 'exploring';
       this.resetMutationCounter(hypothesis.sessionId);
     } else {
       this.incrementMutationCounter(hypothesis.sessionId);
     }
-    // Mark the historical conclusion as superseded by the direct refute
-    // so renderers can distinguish it from a cascade demote. The guard
-    // covers loadState's reload path, which copies hypotheses straight
-    // from the journal without engine-API validation.
-    if (demotesCorroborated && hypothesis.conclusion) {
+    // Mark the historical conclusion as superseded by the record filed here, so
+    // renderers can distinguish it from a cascade demote. The guard covers
+    // loadState's reload path, which copies hypotheses straight from the journal
+    // without engine-API validation.
+    if (reopensBranch && hypothesis.conclusion) {
       hypothesis.conclusion.supersededBy = 'self';
     }
 
@@ -353,7 +375,7 @@ export class TreeManager extends EventEmitter {
       this.emit('event', { type: 'session-reopened', sessionId: session.id } satisfies TreeEvent);
     }
 
-    const demotedAncestors = demotesCorroborated
+    const demotedAncestors = reopensBranch
       ? this.demoteCorroboratedAncestors(hypothesis, now)
       : [];
 
@@ -397,7 +419,7 @@ export class TreeManager extends EventEmitter {
       if (!othersStillGround) {
         throw new TreeError(
           'This is the only refuting record the elimination rests on, so setting it aside would leave a verdict with no counter-instance. '
-          + 'File a refutation that does discriminate first, or reopen the branch with add_evidence before qualifying this one.',
+          + 'File a refutation that does discriminate first, or add supporting evidence to reopen the branch, before qualifying this one.',
         );
       }
     }
@@ -435,7 +457,7 @@ export class TreeManager extends EventEmitter {
     if (isTerminal(hypothesis.status)) {
       const message = hypothesis.status === 'eliminated'
         ? 'Hypothesis is already eliminated'
-        : `Cannot eliminate a ${hypothesis.status} hypothesis`;
+        : `Cannot eliminate ${withArticle(hypothesis.status)} hypothesis`;
       throw new TreeError(message);
     }
 
@@ -507,7 +529,7 @@ export class TreeManager extends EventEmitter {
     if (isTerminal(hypothesis.status)) {
       const message = hypothesis.status === 'corroborated'
         ? 'Hypothesis is already corroborated'
-        : `Cannot corroborate a ${hypothesis.status} hypothesis`;
+        : `Cannot corroborate ${withArticle(hypothesis.status)} hypothesis`;
       throw new TreeError(message);
     }
 
@@ -560,7 +582,7 @@ export class TreeManager extends EventEmitter {
     this.assertSessionOpen(hypothesis.sessionId, 'set a hypothesis out-of-scope');
     this.assertReason(reason);
     if (isTerminal(hypothesis.status)) {
-      throw new TreeError(`Cannot set out-of-scope a ${hypothesis.status} hypothesis`);
+      throw new TreeError(`Cannot set ${withArticle(hypothesis.status)} hypothesis out-of-scope`);
     }
     // The root carries the session's problem statement; setting it
     // out-of-scope would abandon the entire investigation by fiat without
@@ -839,11 +861,11 @@ export class TreeManager extends EventEmitter {
   /**
    * Walks up corroborated ancestors and demotes each to 'exploring'.
    * corroborateHypothesis requires direct children terminal at the moment
-   * of the verdict; once a corroborated child demotes via refute, the
-   * parent's gate is retroactively unmet, so the parent demotes too — and
-   * recursively up the corroborated spine. The historical conclusion stays
-   * as audit trail with supersededBy='descendant'. Returns the demoted
-   * ancestors so callers can journal the cascade.
+   * of the verdict; once a child returns to 'exploring', the parent's gate is
+   * retroactively unmet, so the parent demotes too — and recursively up the
+   * corroborated spine. The historical conclusion stays as audit trail with
+   * supersededBy='descendant'. Returns the demoted ancestors so callers can
+   * journal the cascade.
    *
    * The visited set guards against a cycle in parentId pointers (impossible
    * via the public engine API but reachable through corrupt journals).
@@ -880,15 +902,16 @@ export class TreeManager extends EventEmitter {
    * (resolved/abandoned). Pruning never cascades, so a closed session can retain
    * pending/exploring descendants under a pruned branch; mutating those leaked
    * nodes would grow or re-verdict a completed investigation with no closure
-   * re-evaluation. The one sanctioned way to act on a closed session is a refute
-   * that reopens it (see {@link addEvidence}), which calls this before the
-   * reopen and is therefore exempted by its caller.
+   * re-evaluation. The one sanctioned way to act on a closed session is evidence
+   * that cuts against a settled verdict and so reopens it (see
+   * {@link addEvidence}), which exempts itself from this check on that path.
    */
   private assertSessionOpen(sessionId: string, verb: string): void {
     const session = this.sessions.get(sessionId);
     if (session && session.status !== 'open') {
       throw new TreeError(
-        `Cannot ${verb} in a ${session.status} session; add refuting evidence to a corroborated branch to reopen it first`,
+        `Cannot ${verb} in ${withArticle(session.status)} session; add evidence that cuts against a settled verdict to reopen it first `
+        + '(refuting a corroborated branch, or supporting an eliminated one)',
       );
     }
   }

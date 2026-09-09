@@ -62,7 +62,7 @@ function snapshotEvent(tm: TreeManager, sessionId?: string | null): TreeEvent {
 /**
  * Start the HTTP visualization server for one project. Pass port 0 for an
  * OS-assigned ephemeral port; the bound port is returned in the resolved
- * handle. `lock` serializes the state read against MCP mutations.
+ * handle. `lock` serializes this server's own critical sections.
  */
 export async function startHttpServer(
   port: number,
@@ -196,9 +196,8 @@ async function handleStateAPI(res: ServerResponse, url: URL, project: ProjectSta
   const { tm } = project;
   const requestedSessionId = url.searchParams.get('sessionId');
 
-  // Lazy-load + read snapshot under the project lock so ensureSessionLoaded
-  // (which writes the in-memory sessions/hypotheses Maps) cannot interleave
-  // with an MCP handler mid-mutation.
+  // Lazy-load and read the snapshot as one section, so a concurrent request
+  // cannot read the engine's session state part-way through a load.
   try {
     const payload = await lock(async () => {
       if (requestedSessionId) {
@@ -248,9 +247,9 @@ function handleInfoAPI(res: ServerResponse, project: ProjectState): void {
  * Serves a captured artifact: its metadata with a freshly recomputed integrity
  * verdict, a line window of it, or its raw bytes.
  *
- * The reference is resolved from the session's evidence under the project lock,
- * so only bytes some record actually cites are reachable, and the digest checked
- * against is the one recorded at capture.
+ * The reference is resolved from the session's evidence, so only bytes some
+ * record actually cites are reachable, and the digest checked against is the one
+ * recorded at capture.
  */
 async function handleArtifactAPI(
   res: ServerResponse,

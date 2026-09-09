@@ -407,7 +407,7 @@ export function formatCorroborate(hypothesis: Hypothesis, tm: TreeManager): stri
         result += `  - ${h.id.slice(0, 8)}: "${nodeLabel(h)}"\n`;
       }
     }
-    result += `\nCorroboration is provisional retention (Popper). add_evidence(type='refutes') against any corroborated leaf reopens the session for further investigation; the historical verdict stays in the audit trail.\n`;
+    result += `\nCorroboration is provisional retention (Popper). Evidence that cuts against a settled verdict reopens the session for further investigation — add_evidence(type='refutes') on a corroborated branch, or type='supports' on an eliminated one; the historical verdict stays in the audit trail.\n`;
   } else {
     // List only the open nodes that actually block resolution, matching the
     // engine's closure walk: nodes under an eliminated/out-of-scope ancestor

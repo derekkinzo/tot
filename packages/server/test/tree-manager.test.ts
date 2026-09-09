@@ -268,18 +268,87 @@ describe('TreeManager', () => {
       expect(root.status).toBe('exploring');
     });
 
-    it('rejects evidence on eliminated hypothesis', () => {
+    it('supporting evidence on an eliminated hypothesis reopens it', () => {
+      const { session, root } = tm.createSession('Problem');
+      tm.addEvidence(root.id, 'refutes', 'Bad');
+      tm.eliminateHypothesis(root.id, 'Done');
+      // Eliminating the only top-level branch disposes of the whole tree, so
+      // the session closes too and the reopen has to reach both.
+      expect(session.status).toBe('abandoned');
+
+      const events: TreeEvent[] = [];
+      tm.on('event', (e) => events.push(e));
+      tm.addEvidence(root.id, 'supports', 'The counter-instance was misread');
+      // An elimination rests on a counter-instance; support withdraws those
+      // grounds, so the node returns to 'exploring' with the historical
+      // verdict kept in the audit trail.
+      expect(root.status).toBe('exploring');
+      expect(root.conclusion?.verdict).toBe('eliminated');
+      expect(root.conclusion?.supersededBy).toBe('self');
+      expect(session.status).toBe('open');
+      expect(session.completedAt).toBeUndefined();
+      expect(events.some((e) => e.type === 'session-reopened')).toBe(true);
+    });
+
+    it('rejects refuting and neutral evidence on an eliminated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'refutes', 'Bad');
       tm.eliminateHypothesis(root.id, 'Done');
-      expect(() => tm.addEvidence(root.id, 'supports', 'Too late')).toThrow(TreeError);
+      // Neither record can move the verdict: further refutation agrees with
+      // it, and a neutral record establishes nothing either way. The refusal
+      // must come from the verdict, not from the session having closed behind
+      // it — hence matching the wording.
+      expect(() => tm.addEvidence(root.id, 'refutes', 'More of the same'))
+        .toThrow(/Only supporting evidence is admitted on an eliminated hypothesis/);
+      expect(() => tm.addEvidence(root.id, 'neutral', 'Unrelated'))
+        .toThrow(/Only supporting evidence is admitted on an eliminated hypothesis/);
     });
 
-    it('rejects evidence on confirmed hypothesis', () => {
+    it('rejects supporting and neutral evidence on a corroborated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'Good');
       tm.corroborateHypothesis(root.id, 'Found it');
+      expect(() => tm.addEvidence(root.id, 'supports', 'More')).toThrow(TreeError);
       expect(() => tm.addEvidence(root.id, 'neutral', 'Extra')).toThrow(TreeError);
+    });
+
+    it('any evidence on an out-of-scope hypothesis reopens it', () => {
+      // Out-of-scope claims only that a branch was not examined, so any
+      // record at all contradicts it — including a neutral one.
+      const { root } = tm.createSession('Problem');
+      const [a] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      tm.setOutOfScope(a.id, 'set aside');
+      tm.addEvidence(a.id, 'neutral', 'Looked at it after all');
+      expect(a.status).toBe('exploring');
+      expect(a.conclusion?.verdict).toBe('out-of-scope');
+      expect(a.conclusion?.supersededBy).toBe('self');
+    });
+
+    it('reviving an eliminated child demotes its corroborated ancestors', () => {
+      // The corroboration gate requires every child terminal at the moment of
+      // the verdict, so a child that leaves terminal state withdraws the
+      // ancestor's grounds regardless of which verdict the child held.
+      const { session, root } = tm.createSession('Problem');
+      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+      const [a1, a2] = tm.decompose(a.id, [{ title: 'A1' }, { title: 'A2' }], { axis: 'by cause' });
+      tm.addEvidence(a1.id, 'refutes', 'no');
+      tm.eliminateHypothesis(a1.id, 'gone');
+      tm.addEvidence(a2.id, 'supports', 'good');
+      tm.corroborateHypothesis(a2.id, 'A2 wins');
+      tm.addEvidence(a.id, 'supports', 'good');
+      tm.corroborateHypothesis(a.id, 'A wins via A2');
+      tm.addEvidence(b.id, 'refutes', 'no');
+      tm.eliminateHypothesis(b.id, 'gone');
+      expect(session.status).toBe('resolved');
+
+      const { demotedAncestors } = tm.addEvidence(a1.id, 'supports', 'A1 is back in play');
+      expect(a1.status).toBe('exploring');
+      expect(a1.conclusion?.supersededBy).toBe('self');
+      expect(a.status).toBe('exploring');
+      expect(a.conclusion?.verdict).toBe('corroborated');
+      expect(a.conclusion?.supersededBy).toBe('descendant');
+      expect(demotedAncestors.map((h) => h.id)).toEqual([a.id]);
+      expect(session.status).toBe('open');
     });
 
     it('rejects non-existent hypothesis', () => {
@@ -432,7 +501,7 @@ describe('TreeManager', () => {
         id: 'present', parentId: 'root', sessionId: 'sx', depth: 1, title: 'present child',
         status: 'eliminated' as const,
         conclusion: { verdict: 'eliminated' as const, reason: 'r', timestamp: now },
-        evidence: [{ id: 'e', type: 'refutes' as const, content: 'x', timestamp: now }],
+        evidence: [{ id: 'e', kind: 'transcription' as const, type: 'refutes' as const, content: 'x', timestamp: now }],
         metadata: { createdAt: now, updatedAt: now, source: 'agent' as const },
         children: [],
       };

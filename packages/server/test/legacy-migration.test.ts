@@ -71,6 +71,34 @@ describe('legacy-migration', () => {
     expect(readFileSync(join(central, 'race.jsonl'), 'utf-8')).toBe('CENTRAL-WINS\n');
   });
 
+  it('does not bring back a session the user deleted from central storage', () => {
+    // The legacy directory is left in place, so a second pass over it would
+    // re-create whatever was removed and the deletion would not hold.
+    seedLegacy('a.jsonl', 'LEGACY\n');
+    migrateLegacySessions(tmp);
+    const central = getCentralSessionsDir(tmp);
+    rmSync(join(central, 'a.jsonl'));
+
+    migrateLegacySessions(tmp);
+    expect(existsSync(join(central, 'a.jsonl'))).toBe(false);
+  });
+
+  it('retries a run that could not read one of the journals', () => {
+    // A partial pass must not be recorded as done, or the unread journal is
+    // stranded in the legacy directory for good.
+    const legacyDir = join(tmp, '.tot', 'sessions');
+    mkdirSync(legacyDir, { recursive: true });
+    // A directory named like a journal cannot be copied, so the pass is partial.
+    mkdirSync(join(legacyDir, 'broken.jsonl'));
+    seedLegacy('a.jsonl', 'LEGACY\n');
+    migrateLegacySessions(tmp);
+
+    rmSync(join(legacyDir, 'broken.jsonl'), { recursive: true });
+    seedLegacy('b.jsonl', 'LATER\n');
+    migrateLegacySessions(tmp);
+    expect(readFileSync(join(getCentralSessionsDir(tmp), 'b.jsonl'), 'utf-8')).toBe('LATER\n');
+  });
+
   it('is a no-op when no legacy .tot/ dir exists (no throw, no spurious central files)', () => {
     expect(() => migrateLegacySessions(tmp)).not.toThrow();
     const central = getCentralSessionsDir(tmp);

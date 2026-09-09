@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -20,7 +20,7 @@ function parseResult(result: any): any {
 /**
  * Loads every session and its hypotheses by composing the production loaders
  * (scanSessions to enumerate, loadSession to replay each), so these tests
- * exercise the same code paths the daemon uses rather than a test-only loader.
+ * exercise the same code paths the server uses rather than a test-only loader.
  */
 function loadAllSessions(dataDir: string): { sessions: Session[]; hypotheses: Hypothesis[] } {
   const sessions: Session[] = [];
@@ -175,34 +175,19 @@ describe('Persistence Roundtrip', () => {
     expect(hypotheses).toHaveLength(0);
   });
 
-  it('.gitignore is created in parent directory when parent is .tot', async () => {
-    // ensureGitignore only writes when the parent dir ends with '.tot'
-    const totDir = join(tempDir, '.tot');
-    const dataDir = join(totDir, 'sessions');
-    const { client, cleanup } = await createServerWithClient(dataDir);
+  it('writes nothing but journals into the store, whatever the store is named', async () => {
+    // The store lives outside any repo, so nothing there needs a marker file —
+    // including when its directory happens to be named like one that would.
+    const storeDir = join(tempDir, '.tot');
+    const { client, cleanup } = await createServerWithClient(join(storeDir, 'sessions'));
     await client.callTool({
       name: 'create_tree',
-      arguments: { problem: 'Gitignore test' },
+      arguments: { problem: 'Store layout' },
     });
     await cleanup();
 
-    const gitignorePath = join(totDir, '.gitignore');
-    expect(existsSync(gitignorePath)).toBe(true);
-    expect(readFileSync(gitignorePath, 'utf-8').trim()).toBe('*');
-  });
-
-  it('.gitignore is NOT created when parent directory is not .tot', async () => {
-    // Custom TOT_DATA_DIR paths should not get a blanket gitignore
-    const customDir = join(tempDir, 'custom-data');
-    const { client, cleanup } = await createServerWithClient(customDir);
-    await client.callTool({
-      name: 'create_tree',
-      arguments: { problem: 'No gitignore test' },
-    });
-    await cleanup();
-
-    const gitignorePath = join(tempDir, '.gitignore');
-    expect(existsSync(gitignorePath)).toBe(false);
+    expect(readdirSync(storeDir)).toEqual(['sessions']);
+    expect(readdirSync(join(storeDir, 'sessions')).every((f) => f.endsWith('.jsonl'))).toBe(true);
   });
 
   it('scanSessions honors a later session-reopened over an earlier session-completed', () => {
@@ -457,7 +442,7 @@ describe('Persistence Roundtrip', () => {
   it('cascade demote round-trips: refute on a corroborated child journals demoted ancestors so replay agrees', async () => {
     // The cascade demotes corroborated ancestors when a corroborated
     // descendant is refuted. Both the descendant and every ancestor must
-    // be journaled so a daemon restart reconstructs the same in-memory
+    // be journaled so a restart reconstructs the same in-memory
     // tree the live engine produced.
     const { client, cleanup } = await createServerWithClient(tempDir);
     const { rootId } = parseResult(await client.callTool({
@@ -502,7 +487,7 @@ describe('Persistence Roundtrip', () => {
   it('abandoned-reopen round-trips: refute on a corroborated leaf in an abandoned session journals session-reopened', async () => {
     // Both terminal states reopen on refute against a corroborated leaf;
     // the persistence side must journal session-reopened for the abandoned
-    // case as well, otherwise daemon restart reads the prior
+    // case as well, otherwise a restart reads the prior
     // session-completed and silently disagrees with the live engine.
     const { client, cleanup } = await createServerWithClient(tempDir);
     const { rootId } = parseResult(await client.callTool({
@@ -703,5 +688,88 @@ describe('pickActiveSession', () => {
     const older = idx({ id: 'older', status: 'resolved', createdAt: '2024-01-01T00:00:00.000Z' });
     const newer = idx({ id: 'newer', status: 'abandoned', createdAt: '2024-09-01T00:00:00.000Z' });
     expect(pickActiveSession([older, newer])?.id).toBe('newer');
+  });
+});
+
+describe('a journal left ending mid-record', () => {
+  // An append can write some of its bytes and then fail, leaving a record with
+  // no terminator. Appending straight onto those bytes splices two records into
+  // one unreadable line and loses BOTH — including the later one, whose own
+  // append succeeded and was therefore reported as written.
+
+  let dataDir: string;
+  const sessionId = 'sess-torn';
+  const journal = () => join(dataDir, `${sessionId}.jsonl`);
+  const line = (type: string, payload: unknown) =>
+    JSON.stringify({ v: JOURNAL_SCHEMA_VERSION, timestamp: '2024-01-01T00:00:00.000Z', type, payload }) + '\n';
+
+  const header = line('session-created', {
+    id: sessionId, problem: 'Recover from a partial write', rootNodeId: 'root',
+    status: 'open', createdAt: '2024-01-01T00:00:00.000Z',
+  });
+  const node = (id: string, over: Record<string, unknown> = {}) => line('hypothesis-added', {
+    id, parentId: 'root', sessionId, depth: 1, title: id, status: 'pending',
+    evidence: [], children: [], metadata: { createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z', source: 'agent' },
+    ...over,
+  });
+  const root = node('root', { parentId: null, depth: 0 });
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'tot-torn-'));
+  });
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('does not swallow the next record appended to it', async () => {
+    // Truncate the last record mid-way, exactly as a failed append leaves it.
+    writeFileSync(journal(), header + root + node('kept').slice(0, 40));
+    await new Persistence(dataDir, sessionId).append('hypothesis-added', {
+      id: 'after', parentId: 'root', sessionId, depth: 1, title: 'after', status: 'pending',
+      evidence: [], children: [], metadata: { createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z', source: 'agent' },
+    });
+
+    const loaded = loadSession(journal());
+    expect(loaded!.hypotheses.map((h) => h.id)).toEqual(['root', 'after']);
+  });
+
+  it('reports the records it could not read, so a smaller tree is not mistaken for the whole one', () => {
+    writeFileSync(journal(), header + root + 'this line is not json\n' + node('kept'));
+    const warnings: string[] = [];
+    const original = console.error;
+    console.error = (msg?: unknown) => { warnings.push(String(msg)); };
+    try {
+      loadSession(journal());
+    } finally {
+      console.error = original;
+    }
+    expect(warnings.join('\n')).toMatch(/1 of 4 records/);
+  });
+
+  it('says nothing when every record was read', () => {
+    writeFileSync(journal(), header + root + node('kept'));
+    const warnings: string[] = [];
+    const original = console.error;
+    console.error = (msg?: unknown) => { warnings.push(String(msg)); };
+    try {
+      loadSession(journal());
+    } finally {
+      console.error = original;
+    }
+    expect(warnings).toEqual([]);
+  });
+
+  it('keeps a session whose header line is unreadable, rather than losing every node with it', () => {
+    writeFileSync(journal(), '{"v":2,"type":"session-created","paylo' + '\n' + root + node('kept'));
+    const loaded = loadSession(journal());
+    expect(loaded).not.toBeNull();
+    expect(loaded!.session.id).toBe(sessionId);
+    expect(loaded!.hypotheses.map((h) => h.id)).toEqual(['root', 'kept']);
+  });
+
+  it('lists that session in the index too, so both surfaces see the same file', () => {
+    writeFileSync(journal(), '{"v":2,"type":"session-created","paylo' + '\n' + root + node('kept'));
+    expect(scanSessions(dataDir).map((s) => ({ id: s.id, nodeCount: s.nodeCount })))
+      .toEqual([{ id: sessionId, nodeCount: 2 }]);
   });
 });

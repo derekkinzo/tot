@@ -394,7 +394,7 @@ describe('MCP Integration', () => {
       expect(text).toContain('Beta');
     });
 
-    it('error: evidence on eliminated hypothesis', async () => {
+    it('supporting evidence reopens an eliminated hypothesis', async () => {
       const { rootId } = parseResult(
         await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
       );
@@ -408,7 +408,30 @@ describe('MCP Integration', () => {
       });
       const result = await client.callTool({
         name: 'add_evidence',
-        arguments: { hypothesisId: rootId, type: 'supports', content: 'too late' },
+        arguments: { hypothesisId: rootId, type: 'supports', content: 'the counter-instance was misread' },
+      });
+      expect(result.isError).toBeFalsy();
+      const full = JSON.parse(getText(await client.callTool({ name: 'get_tree', arguments: { format: 'full' } })));
+      expect(full.hypotheses[rootId].status).toBe('exploring');
+      // The historical verdict stays on the node as an audit record.
+      expect(full.hypotheses[rootId].conclusion.verdict).toBe('eliminated');
+    });
+
+    it('error: evidence that agrees with a settled verdict', async () => {
+      const { rootId } = parseResult(
+        await client.callTool({ name: 'create_tree', arguments: { problem: 'Test' } }),
+      );
+      await client.callTool({
+        name: 'add_evidence',
+        arguments: { hypothesisId: rootId, type: 'refutes', content: 'bad' },
+      });
+      await client.callTool({
+        name: 'eliminate_hypothesis',
+        arguments: { hypothesisId: rootId, reason: 'done' },
+      });
+      const result = await client.callTool({
+        name: 'add_evidence',
+        arguments: { hypothesisId: rootId, type: 'refutes', content: 'more of the same' },
       });
       expect(result.isError).toBe(true);
     });

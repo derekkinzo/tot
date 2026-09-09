@@ -1,7 +1,10 @@
 /**
- * A promise-chain mutex. Serializes async critical sections so an in-flight
- * mutation cannot interleave with another read/write across `await` points
- * (e.g. an HTTP /api/state read while an MCP tool handler is mid-mutation).
+ * A promise-chain mutex: each section runs to completion before the next
+ * starts, so one cannot observe state another left half-written across an
+ * `await`. Held by the HTTP handlers, which lazily load a session — replacing
+ * the engine's in-memory state — and then read it back. Tool handlers do not
+ * take it, and do not need to: each mutation runs synchronously, so no await
+ * can land inside one.
  */
 export type Lock = <T>(fn: () => Promise<T>) => Promise<T>;
 

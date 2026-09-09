@@ -13,7 +13,9 @@ export interface ProjectState {
   artifactsDir: string;
   tm: TreeManager;
   sessionIndex: SessionIndex[];
-  ensureSessionLoaded: (sessionId: string) => boolean;
+  /** Loads a session from disk on demand — the named one, or the project's
+   *  active one when none is named. True when a session is loaded afterwards. */
+  ensureSessionLoaded: (sessionId?: string) => boolean;
   persistenceHealthy: boolean;
 }
 

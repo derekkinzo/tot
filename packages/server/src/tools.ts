@@ -102,6 +102,8 @@ const TOOL_DEFS = {
       decisive: z.boolean().optional().describe('Set when the verdict turns on this record, so it is read first.'),
       artifactPath: nonBlank(4096).optional().describe(
         'Path to a file holding the verbatim evidence — a log, a command capture, a diff. The file is snapshotted so the record cites the bytes themselves rather than a retelling of them. Prefer this over pasting output into `content`.'),
+      artifactContent: nonBlank(100_000).optional().describe(
+        'The verbatim evidence itself, for output that was never written to a file. Stored as a capture exactly like artifactPath, so the record cites bytes rather than a retelling; use artifactPath instead when the output is already on disk, or is larger than this field holds. Mutually exclusive with artifactPath.'),
       excerptStartLine: z.number().int().min(1).optional().describe('First line of the artifact this record is about (1-based).'),
       excerptEndLine: z.number().int().min(1).optional().describe('Last line of the artifact this record is about (inclusive). Defaults to excerptStartLine, citing a single line.'),
       command: nonBlank(2000).optional().describe('The invocation that produced the artifact.'),
@@ -194,7 +196,7 @@ export function getToolHandlers(
   getDataDir: () => string,
   onPersistenceError?: (err: Error) => void,
   getDashboardUrl?: () => string | null,
-  ensureSessionLoaded?: (sessionId: string) => boolean,
+  ensureSessionLoaded?: (sessionId?: string) => boolean,
   listSessions?: () => SessionSummary[],
 ): ToolHandlers {
   // Bytes live beside the journals that cite them, so the store follows the data
@@ -228,13 +230,16 @@ export function getToolHandlers(
    * With no session named, this resolves the way the status read-out does: the
    * most recent open session, falling back to the most recent overall, so a
    * finished investigation stays readable and the two surfaces cannot disagree
-   * about which tree is current.
+   * about which tree is current. When the engine holds no session at all, one is
+   * loaded from disk first, so a project whose tree was started elsewhere reads
+   * as having one.
    */
   function readableTree(sessionId?: string): ReturnType<TreeManager['getTree']> {
     if (sessionId !== undefined) {
       if (!tm.hasSession(sessionId) && !(ensureSessionLoaded?.(sessionId) ?? false)) return null;
       return tm.getTree(sessionId);
     }
+    ensureSessionLoaded?.();
     const chosen = pickActiveSession(tm.getAllSessions());
     return chosen ? tm.getTree(chosen.id) : null;
   }
@@ -374,13 +379,22 @@ export function getToolHandlers(
       // absent artifact is named rather than inferred. Checked here because the
       // advertised schema must stay a plain object shape.
       const { excerptStartLine: startLine, excerptEndLine: endLine } = input;
-      if (input.artifactPath === undefined) {
+      // One record cites one capture, so two sources of bytes is a question
+      // about which of them the record is about that only the caller can answer.
+      if (input.artifactPath !== undefined && input.artifactContent !== undefined) {
+        throw new ArtifactError(
+          'artifactPath and artifactContent both offer bytes to capture, and a record cites one capture. '
+          + 'Keep the one this record is about.',
+        );
+      }
+      if (input.artifactPath === undefined && input.artifactContent === undefined) {
         const orphaned = (['excerptStartLine', 'excerptEndLine', 'command', 'exitCode'] as const)
           .filter((field) => input[field] !== undefined);
         if (orphaned.length > 0) {
           throw new ArtifactError(
             `${orphaned.join(', ')} describe${orphaned.length === 1 ? 's' : ''} a capture, so ` +
-            'artifactPath is needed to say which bytes. Drop the field, or point at the bytes it describes.',
+            'artifactPath or artifactContent is needed to say which bytes. ' +
+            'Drop the field, or supply the bytes it describes.',
           );
         }
         return undefined;
@@ -401,7 +415,10 @@ export function getToolHandlers(
       return captureArtifact({
         artifactsDir: getArtifactsDir(),
         sessionId: hypothesis.sessionId,
-        sourcePath: input.artifactPath,
+        // Exactly one key, so the capture is never handed both a path and bytes.
+        ...(input.artifactPath === undefined
+          ? { content: input.artifactContent }
+          : { sourcePath: input.artifactPath }),
         command: input.command,
         exitCode: input.exitCode,
         excerpt,
@@ -490,9 +507,13 @@ export function getToolHandlers(
 
   handlers.set('get_status', async (args) => {
     const { sessionId } = TOOL_DEFS.get_status.input.parse(args);
-    // A named session is resolved the same way get_tree resolves one, so the two
-    // read surfaces answer for the same tree or refuse for the same reason.
-    if (sessionId !== undefined && readableTree(sessionId) === null) {
+    // Resolved the same way get_tree resolves it, named or not, so the two read
+    // surfaces answer for the same tree and load the same one on demand. The
+    // resolution runs either way — that is what loads a tree started elsewhere —
+    // and only a named session can be refused: with none named there is nothing
+    // to refuse, just a project with no tree yet.
+    const resolved = readableTree(sessionId);
+    if (resolved === null && sessionId !== undefined) {
       return toolResult(`No such session: ${sessionId}`, true);
     }
     return toolResult(fmt.formatStatus(tm, {
@@ -528,7 +549,7 @@ export function registerTools(
     onPersistenceError?: (err: Error) => void;
     /** Loads a session that is on disk but not yet in memory, so a read can reach
      *  a tree the boot did not eager-load. */
-    ensureSessionLoaded?: (sessionId: string) => boolean;
+    ensureSessionLoaded?: (sessionId?: string) => boolean;
     /** Every session of this project, in memory or on disk, so the status
      *  read-out can name the ones it is not summarizing. */
     listSessions?: () => SessionSummary[];

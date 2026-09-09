@@ -212,7 +212,7 @@ export async function captureArtifact(req: CaptureRequest): Promise<ArtifactRef>
         : req.excerpt.endLine > lineCount ? req.excerpt.endLine : undefined;
       if (past !== undefined) {
         throw new ArtifactError(
-          `The excerpt cites line ${past}, past the end of a ${lineCount}-line capture. ` +
+          `The excerpt cites line ${past}, past the end of the capture, which holds ${lineCount} lines. ` +
           'Cite lines the artifact contains.',
         );
       }
