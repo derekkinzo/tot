@@ -115,11 +115,11 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
         </div>
       )}
 
-      {/* Conclusion. A reopen-on-refute leaves the conclusion record on the
-          hypothesis but demotes status back to 'exploring'; the banner is
-          annotated as historical so the live status pill is the current
-          source of truth. supersededBy distinguishes a direct refute from
-          a cascade demote triggered by a refute on a descendant. */}
+      {/* Conclusion. Evidence that cuts against a verdict leaves the conclusion
+          record on the hypothesis but demotes status back to 'exploring'; the
+          banner is annotated as historical so the live status pill is the current
+          source of truth. supersededBy distinguishes a record filed here from a
+          cascade demote triggered by a descendant's reopening. */}
       {hypothesis.conclusion && (() => {
         const status = conclusionStatus(hypothesis)!;
         const verdict = status.verdict;
@@ -137,7 +137,7 @@ export default function DetailPanel({ hypothesis, hypotheses, onClose, onOpenArt
         const label = !isHistorical
           ? verdictLabel
           : status.supersededByDescendant
-            ? `Reopened (refuted descendant)`
+            ? `Reopened by a descendant`
             : `Reopened from ${verdictLabel}`;
         return (
           <div style={{

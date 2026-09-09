@@ -62,7 +62,7 @@ function renderNode(
     const prefix = !concl.isHistorical
       ? concl.verdict
       : concl.supersededByDescendant
-        ? `historically ${concl.verdict} (reopened by refuted descendant)`
+        ? `historically ${concl.verdict} (reopened by a descendant)`
         : `historically ${concl.verdict}`;
     lines.push(`${indent}  > ${prefix}: ${node.conclusion!.reason}`);
   }

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, chmodSync } from 'node:fs';
+import {
+  mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, chmodSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -141,6 +143,45 @@ describe('per-session server', () => {
     expect(journals).toHaveLength(1);
     // The repo / project dir must stay clean — no per-project .tot is created.
     expect(existsSync(join(projectDir, '.tot'))).toBe(false);
+  });
+
+  it('leaves no trace in the store for a project where no tree was ever built', async () => {
+    // A server boots wherever an agent is launched, including in projects that
+    // never build a tree. Such a boot must not add a project to the store, or
+    // what the store lists is padded with projects that have nothing to show.
+    await start();
+    expect(existsSync(join(stateDir, 'projects', hashProjectDir(projectDir)))).toBe(false);
+  });
+
+  it('records the project path as soon as the project has its first tree', async () => {
+    // The record must not wait for the next boot: a project worked in one
+    // sitting would otherwise be listed by its hash alone, with no path to
+    // show for it.
+    const s1 = await start();
+    const c1 = await connect(s1);
+    clients.push(c1);
+    await c1.callTool({ name: 'create_tree', arguments: { problem: 'Worth recording' } });
+
+    const meta = JSON.parse(readFileSync(
+      join(stateDir, 'projects', hashProjectDir(projectDir), 'meta.json'), 'utf-8',
+    ));
+    expect(meta.projectDir).toBe(projectDir);
+  });
+
+  it('records the project path on a later boot for a project that already has trees', async () => {
+    const s1 = await start();
+    const c1 = await connect(s1);
+    await c1.callTool({ name: 'create_tree', arguments: { problem: 'Worth recording' } });
+    await c1.close();
+    await s1.close();
+    // Removed so the assertion below can only be satisfied by the second boot.
+    rmSync(join(stateDir, 'projects', hashProjectDir(projectDir), 'meta.json'), { force: true });
+
+    await start();
+    const meta = JSON.parse(readFileSync(
+      join(stateDir, 'projects', hashProjectDir(projectDir), 'meta.json'), 'utf-8',
+    ));
+    expect(meta.projectDir).toBe(projectDir);
   });
 
   it('reloads an existing tree from central storage on restart', async () => {
@@ -548,5 +589,77 @@ describe('enumerating a project\'s sessions', () => {
     const status = getText(await client.callTool({ name: 'get_status', arguments: {} }));
     expect(status).not.toContain('other session');
     expect(status).not.toContain('Also in this project');
+  });
+});
+
+describe('a session another process opened on the same project', () => {
+  // One store per project, and any number of processes sharing it: a session can
+  // land in it at any time after this process built its index. Answering from a
+  // boot-time index alone denies a session that is on disk, which invites a
+  // second tree for a problem already being worked.
+
+  let stateDir: string;
+  let projectDir: string;
+  const open: SessionServer[] = [];
+  const clients: Client[] = [];
+  const savedDataDir = process.env['TOT_DATA_DIR'];
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'tot-sib-state-'));
+    projectDir = mkdtempSync(join(tmpdir(), 'tot-sib-proj-'));
+    process.env['TOT_DATA_DIR'] = stateDir;
+  });
+  afterEach(async () => {
+    for (const c of clients.splice(0)) { try { await c.close(); } catch { /* ignore */ } }
+    for (const s of open.splice(0)) { try { await s.close(); } catch { /* ignore */ } }
+    if (savedDataDir === undefined) delete process.env['TOT_DATA_DIR'];
+    else process.env['TOT_DATA_DIR'] = savedDataDir;
+    for (const d of [stateDir, projectDir]) rmSync(d, { recursive: true, force: true });
+  });
+
+  async function start(): Promise<Client> {
+    const s = await createSessionServer({ projectDir });
+    open.push(s);
+    const client = await connect(s);
+    clients.push(client);
+    return client;
+  }
+
+  /** Boot a reader on an empty store, then have a second server open a session. */
+  async function readerAndSibling(): Promise<{ reader: Client; sessionId: string }> {
+    const reader = await start();
+    const writer = await start();
+    const { sessionId } = parseResult(await writer.callTool({
+      name: 'create_tree', arguments: { problem: 'a problem opened by another process' },
+    }));
+    expect(sessionId).toBeDefined();
+    return { reader, sessionId };
+  }
+
+  it('is readable by id, not reported as non-existent', async () => {
+    const { reader, sessionId } = await readerAndSibling();
+    const tree = getText(await reader.callTool({ name: 'get_tree', arguments: { sessionId } }));
+    expect(tree).not.toContain('No such session');
+    expect(tree).toContain('a problem opened by another process');
+  });
+
+  it('answers an un-named read, so the project does not read as having no tree', async () => {
+    const { reader } = await readerAndSibling();
+    const status = getText(await reader.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).not.toContain('No session yet for this project');
+    expect(status).toContain('a problem opened by another process');
+  });
+
+  it('does not displace the tree this process is already working', async () => {
+    // Following a session opened elsewhere would redirect un-named reads
+    // mid-investigation, which is worse than not seeing it.
+    const mine = await start();
+    await mine.callTool({ name: 'create_tree', arguments: { problem: 'the tree this process is working' } });
+    const sibling = await start();
+    await sibling.callTool({ name: 'create_tree', arguments: { problem: 'a later tree from elsewhere' } });
+
+    const status = getText(await mine.callTool({ name: 'get_status', arguments: {} }));
+    expect(status).toContain('the tree this process is working');
+    expect(status).not.toContain('Investigating: a later tree from elsewhere');
   });
 });

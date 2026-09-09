@@ -6,8 +6,8 @@
  */
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
-import { writeFileSync, renameSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
-import { getTotDir } from './storage-paths.js';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { atomicWrite, getTotDir } from './storage-paths.js';
 import { artifactsDirFor } from './artifacts.js';
 
 /**
@@ -36,10 +36,13 @@ export function getCentralArtifactsDir(projectDir: string): string {
 
 
 /**
- * Records the real project path alongside its hash so a future cross-project
- * listing can display human-readable paths. Atomic (temp + rename); idempotent.
+ * Records the real project path alongside its hash so a cross-project listing
+ * can display human-readable paths. Atomic (temp + rename); idempotent.
  * Best-effort: meta.json is non-essential, so any failure is logged and
  * swallowed rather than aborting server startup.
+ *
+ * Creates the project directory, so call it for a project that has trees — a
+ * directory holding only this file describes a project with nothing in it.
  */
 export function writeProjectMeta(projectDir: string): void {
   const absPath = resolve(projectDir);
@@ -58,9 +61,7 @@ export function writeProjectMeta(projectDir: string): void {
         // fall through to rewrite a corrupt or non-object meta
       }
     }
-    const tmp = metaPath + '.tmp';
-    writeFileSync(tmp, JSON.stringify({ projectDir: absPath }, null, 2));
-    renameSync(tmp, metaPath);
+    atomicWrite(metaPath, JSON.stringify({ projectDir: absPath }, null, 2));
   } catch (err) {
     console.error(`[tot-mcp] Warning: failed to write project meta: ${err}`);
   }

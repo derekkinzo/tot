@@ -11,11 +11,12 @@
  * reloads its trees from disk, and repos stay free of a per-project .tot dir.
  */
 
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { TreeManager } from './tree-manager.js';
-import { scanSessions, loadSession, pickActiveSession } from './persistence.js';
+import { scanSessions, loadSession, pickActiveSession, type SessionIndex } from './persistence.js';
 import { registerTools } from './tools.js';
 import { registerPrompts } from './prompts.js';
 import { startHttpServer } from './http.js';
@@ -49,7 +50,6 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
   // Copy any legacy {projectDir}/.tot/sessions journals into central storage
   // (non-destructive) before scanning, so pre-migration trees stay visible.
   migrateLegacySessions(projectDir);
-  writeProjectMeta(projectDir);
 
   const dataDir = getCentralSessionsDir(projectDir);
   const artifactsDir = getCentralArtifactsDir(projectDir);
@@ -63,6 +63,20 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
     : STAGNATION_THRESHOLD_DEFAULT;
   const tm = new TreeManager({ stagnationThreshold });
 
+  // The path is recorded once this project has a store to describe, and not
+  // before: recording it unconditionally creates a directory for every project a
+  // server ever booted in, so the store fills with entries naming projects that
+  // hold no tree and a listing built on them is mostly empty rooms. A project
+  // whose first tree is created in this process qualifies as soon as it is, so
+  // the record does not wait for the next boot to appear.
+  let projectRecorded = existsSync(dataDir);
+  if (projectRecorded) writeProjectMeta(projectDir);
+  tm.on('event', (event) => {
+    if (projectRecorded || event.type !== 'session-created') return;
+    projectRecorded = true;
+    writeProjectMeta(projectDir);
+  });
+
   // Lazy index; eager-load only the most-recent-open (else most-recent) session.
   const sessionIndex = scanSessions(dataDir);
   const target = pickActiveSession(sessionIndex);
@@ -71,19 +85,47 @@ export async function createSessionServer(opts: { projectDir?: string } = {}): P
     if (loaded) tm.loadState([loaded.session], loaded.hypotheses);
   }
 
-  function ensureSessionLoaded(sessionId: string): boolean {
-    if (tm.hasSession(sessionId)) return true;
-    const entry = sessionIndex.find((s) => s.id === sessionId);
-    if (!entry) return false;
+  /**
+   * Loads a session into the engine on demand, by id or — with none named — this
+   * project's active one. Reports whether a session is loaded afterwards.
+   *
+   * The index is built once at boot, but this project's store is shared: another
+   * process can add a session to it at any time after that. So the index is
+   * re-scanned before reporting a session absent, rather than answering "no such
+   * session" about a session that is on disk, or "no session yet" about a project
+   * that has one. A hit costs nothing; the re-scan happens only on the path that
+   * would otherwise return a wrong answer.
+   *
+   * A session already in memory is never displaced by a newer one found on disk.
+   * Whichever tree this process is working stays the one its un-named reads
+   * address, so a session opened elsewhere cannot redirect them mid-investigation.
+   */
+  function ensureSessionLoaded(sessionId?: string): boolean {
+    if (sessionId === undefined) {
+      if (tm.getAllSessions().length > 0) return true;
+    } else if (tm.hasSession(sessionId)) {
+      return true;
+    }
+
+    const find = (): SessionIndex | undefined => sessionId === undefined
+      ? pickActiveSession(sessionIndex)
+      : sessionIndex.find((s) => s.id === sessionId);
+
+    let entry = find();
+    if (!entry) {
+      // In place: the dashboard and the session catalog hold this same array.
+      sessionIndex.splice(0, sessionIndex.length, ...scanSessions(dataDir));
+      entry = find();
+      if (!entry) return false;
+    }
     const loaded = loadSession(entry.filePath);
     if (!loaded) return false;
     tm.loadState([loaded.session], loaded.hypotheses);
     return true;
   }
 
-  // Single-project async mutex: the HTTP state read runs ensureSessionLoaded
-  // under this lock so it cannot interleave with a tool handler mid-mutation
-  // across an await point.
+  // Serializes the HTTP handlers' lazy-load-then-read sections against each
+  // other. See {@link makeLock} for why the tool handlers need no lock.
   const lock = makeLock();
 
   // Resolved once the HTTP server binds; threaded into get_status/get_tree so

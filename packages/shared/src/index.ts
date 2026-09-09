@@ -174,9 +174,9 @@ export interface Conclusion {
   // Ids of refutes-typed evidence that ground an 'eliminated' verdict.
   // Empty/absent when replaying older journals that did not record this.
   refutingEvidenceIds?: string[];
-  // Set when the verdict has been superseded by a later refute. 'self' marks a
-  // direct refute against this hypothesis; 'descendant' marks a cascade demote
-  // triggered by a refute on a corroborated descendant. Renderers use this to
+  // Set when a later record cut against the verdict and reopened it. 'self'
+  // marks a record filed on this hypothesis; 'descendant' marks a cascade demote
+  // triggered by a corroborated descendant reopening. Renderers use this to
   // distinguish the historical-conclusion banner.
   supersededBy?: 'self' | 'descendant';
 }
@@ -241,6 +241,25 @@ export function isTerminal(status: HypothesisStatus): boolean {
  */
 export function isOpen(status: HypothesisStatus): boolean {
   return status === 'pending' || status === 'exploring';
+}
+
+/**
+ * Whether a record of this type cuts against a settled verdict, and so reopens
+ * it.
+ *
+ * A verdict is held while the records it rests on stand, so an observation that
+ * cuts against it withdraws the grounds rather than arriving too late to count.
+ * Which type cuts against which verdict follows from what the verdict claims:
+ * refutation against corroboration, support against an elimination that rests on
+ * a counter-instance, and any record at all against out-of-scope, which claims
+ * only that a branch was never examined — so examining it is the contradiction.
+ *
+ * False for a status that is not terminal: there is no verdict there to reopen.
+ */
+export function reopensVerdict(status: HypothesisStatus, type: Evidence['type']): boolean {
+  if (status === 'corroborated') return type === 'refutes';
+  if (status === 'eliminated') return type === 'supports';
+  return status === 'out-of-scope';
 }
 
 // ─── Evidence counts ───

@@ -154,6 +154,48 @@ describe('verbatim evidence capture, end to end', () => {
     expect(evidence.artifact).toBeUndefined();
   });
 
+  it('captures inline output as verbatim bytes, with no file to point at', async () => {
+    // Output that only ever existed on a stream still deserves a capture; the
+    // alternative is a retelling, or a temp file written solely to be pointed at.
+    const { s, client } = await start();
+    const rootId = await rootOf(client);
+    const res: any = await client.callTool({
+      name: 'add_evidence',
+      arguments: {
+        hypothesisId: rootId, type: 'refutes', content: 'the assertion fails on line 7',
+        artifactContent: LOG_BODY, command: 'npm test', exitCode: 1, excerptStartLine: 7,
+      },
+    });
+    expect(res.isError).toBeFalsy();
+
+    const { hypotheses } = await state(s);
+    const evidence = hypotheses.find((h: any) => h.id === rootId).evidence[0];
+    expect(evidence.kind).toBe('artifact');
+    expect(evidence.artifact.lineCount).toBe(12);
+    expect(evidence.artifact.excerpt).toEqual({ startLine: 7, endLine: 7 });
+    const stored = join(getCentralArtifactsDir(projectDir), evidence.artifact.sessionId, evidence.artifact.id);
+    expect(readFileSync(stored, 'utf-8')).toBe(LOG_BODY);
+
+    const meta = await (await fetch(
+      `http://localhost:${s.port}/api/artifacts/${evidence.artifact.sessionId}/${evidence.artifact.id}/meta`,
+    )).json();
+    expect(meta.integrity).toBe('verified');
+  });
+
+  it('refuses a path and inline bytes together, which offer two captures for one record', async () => {
+    const { client } = await start();
+    const rootId = await rootOf(client);
+    const res: any = await client.callTool({
+      name: 'add_evidence',
+      arguments: {
+        hypothesisId: rootId, type: 'refutes', content: 'x',
+        artifactPath: log('a.log', LOG_BODY), artifactContent: LOG_BODY,
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(storedIds()).toEqual([]);
+  });
+
   it('survives a restart: the reference replays and still resolves to the same bytes', async () => {
     const { s, client } = await start();
     const rootId = await rootOf(client);

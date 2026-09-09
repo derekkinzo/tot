@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyEntry, deriveScanStatus, emptyReplayState, isFromNewerWriter,
+  applyEntry, deriveScanStatus, emptyReplayState, foldedSession, isFromNewerWriter,
   JOURNAL_SCHEMA_VERSION, type JournalEntry,
 } from '../src/replay.js';
-import type { Hypothesis, Session } from '../src/types.js';
+import type { Evidence, Hypothesis, Session } from '../src/types.js';
 import { deriveTitle } from '@tot-mcp/shared';
 
 const ts = '2024-01-01T00:00:00.000Z';
@@ -535,5 +535,145 @@ describe('deriveScanStatus (scan projection)', () => {
       hyp('b', { parentId: 'a', status: 'corroborated' }),
     ];
     expect(deriveScanStatus(session({ status: 'abandoned' }), hyps, false)).toBe('abandoned');
+  });
+});
+
+describe('a snapshot folds onto the node it updates rather than substituting it', () => {
+  // children and evidence only ever grow, so a field a snapshot omits means its
+  // writer had not seen that entry — not that the entry went away. Substituting
+  // the collection loses whatever another writer recorded, and the loss is
+  // structural: a dropped child still names its parent, but the parent no longer
+  // names it, so no walk from the root can reach it.
+
+  const ev = (id: string, over: Partial<Evidence> = {}): Evidence => ({
+    id, type: 'supports', kind: 'transcription', content: `record ${id}`, timestamp: ts, ...over,
+  });
+
+  it('keeps children recorded by a writer that the later snapshot never saw', () => {
+    const s = fold(
+      entry('hypothesis-added', hyp('root')),
+      // Two writers decomposed the same node from the same starting point, so
+      // neither snapshot carries the other's children.
+      entry('hypothesis-updated', hyp('root', { children: ['a1', 'a2'] })),
+      entry('hypothesis-updated', hyp('root', { children: ['b1', 'b2'] })),
+    );
+    expect(s.hypotheses[0].children).toEqual(['a1', 'a2', 'b1', 'b2']);
+  });
+
+  it('leaves no child naming a parent that does not name it back', () => {
+    const s = fold(
+      entry('hypothesis-added', hyp('root')),
+      entry('hypothesis-updated', hyp('root', { children: ['a1'] })),
+      entry('hypothesis-added', hyp('a1', { parentId: 'root' })),
+      entry('hypothesis-updated', hyp('root', { children: ['b1'] })),
+      entry('hypothesis-added', hyp('b1', { parentId: 'root' })),
+    );
+    const root = s.hypotheses.find((h) => h.id === 'root')!;
+    const orphans = s.hypotheses.filter(
+      (h) => h.parentId === 'root' && !root.children.includes(h.id),
+    );
+    expect(orphans).toEqual([]);
+  });
+
+  it('keeps evidence recorded by a writer that the later snapshot never saw', () => {
+    const s = fold(
+      entry('hypothesis-added', hyp('h1')),
+      entry('hypothesis-updated', hyp('h1', { evidence: [ev('e-a')] })),
+      entry('hypothesis-updated', hyp('h1', { evidence: [ev('e-b')] })),
+    );
+    expect(s.hypotheses[0].evidence.map((e) => e.id)).toEqual(['e-a', 'e-b']);
+  });
+
+  it('lets the later snapshot of a record win, because qualifiers are applied in place', () => {
+    const s = fold(
+      entry('hypothesis-added', hyp('h1', { evidence: [ev('e-a')] })),
+      entry('hypothesis-updated', hyp('h1', { evidence: [ev('e-a', { decisive: true })] })),
+    );
+    expect(s.hypotheses[0].evidence).toHaveLength(1);
+    expect(s.hypotheses[0].evidence[0].decisive).toBe(true);
+  });
+
+  it('never folds two records with no id onto one entry', () => {
+    // A hand-authored journal can omit the id. Such records cannot be matched
+    // against anything, so each is kept in full rather than collapsed.
+    // The in-memory type requires an id; a journal on disk is not bound by it.
+    const anonymous = [{ ...ev('x'), id: undefined }, { ...ev('y'), id: undefined }] as unknown as Evidence[];
+    const s = fold(
+      entry('hypothesis-added', hyp('h1')),
+      entry('hypothesis-updated', hyp('h1', { evidence: anonymous })),
+    );
+    expect(s.hypotheses[0].evidence).toHaveLength(2);
+  });
+
+  it('folds a single writer to exactly what it last wrote, with nothing duplicated', () => {
+    // One writer's snapshots each contain every earlier entry, so merging and
+    // substituting agree — a journal written by one process reads unchanged.
+    const s = fold(
+      entry('hypothesis-added', hyp('root', { children: ['a'] })),
+      entry('hypothesis-updated', hyp('root', { children: ['a', 'b'] })),
+      entry('hypothesis-updated', hyp('root', { children: ['a', 'b', 'c'] })),
+    );
+    expect(s.hypotheses[0].children).toEqual(['a', 'b', 'c']);
+  });
+
+  it('still takes the latest scalar fields, which no writer merges', () => {
+    const s = fold(
+      entry('hypothesis-added', hyp('h1', { status: 'exploring' })),
+      entry('hypothesis-updated', hyp('h1', { status: 'eliminated' })),
+    );
+    expect(s.hypotheses[0].status).toBe('eliminated');
+  });
+});
+
+describe('the session a journal describes survives a damaged header', () => {
+  // The header is one line among many, and no session means no index entry and
+  // nothing to load — so a reader that knows only the header loses every node in
+  // the journal over one bad line.
+
+  it('reconstructs the session from the root node when no header was recorded', () => {
+    const s = fold(
+      entry('hypothesis-added', hyp('root', {
+        sessionId: 'sess-7', title: 'Deploy fails', statement: 'Why does the deploy step fail?',
+      })),
+      entry('hypothesis-added', hyp('kid', { parentId: 'root', sessionId: 'sess-7' })),
+    );
+    const recovered = foldedSession(s);
+    expect(recovered).toEqual({
+      id: 'sess-7',
+      problem: 'Why does the deploy step fail?',
+      rootNodeId: 'root',
+      status: 'open',
+      createdAt: ts,
+    });
+  });
+
+  it('reports no session when there is neither a header nor a root node', () => {
+    expect(foldedSession(emptyReplayState())).toBeUndefined();
+  });
+
+  it('fills in only the fields a partial header failed to carry', () => {
+    const s = fold(
+      entry('session-created', { status: 'open', problem: 'Recorded problem' }),
+      entry('hypothesis-added', hyp('root', { sessionId: 'sess-7', title: 'Recovered' })),
+    );
+    const recovered = foldedSession(s)!;
+    // The header holds the problem verbatim, where the root's copy may have been
+    // split into a label and a statement, so the header keeps that field.
+    expect(recovered.problem).toBe('Recorded problem');
+    expect(recovered.id).toBe('sess-7');
+    expect(recovered.rootNodeId).toBe('root');
+  });
+
+  it('refuses a session it cannot address, rather than passing the gap on', () => {
+    // With no node to recover an id from, there is nothing to list or open, and
+    // handing the session back only moves the failure to the surface that
+    // renders it.
+    const s = fold(entry('session-created', { status: 'open', problem: 'No id, no nodes' }));
+    expect(foldedSession(s)).toBeUndefined();
+  });
+
+  it('reads a problem the header never stated as unstated, not as a missing field', () => {
+    const s = fold(entry('session-created', { id: 'sess-9', status: 'open' }));
+    expect(foldedSession(s)?.problem).toBe('');
   });
 });

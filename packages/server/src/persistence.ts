@@ -1,8 +1,10 @@
 import { appendFile } from 'node:fs/promises';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
-  applyEntry, deriveScanStatus, emptyReplayState, JOURNAL_SCHEMA_VERSION,
+  applyEntry, deriveScanStatus, emptyReplayState, foldedSession, JOURNAL_SCHEMA_VERSION,
   type JournalEntry, type ReplayState,
 } from './replay.js';
 import type { Hypothesis, Session, TreeEvent } from './types.js';
@@ -22,12 +24,15 @@ export interface SessionIndex {
 export class Persistence {
   private filePath: string;
   private onError?: (err: Error) => void;
+  /** Whether the file may end mid-record, so the next append has to close that
+   *  record off before starting its own. See {@link endsMidRecord}. */
+  private unterminated: boolean;
 
   constructor(dataDir: string, sessionId: string, onError?: (err: Error) => void) {
     mkdirSync(dataDir, { recursive: true });
     this.filePath = join(dataDir, `${sessionId}.jsonl`);
     this.onError = onError;
-    ensureGitignore(dataDir);
+    this.unterminated = endsMidRecord(this.filePath);
   }
 
   async append(type: string, payload: unknown): Promise<void> {
@@ -37,9 +42,19 @@ export class Persistence {
       type,
       payload,
     };
+    // A newline ahead of the record when the file ends mid-record: an append can
+    // write some of its bytes and then fail, and the partial record it leaves
+    // behind has no terminator. Appending straight onto those bytes would splice
+    // the two records into one unparseable line and lose BOTH — including this
+    // one, which the caller would still be told was written, because this append
+    // itself succeeds. Closing the partial record first confines the damage to
+    // the record that actually failed. Readers drop the resulting blank line.
+    const line = (this.unterminated ? '\n' : '') + JSON.stringify(entry) + '\n';
     try {
-      await appendFile(this.filePath, JSON.stringify(entry) + '\n');
+      await appendFile(this.filePath, line);
+      this.unterminated = false;
     } catch (err) {
+      this.unterminated = true;
       console.error(`[tot-mcp] Warning: failed to write JSONL: ${err}`);
       this.onError?.(err instanceof Error ? err : new Error(String(err)));
       // Propagate so the sink can flag the session unhealthy and the tool
@@ -47,6 +62,31 @@ export class Persistence {
       // for a mutation that never reached disk.
       throw err instanceof Error ? err : new Error(String(err));
     }
+  }
+}
+
+/**
+ * Whether a journal's last byte is something other than a record terminator.
+ *
+ * True of a file left mid-record by a write that failed part-way, whichever
+ * process was writing — so a session resumed after a crash does not append onto
+ * a partial record. Reads one byte rather than the file, which can be large.
+ * False when the file does not exist yet, or cannot be read: an append onto it
+ * will fail on its own terms and report that.
+ */
+function endsMidRecord(filePath: string): boolean {
+  let fd: number | undefined;
+  try {
+    const { size } = statSync(filePath);
+    if (size === 0) return false;
+    fd = openSync(filePath, 'r');
+    const last = Buffer.alloc(1);
+    readSync(fd, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -91,17 +131,19 @@ export function scanSessions(dataDir: string): SessionIndex[] {
       if (lines.length === 0) continue;
 
       const state = emptyReplayState();
+      let skipped = 0;
       for (const line of lines) {
         try {
           applyEntry(state, JSON.parse(line) as JournalEntry);
         } catch {
-          // skip corrupt line, keep folding the rest
+          skipped++; // keep folding the rest
         }
       }
 
-      const session = state.sessions[0];
-      if (!session) continue; // no session-created header → not a usable session file
+      const session = foldedSession(state);
+      if (!session) continue; // nothing describing a session → not a session file
       warnIfFromNewerWriter(state, filePath);
+      warnIfLinesSkipped(skipped, lines.length, filePath);
 
       index.push({
         id: session.id,
@@ -130,20 +172,22 @@ export function loadSession(filePath: string): { session: Session; hypotheses: H
     if (lines.length === 0) return null;
 
     const state = emptyReplayState();
+    let skipped = 0;
     for (const line of lines) {
       try {
         applyEntry(state, JSON.parse(line) as JournalEntry);
       } catch {
-        // skip corrupt lines
+        skipped++; // keep folding the rest
       }
     }
 
-    if (state.sessions.length === 0) return null;
-    warnIfFromNewerWriter(state, filePath);
     // Derived the same way the index derives it. Handing back the folded status
     // would have the session list and the loaded session state different terminal
     // verdicts for the same bytes.
-    const session = state.sessions[0];
+    const session = foldedSession(state);
+    if (!session) return null;
+    warnIfFromNewerWriter(state, filePath);
+    warnIfLinesSkipped(skipped, lines.length, filePath);
     return {
       session: {
         ...session,
@@ -170,6 +214,24 @@ function warnIfFromNewerWriter(state: ReplayState, filePath: string): void {
     `[tot-mcp] Warning: ${filePath} was written by a newer version of tot-mcp ` +
     `(journal schema above v${JOURNAL_SCHEMA_VERSION}). It has been read as far as this ` +
     'build understands it; anything newer was left out. Upgrade to see the whole session.',
+  );
+}
+
+/**
+ * Says so when lines of a journal could not be read.
+ *
+ * A skipped line is a record that is simply gone: an eliminated branch that
+ * reads as still open, evidence that no longer appears under the hypothesis it
+ * was filed against. The tree still renders, which is the danger — it renders as
+ * a smaller but entirely plausible tree, with nothing to distinguish it from the
+ * whole one. Saying how many records were lost is what lets a reader tell.
+ */
+function warnIfLinesSkipped(skipped: number, total: number, filePath: string): void {
+  if (skipped === 0) return;
+  console.error(
+    `[tot-mcp] Warning: ${skipped} of ${total} records in ${filePath} could not be read ` +
+    'and were left out. The session is shown without them, so it may be missing nodes, ' +
+    'evidence, or verdicts it once had.',
   );
 }
 
@@ -227,21 +289,4 @@ export function journalEventToEntry(event: TreeEvent): JournalRecord | null {
  */
 function persistedHypothesis(h: Hypothesis): Hypothesis & { content: string } {
   return { ...h, content: h.statement ?? h.title };
-}
-
-function ensureGitignore(dataDir: string): void {
-  const parentDir = join(dataDir, '..');
-  // Only write .gitignore if the parent looks like a .tot directory.
-  // Custom TOT_DATA_DIR paths may point elsewhere; writing a blanket
-  // "*" gitignore in an arbitrary directory would be surprising.
-  if (!parentDir.endsWith('.tot')) return;
-
-  const gitignorePath = join(parentDir, '.gitignore');
-  if (!existsSync(gitignorePath)) {
-    try {
-      writeFileSync(gitignorePath, '*\n');
-    } catch {
-      // Non-critical
-    }
-  }
 }

@@ -3,10 +3,10 @@ import type { Hypothesis } from '../types';
 /**
  * Classifies a hypothesis's conclusion record for display.
  *
- * A reopen-on-refute leaves the conclusion on the hypothesis but demotes its
- * live status, so the banner must be marked historical. `supersededBy` is the
- * explicit signal; a status that disagrees with the recorded verdict is the
- * fallback wherever that field is absent.
+ * Evidence that cuts against a verdict leaves the conclusion on the hypothesis
+ * but demotes its live status, so the banner must be marked historical.
+ * `supersededBy` is the explicit signal; a status that disagrees with the
+ * recorded verdict is the fallback wherever that field is absent.
  *
  * Returns the raw `verdict` (callers apply their own label) plus the derived
  * flags — it deliberately does NOT format a label, so DetailPanel and
@@ -16,7 +16,7 @@ export interface ConclusionStatus {
   verdict: 'eliminated' | 'corroborated' | 'out-of-scope';
   /** True when the conclusion is a superseded/reopened record, not the live verdict. */
   isHistorical: boolean;
-  /** True when a refute on a descendant (cascade demote) reopened this node. */
+  /** True when a descendant's reopening (cascade demote) reopened this node. */
   supersededByDescendant: boolean;
 }
 
