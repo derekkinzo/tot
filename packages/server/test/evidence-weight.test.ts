@@ -192,3 +192,72 @@ describe('qualifyEvidence', () => {
       .toThrow(/resolved|closed/i);
   });
 });
+
+describe('grounding a verdict that is already settled', () => {
+  // The canvas marks a settled leaf that carries no verbatim record, and counts it
+  // against the project's grounded tally. The record the verdict rests on agrees
+  // with that verdict, so re-filing it with a capture is refused, and filing the
+  // bytes as the opposite type would tear the verdict down in order to attach its
+  // own evidence. Attaching them to the record already on the ledger is what
+  // leaves the verdict standing and the flag answered.
+  const artifact = (filename: string) => ({
+    id: `art-${filename}`,
+    sessionId: 'irrelevant-here',
+    digest: { alg: 'sha-256' as const, value: 'd'.repeat(64) },
+    filename,
+    mediaType: 'text/plain',
+    byteLength: 42,
+    capturedAt: '2024-01-01T00:00:00.000Z',
+  });
+
+  /** A settled leaf whose verdict rests on a paraphrase, beside a live sibling. */
+  async function settledOnAParaphrase() {
+    const { TreeManager } = await import('../src/tree-manager.js');
+    const tm = new TreeManager({});
+    const { root } = tm.createSession('why the deploy stalls', 'Deploy stalls');
+    const kids = tm.decompose(root.id, [{ title: 'Cache miss' }, { title: 'Slow tests' }], { axis: 'by stage' });
+    const { evidence } = tm.addEvidence(kids[0].id, 'refutes', 'the cache is warm on every run');
+    tm.eliminateHypothesis(kids[0].id, 'the cache is warm');
+    return { tm, nodeId: kids[0].id, evidenceId: evidence.id };
+  }
+
+  it('is flagged until the bytes are attached', async () => {
+    const { tm, nodeId } = await settledOnAParaphrase();
+    expect(hasUngroundedVerdict(tm.getHypothesis(nodeId)!)).toBe(true);
+  });
+
+  it('is answered by attaching the bytes to the record it rests on', async () => {
+    const { tm, nodeId, evidenceId } = await settledOnAParaphrase();
+    tm.qualifyEvidence(nodeId, evidenceId, { artifact: artifact('cache-stats.log') });
+    const node = tm.getHypothesis(nodeId)!;
+    expect(hasUngroundedVerdict(node)).toBe(false);
+    expect(node.evidence[0].kind).toBe('artifact');
+    expect(node.evidence[0].artifact?.filename).toBe('cache-stats.log');
+  });
+
+  it('leaves the verdict standing, which is the whole point of attaching rather than re-filing', async () => {
+    const { tm, nodeId, evidenceId } = await settledOnAParaphrase();
+    tm.qualifyEvidence(nodeId, evidenceId, { artifact: artifact('cache-stats.log') });
+    const node = tm.getHypothesis(nodeId)!;
+    expect(node.status).toBe('eliminated');
+    expect(node.conclusion?.reason).toBe('the cache is warm');
+  });
+
+  it('refuses a second capture on one record, rather than replacing the first', async () => {
+    // A record cites one capture: the excerpt and the digest describe those bytes,
+    // and replacing them would leave both describing something nothing points at.
+    const { tm, nodeId, evidenceId } = await settledOnAParaphrase();
+    tm.qualifyEvidence(nodeId, evidenceId, { artifact: artifact('cache-stats.log') });
+    expect(() => tm.qualifyEvidence(nodeId, evidenceId, { artifact: artifact('other.log') }))
+      .toThrow(/already cites captured bytes \(cache-stats\.log\)/);
+    expect(tm.getHypothesis(nodeId)!.evidence[0].artifact?.filename).toBe('cache-stats.log');
+  });
+
+  it('leaves a record with no capture a paraphrase, so the mark is only cleared when earned', async () => {
+    const { tm, nodeId, evidenceId } = await settledOnAParaphrase();
+    tm.qualifyEvidence(nodeId, evidenceId, { decisive: true });
+    const node = tm.getHypothesis(nodeId)!;
+    expect(node.evidence[0].kind).toBe('transcription');
+    expect(hasUngroundedVerdict(node)).toBe(true);
+  });
+});

@@ -133,13 +133,19 @@ const TOOL_DEFS = {
     }),
   },
   qualify_evidence: {
-    description: 'Re-label an existing evidence record: mark it as the record the verdict turns on, mark it as not discriminating between the live alternatives (it is retained and still listed, but stops counting toward a verdict), or link it to records it only observes jointly with. Only available while the session is open.',
+    description: 'Amend an existing evidence record: mark it as the record the verdict turns on, mark it as not discriminating between the live alternatives (it is retained and still listed, but stops counting toward a verdict), link it to records it only observes jointly with, or attach captured bytes so it cites them verbatim. Attaching bytes is how a verdict already settled gets grounded — re-filing the observation would be refused as agreeing with the verdict. Only available while the session is open.',
     input: z.object({
       hypothesisId: identifier().describe('ID of the hypothesis holding the record'),
-      evidenceId: identifier().describe('ID of the evidence record to re-label'),
+      evidenceId: identifier().describe('ID of the evidence record to amend'),
       decisive: z.boolean().optional().describe('Set when the verdict turns on this record.'),
       nonDiagnostic: z.boolean().optional().describe('Set when the record does not discriminate between the live alternatives.'),
       linkedGroupId: identifier().optional().describe('Shared id for records that only support or refute jointly; a group counts as one observation.'),
+      artifactPath: nonBlank(4096).optional().describe(
+        'Path to a file holding the verbatim evidence this record describes. The file is snapshotted so the record cites the bytes themselves rather than a retelling of them.'),
+      artifactContent: nonBlank(1_000_000).optional().describe(
+        'The verbatim bytes themselves, for output that was never a file. Mutually exclusive with artifactPath.'),
+      command: nonBlank(4096).optional().describe('The command that produced the bytes, recorded with the capture.'),
+      exitCode: z.number().int().optional().describe('Exit status of that command.'),
     }),
   },
   get_tree: {
@@ -425,11 +431,14 @@ export function getToolHandlers(
       });
     },
     run: ({ hypothesisId, type, content, source, decisive }, artifact) => {
-      tm.addEvidence(hypothesisId, type, content, source, decisive, artifact);
+      const { evidence } = tm.addEvidence(hypothesisId, type, content, source, decisive, artifact);
       // Re-read: addEvidence returns the cascade detail, but the formatter needs
       // the post-mutation hypothesis snapshot.
       const hypothesis = tm.getHypothesis(hypothesisId)!;
-      return { text: fmt.formatAddEvidence(hypothesisId, hypothesis, tm), sessionId: hypothesis.sessionId };
+      return {
+        text: fmt.formatAddEvidence(hypothesisId, hypothesis, tm, evidence.id),
+        sessionId: hypothesis.sessionId,
+      };
     },
     // A capture whose mutation was refused would otherwise leave bytes that
     // nothing references.
@@ -453,9 +462,50 @@ export function getToolHandlers(
     return { text: fmt.formatSetOutOfScope(hypothesis, tm), sessionId: hypothesis.sessionId };
   }));
 
-  handlers.set('qualify_evidence', dispatch(TOOL_DEFS.qualify_evidence.input, ({ hypothesisId, evidenceId, decisive, nonDiagnostic, linkedGroupId }) => {
-    const hypothesis = tm.qualifyEvidence(hypothesisId, evidenceId, { decisive, nonDiagnostic, linkedGroupId });
-    return { text: fmt.formatQualifyEvidence(hypothesis, evidenceId, tm), sessionId: hypothesis.sessionId };
+  handlers.set('qualify_evidence', dispatch(TOOL_DEFS.qualify_evidence.input, {
+    // Capturing bytes is file I/O, so it runs before the mutation and outside it,
+    // exactly as it does for a record being filed for the first time.
+    prepare: async (input) => {
+      if (input.artifactPath !== undefined && input.artifactContent !== undefined) {
+        throw new ArtifactError(
+          'artifactPath and artifactContent both offer bytes to capture, and a record cites one capture. '
+          + 'Keep the one this record is about.',
+        );
+      }
+      if (input.artifactPath === undefined && input.artifactContent === undefined) {
+        const orphaned = (['command', 'exitCode'] as const).filter((field) => input[field] !== undefined);
+        if (orphaned.length > 0) {
+          throw new ArtifactError(
+            `${orphaned.join(', ')} describe${orphaned.length === 1 ? 's' : ''} a capture, so ` +
+            'artifactPath or artifactContent is needed to say which bytes. ' +
+            'Drop the field, or supply the bytes it describes.',
+          );
+        }
+        return undefined;
+      }
+      const hypothesis = tm.getHypothesis(input.hypothesisId);
+      if (!hypothesis) throw new TreeError(`Hypothesis not found: ${input.hypothesisId}`);
+      return captureArtifact({
+        artifactsDir: getArtifactsDir(),
+        sessionId: hypothesis.sessionId,
+        ...(input.artifactPath === undefined
+          ? { content: input.artifactContent }
+          : { sourcePath: input.artifactPath }),
+        command: input.command,
+        exitCode: input.exitCode,
+      });
+    },
+    run: ({ hypothesisId, evidenceId, decisive, nonDiagnostic, linkedGroupId }, artifact) => {
+      const hypothesis = tm.qualifyEvidence(hypothesisId, evidenceId, {
+        decisive, nonDiagnostic, linkedGroupId, artifact,
+      });
+      return { text: fmt.formatQualifyEvidence(hypothesis, evidenceId, tm), sessionId: hypothesis.sessionId };
+    },
+    // A capture whose mutation was refused would otherwise leave bytes that
+    // nothing references.
+    compensate: async (artifact) => {
+      if (artifact) await discardArtifact(getArtifactsDir(), artifact);
+    },
   }));
 
   // Read-only: no sessionId → dispatch skips the drain.
