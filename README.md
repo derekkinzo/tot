@@ -112,7 +112,7 @@ tree. Each MCP server instance picks its own free port at startup.
 | `get_tree` | View a tree — the session `get_status` summarizes, or any other session of the project by id |
 | `get_status` | Progress summary + stagnation detection |
 | `validate_decomposition` | Check structural properties of a decomposition |
-| `qualify_evidence` | Mark a record decisive, non-discriminating, or dependent on another |
+| `qualify_evidence` | Amend a record: mark it decisive, non-discriminating, or dependent on another, or attach captured bytes so it cites them verbatim |
 
 ## Claude Code Skills, Agents, and Hooks
 

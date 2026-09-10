@@ -73,6 +73,16 @@ describe('verbatim evidence capture, end to end', () => {
     return ids;
   }
 
+  /** Splits a node, returning the new child ids. */
+  async function decomposeInto(client: Client, parentId: string, children: string[]): Promise<string[]> {
+    const res: any = await client.callTool({
+      name: 'decompose', arguments: { parentId, axis: 'by stage', children },
+    });
+    expect(res.isError).toBeFalsy();
+    const text = res.content?.find((c: any) => c.type === 'text')?.text ?? '';
+    return JSON.parse(text.split('\n')[0]).childIds;
+  }
+
   async function rootOf(client: Client): Promise<string> {
     return (await newTree(client)).rootId;
   }
@@ -468,6 +478,68 @@ describe('verbatim evidence capture, end to end', () => {
     const meta = await (await fetch(
       `http://localhost:${reopened.s.port}/api/artifacts/${ref.sessionId}/${ref.id}/meta`)).json();
     expect(meta.integrity).toBe('verified');
+  });
+
+  it('grounds a verdict already settled, through the record it rests on', async () => {
+    // The refusal that sends a caller here: the record the verdict rests on agrees
+    // with the verdict, so re-filing it with the bytes is refused, and filing them
+    // as the opposite type would tear the verdict down to attach its own evidence.
+    const { s, client } = await start();
+    const { rootId } = await newTree(client);
+    const [a] = await decomposeInto(client, rootId, ['Cause A', 'Cause B']);
+
+    const filed: any = await client.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: a, type: 'refutes', content: 'the cache is warm on every run' },
+    });
+    expect(filed.isError).toBeFalsy();
+    // The id comes back from the call that filed the record, so amending it needs
+    // no round trip through the whole tree.
+    const { evidenceId } = JSON.parse(
+      (filed.content.find((c: any) => c.type === 'text')?.text ?? '').split('\n')[0],
+    );
+    expect(evidenceId, 'add_evidence did not report the id of the record it filed').toBeTruthy();
+    await client.callTool({ name: 'eliminate_hypothesis', arguments: { hypothesisId: a, reason: 'the cache is warm' } });
+
+    // Re-filing the same observation with the bytes is refused, and says where to go.
+    const refiled: any = await client.callTool({
+      name: 'add_evidence',
+      arguments: { hypothesisId: a, type: 'refutes', content: 'the cache is warm on every run', artifactPath: log('cache.log', LOG_BODY) },
+    });
+    expect(refiled.isError).toBe(true);
+    const refusal = refiled.content.find((c: any) => c.type === 'text')?.text ?? '';
+    expect(refusal).toMatch(/qualify_evidence/);
+    expect(storedIds(), 'the refused capture left bytes behind').toEqual([]);
+
+    // Attaching them to the record on the ledger grounds the verdict and keeps it.
+    const amended: any = await client.callTool({
+      name: 'qualify_evidence',
+      arguments: { hypothesisId: a, evidenceId, artifactPath: log('cache.log', LOG_BODY) },
+    });
+    expect(amended.isError).toBeFalsy();
+    // Said back, because a caller told the record is "unqualified" cannot tell an
+    // attachment from an amendment that did nothing.
+    expect(amended.content.find((c: any) => c.type === 'text')?.text ?? '')
+      .toMatch(/verbatim, citing cache\.log/);
+
+    const { hypotheses } = await state(s);
+    const node = hypotheses.find((h: any) => h.id === a);
+    expect(node.status).toBe('eliminated');
+    const ref = node.evidence.find((e: any) => e.artifact)?.artifact;
+    expect(ref, 'the verdict still cites no capture').toBeTruthy();
+    const meta = await (await fetch(`http://localhost:${s.port}/api/artifacts/${ref.sessionId}/${ref.id}/meta`)).json();
+    expect(meta.integrity).toBe('verified');
+  });
+
+  it('leaves no stored bytes behind when a capture offered to qualify_evidence is refused', async () => {
+    const { client } = await start();
+    const { rootId } = await newTree(client);
+    const res: any = await client.callTool({
+      name: 'qualify_evidence',
+      arguments: { hypothesisId: rootId, evidenceId: '11111111-1111-4111-8111-111111111111', artifactPath: log('b.log', LOG_BODY) },
+    });
+    expect(res.isError).toBe(true);
+    expect(storedIds()).toEqual([]);
   });
 
   it('leaves no stored bytes behind when the mutation is refused', async () => {

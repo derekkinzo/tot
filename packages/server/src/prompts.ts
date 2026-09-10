@@ -80,7 +80,7 @@ export function buildChallengePrompt(hypothesisId: string): string {
 5. **Check ordering.** Did the supposed cause precede the effect? Confirm against dated records and record what you found — a record's timestamp is when it was written, not when the phenomenon occurred, so an ordering claim only survives if the record states it.
 6. **Design a discriminating test.** One observation whose result separates this claim from its rivals (cf. Platt's strong inference, 1964). Record the proposal with \`add_evidence\` type \`neutral\`, stating what each rival predicts, so the test is in the audit trail whether or not it gets run.
 
-Call \`add_evidence\` for every finding with the type it earns (supports / refutes / neutral); a finding left in your reply alone does not reach the tree. Use \`qualify_evidence\` to mark a record the verdict turns on as \`decisive\`, and one that does not separate the live alternatives as \`nonDiagnostic\`.
+Call \`add_evidence\` for every finding with the type it earns (supports / refutes / neutral); a finding left in your reply alone does not reach the tree. Use \`qualify_evidence\` to mark a record the verdict turns on as \`decisive\`, and one that does not separate the live alternatives as \`nonDiagnostic\`. It also attaches captured bytes to a record already filed, which is how a verdict that is already settled is grounded — re-filing the observation is refused, because a record agreeing with a settled verdict can neither change it nor withdraw its grounds.
 
 Report what survived, what you refuted, which rivals now have evidence, and the test you proposed.`;
 }
@@ -156,7 +156,7 @@ When a hypothesis has survived the refutation tests applied to it, call \`corrob
 The session resolves only when every other top-level branch is terminal (eliminated, corroborated, or out-of-scope).
 
 ### Reading and qualifying what is recorded
-\`get_status\` summarizes progress, unexplored branches, and the ids of the project's other sessions; \`get_tree\` reads any of them, resolved ones included, and its \`full\` form is what an export should read. \`qualify_evidence\` marks a record the verdict turns on as \`decisive\`, marks one that does not separate the live alternatives as \`nonDiagnostic\` — retained and still listed, but weighing nothing — and links records that restate one observation under a shared \`linkedGroupId\` so the group counts once.
+\`get_status\` summarizes progress, unexplored branches, and the ids of the project's other sessions; \`get_tree\` reads any of them, resolved ones included, and its \`full\` form is what an export should read. \`qualify_evidence\` marks a record the verdict turns on as \`decisive\`, marks one that does not separate the live alternatives as \`nonDiagnostic\` — retained and still listed, but weighing nothing — links records that restate one observation under a shared \`linkedGroupId\` so the group counts once, and attaches captured bytes to a record already filed. On a settled hypothesis only a record that cuts against the verdict is admitted, and it reopens the branch; a neutral record is filed and leaves the verdict standing.
 
 ## Key Principles
 

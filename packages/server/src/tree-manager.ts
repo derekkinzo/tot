@@ -14,7 +14,7 @@ import type {
   TreeState,
 } from './types.js';
 import { STAGNATION_THRESHOLD_DEFAULT, MAX_DEPTH_DEFAULT, MAX_HYPOTHESES_DEFAULT } from './defaults.js';
-import { nodeLabel, readsAsClause, reopensVerdict, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
+import { admitsEvidence, nodeLabel, readsAsClause, reopensVerdict, splitProse, titleProblem, type HypothesisDraft } from '@tot-mcp/shared';
 
 /**
  * Wordings that read as a residual branch. Word-bounded so "another" is not read
@@ -297,22 +297,26 @@ export class TreeManager extends EventEmitter {
     if (content.trim().length === 0) {
       throw new TreeError('Evidence content cannot be empty or whitespace-only');
     }
-    // Every verdict is provisional, so a record that cuts against one is
-    // admitted and reopens the branch (see {@link reopensVerdict}). A record
-    // that agrees with a settled verdict is not: accumulating agreement on a
-    // question already answered is the satisficing move eliminative method
-    // exists to prevent, and it cannot change the disposition either way.
-    if (isTerminal(hypothesis.status) && !reopensVerdict(hypothesis.status, type)) {
-      // out-of-scope admits every type, so only the two grounded verdicts reach here.
-      const admitted = hypothesis.status === 'corroborated' ? 'refuting' : 'supporting';
+    // Every verdict is provisional, so a record that cuts against one is admitted
+    // and reopens the branch. Only a record that AGREES with a settled verdict is
+    // refused — see {@link admitsEvidence}.
+    if (!admitsEvidence(hypothesis.status, type)) {
+      // Neutral is admitted everywhere and out-of-scope admits every type, so what
+      // reaches here is agreement with one of the two grounded verdicts.
+      const agreeing = hypothesis.status === 'corroborated' ? 'A supporting record' : 'A refutation';
+      const cutting = hypothesis.status === 'corroborated' ? 'a refutation' : 'a supporting record';
       throw new TreeError(
-        `Only ${admitted} evidence is admitted on ${withArticle(hypothesis.status)} hypothesis, `
-        + 'because it withdraws the grounds the verdict rests on and reopens the branch. '
-        + 'A record that agrees with the verdict leaves it where it stands.',
+        `${agreeing} agrees with the verdict already settled on ${withArticle(hypothesis.status)} hypothesis, `
+        + 'so it can neither change the disposition nor withdraw the grounds it rests on. '
+        + `Only ${cutting} would withdraw them, and it reopens the branch. `
+        + 'To file this observation without disturbing the verdict, record it as neutral; '
+        + 'to attach captured bytes to the record the verdict already rests on, use qualify_evidence.',
       );
     }
-    // Past that guard, any evidence on a settled node is evidence against it.
-    const reopensBranch = isTerminal(hypothesis.status);
+    // A record that cuts against the verdict withdraws its grounds; one that is
+    // merely admitted alongside it — a neutral observation — leaves it standing.
+    const reopensBranch = isTerminal(hypothesis.status)
+      && reopensVerdict(hypothesis.status, type);
 
     // A closed session accepts no other evidence: pruning never cascades, so a
     // closed session can retain pending/exploring descendants under a pruned
@@ -400,7 +404,13 @@ export class TreeManager extends EventEmitter {
   qualifyEvidence(
     hypothesisId: string,
     evidenceId: string,
-    qualifiers: { decisive?: boolean; nonDiagnostic?: boolean; linkedGroupId?: string },
+    qualifiers: {
+      decisive?: boolean;
+      nonDiagnostic?: boolean;
+      linkedGroupId?: string;
+      /** Bytes to attach, making the record verbatim. */
+      artifact?: ArtifactRef;
+    },
   ): Hypothesis {
     const hypothesis = this.getHypothesisOrThrow(hypothesisId);
     this.assertSessionOpen(hypothesis.sessionId, 'qualify evidence');
@@ -425,6 +435,25 @@ export class TreeManager extends EventEmitter {
       }
     }
 
+    // Bytes attached to a record already on the ledger, which is the only way to
+    // ground a verdict that is already settled: the record the verdict rests on
+    // agrees with it, so re-filing it with a capture would be refused, and filing
+    // it as the opposite type would tear the verdict down to attach its own
+    // evidence. Refused where the record already cites a capture, because a record
+    // cites one, and replacing it would leave the excerpt and the digest of the
+    // first describing bytes nothing points at.
+    if (qualifiers.artifact !== undefined) {
+      if (record.artifact !== undefined) {
+        throw new TreeError(
+          `This record already cites captured bytes (${record.artifact.filename}), and a record cites one capture. `
+          + 'File a separate record for the other bytes.',
+        );
+      }
+      record.artifact = qualifiers.artifact;
+      // Derived from the bytes, exactly as it is at capture, so the two cannot
+      // disagree about whether a record is verbatim.
+      record.kind = 'artifact';
+    }
     if (qualifiers.decisive !== undefined) record.decisive = qualifiers.decisive;
     if (qualifiers.nonDiagnostic !== undefined) record.nonDiagnostic = qualifiers.nonDiagnostic;
     if (qualifiers.linkedGroupId !== undefined) record.linkedGroupId = qualifiers.linkedGroupId;

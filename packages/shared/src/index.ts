@@ -262,6 +262,26 @@ export function reopensVerdict(status: HypothesisStatus, type: Evidence['type'])
   return status === 'out-of-scope';
 }
 
+/**
+ * Whether a record of this type may be filed on a hypothesis in this status.
+ *
+ * Distinct from {@link reopensVerdict}, which asks what a record does to a
+ * verdict once filed. A record is refused only where it AGREES with a settled
+ * verdict: agreement can neither change the disposition nor withdraw its
+ * grounds, so accumulating it on a question already answered is the satisficing
+ * move eliminative method exists to prevent.
+ *
+ * A neutral record agrees with nothing. It makes no claim about the hypothesis,
+ * so it is filed wherever it is offered and leaves any verdict where it stands —
+ * except on out-of-scope, whose only claim is that the branch was never examined,
+ * which any observation of it contradicts.
+ */
+export function admitsEvidence(status: HypothesisStatus, type: Evidence['type']): boolean {
+  if (!isTerminal(status)) return true;
+  if (type === 'neutral') return true;
+  return reopensVerdict(status, type);
+}
+
 // ─── Evidence counts ───
 
 /**

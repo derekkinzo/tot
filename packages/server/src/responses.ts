@@ -214,7 +214,12 @@ export function formatAddHypothesis(hypothesis: Hypothesis, tm: TreeManager): st
   return result;
 }
 
-export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, tm: TreeManager): string {
+export function formatAddEvidence(
+  hypothesisId: string,
+  hypothesis: Hypothesis,
+  tm: TreeManager,
+  evidenceId?: string,
+): string {
   // Reuse the advisory module's counts so the gate that fires and the number
   // printed in the warning string cannot drift apart.
   const supporting = countSupporting(hypothesis);
@@ -226,7 +231,9 @@ export function formatAddEvidence(hypothesisId: string, hypothesis: Hypothesis, 
   // siblings — a corroborated sibling is a settled verdict, not a competitor.
   const openSiblings = siblings.filter((s) => isOpen(s.status));
 
-  let result = JSON.stringify({ hypothesisId, evidenceCount: hypothesis.evidence.length }) + '\n\n' +
+  // The record's own id, so amending it later — attaching captured bytes to it,
+  // marking it decisive — does not need the whole tree read back to find it.
+  let result = JSON.stringify({ hypothesisId, evidenceId, evidenceCount: hypothesis.evidence.length }) + '\n\n' +
     `✓ Evidence added to "${nodeLabel(hypothesis)}"\n\n`;
 
   // Evidence matrix across siblings
@@ -530,6 +537,9 @@ export function formatQualifyEvidence(hypothesis: Hypothesis, evidenceId: string
     record?.decisive ? 'decisive' : null,
     record?.nonDiagnostic ? 'not discriminating' : null,
     record?.linkedGroupId ? `linked to group ${record.linkedGroupId}` : null,
+    // Named among the marks, because a caller who attached bytes and is told the
+    // record is "unqualified" cannot tell that from an amendment that did nothing.
+    record?.artifact ? `verbatim, citing ${record.artifact.filename}` : null,
   ].filter(Boolean);
   return `✓ Evidence ${evidenceId.slice(0, 8)} on "${nodeLabel(hypothesis)}" is now ${marks.join(', ') || 'unqualified'}\n\n` +
     `Weight: ${supportingWeight(hypothesis)} supporting, ${refutingWeight(hypothesis)} refuting ` +

@@ -290,26 +290,71 @@ describe('TreeManager', () => {
       expect(events.some((e) => e.type === 'session-reopened')).toBe(true);
     });
 
-    it('rejects refuting and neutral evidence on an eliminated hypothesis', () => {
+    it('rejects a further refutation on an eliminated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'refutes', 'Bad');
       tm.eliminateHypothesis(root.id, 'Done');
-      // Neither record can move the verdict: further refutation agrees with
-      // it, and a neutral record establishes nothing either way. The refusal
-      // must come from the verdict, not from the session having closed behind
-      // it — hence matching the wording.
+      // It agrees with the verdict, so it can neither move it nor withdraw its
+      // grounds. The refusal must come from the verdict, not from the session
+      // having closed behind it — hence matching the wording.
       expect(() => tm.addEvidence(root.id, 'refutes', 'More of the same'))
-        .toThrow(/Only supporting evidence is admitted on an eliminated hypothesis/);
-      expect(() => tm.addEvidence(root.id, 'neutral', 'Unrelated'))
-        .toThrow(/Only supporting evidence is admitted on an eliminated hypothesis/);
+        .toThrow(/agrees with the verdict already settled on an eliminated hypothesis/);
     });
 
-    it('rejects supporting and neutral evidence on a corroborated hypothesis', () => {
+    it('rejects a further supporting record on a corroborated hypothesis', () => {
       const { root } = tm.createSession('Problem');
       tm.addEvidence(root.id, 'supports', 'Good');
       tm.corroborateHypothesis(root.id, 'Found it');
-      expect(() => tm.addEvidence(root.id, 'supports', 'More')).toThrow(TreeError);
-      expect(() => tm.addEvidence(root.id, 'neutral', 'Extra')).toThrow(TreeError);
+      expect(() => tm.addEvidence(root.id, 'supports', 'More'))
+        .toThrow(/agrees with the verdict already settled on a corroborated hypothesis/);
+    });
+
+    it('says how to file the observation without disturbing the verdict', () => {
+      // A refusal that only names the rule leaves the caller with an observation
+      // and no way to record it.
+      const { root } = tm.createSession('Problem');
+      tm.addEvidence(root.id, 'supports', 'Good');
+      tm.corroborateHypothesis(root.id, 'Found it');
+      expect(() => tm.addEvidence(root.id, 'supports', 'More')).toThrow(/record it as neutral/);
+      expect(() => tm.addEvidence(root.id, 'supports', 'More')).toThrow(/qualify_evidence/);
+    });
+
+    describe('a neutral record on a settled hypothesis', () => {
+      // Neutral agrees with nothing: it makes no claim about the hypothesis, so it
+      // can neither confirm a verdict nor cut against one. Refusing it would leave
+      // context and background observations with nowhere to go once a branch is
+      // settled, which is most of an investigation's life.
+      const settledLeaf = () => {
+        const { root } = tm.createSession('Problem');
+        // A live sibling, so the session stays open and the refusal (or admission)
+        // can only come from the verdict on this node.
+        const kids = tm.decompose(root.id, [{ title: 'Cause A' }, { title: 'Cause B' }], { axis: 'by cause' });
+        tm.addEvidence(kids[0].id, 'refutes', 'ruled out');
+        tm.eliminateHypothesis(kids[0].id, 'ruled out');
+        return kids[0].id;
+      };
+
+      it('is filed', () => {
+        const id = settledLeaf();
+        expect(() => tm.addEvidence(id, 'neutral', 'the same run also logged a cache warm-up')).not.toThrow();
+        expect(tm.getHypothesis(id)!.evidence.map((e) => e.type)).toEqual(['refutes', 'neutral']);
+      });
+
+      it('leaves the verdict where it stands', () => {
+        const id = settledLeaf();
+        tm.addEvidence(id, 'neutral', 'the same run also logged a cache warm-up');
+        const node = tm.getHypothesis(id)!;
+        expect(node.status).toBe('eliminated');
+        expect(node.conclusion?.reason).toBe('ruled out');
+      });
+
+      it('still reopens out-of-scope, whose only claim is that the branch went unexamined', () => {
+        const { root } = tm.createSession('Problem');
+        const kids = tm.decompose(root.id, [{ title: 'Cause A' }, { title: 'Cause B' }], { axis: 'by cause' });
+        tm.setOutOfScope(kids[0].id, 'set aside');
+        tm.addEvidence(kids[0].id, 'neutral', 'an observation of the branch that was set aside');
+        expect(tm.getHypothesis(kids[0].id)!.status).toBe('exploring');
+      });
     });
 
     it('any evidence on an out-of-scope hypothesis reopens it', () => {
@@ -669,15 +714,38 @@ describe('TreeManager', () => {
       expect(ancestorUpdateIdx).toBeGreaterThan(reopenIdx);
     });
 
-    it('rejects supports/neutral evidence on a corroborated leaf', () => {
-      const { root } = tm.createSession('Problem');
-      const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
-      tm.addEvidence(b.id, 'refutes', 'no');
-      tm.eliminateHypothesis(b.id, 'no');
-      tm.addEvidence(a.id, 'supports', 'good');
-      tm.corroborateHypothesis(a.id, 'A');
-      expect(() => tm.addEvidence(a.id, 'supports', 'more')).toThrow(TreeError);
-      expect(() => tm.addEvidence(a.id, 'neutral', 'extra')).toThrow(TreeError);
+    describe('a corroborated leaf that closed its session', () => {
+      // Two refusals meet here and say different things, so each is named: the
+      // verdict refuses a record that agrees with it, and a closed session refuses
+      // a record that would not reopen it.
+      const closedOnA = () => {
+        const { root } = tm.createSession('Problem');
+        const [a, b] = tm.decompose(root.id, [{ title: 'A' }, { title: 'B' }], { axis: 'by cause' });
+        tm.addEvidence(b.id, 'refutes', 'no');
+        tm.eliminateHypothesis(b.id, 'no');
+        tm.addEvidence(a.id, 'supports', 'good');
+        tm.corroborateHypothesis(a.id, 'A');
+        return a.id;
+      };
+
+      it('refuses more support, because it agrees with the verdict', () => {
+        expect(() => tm.addEvidence(closedOnA(), 'supports', 'more'))
+          .toThrow(/agrees with the verdict already settled on a corroborated hypothesis/);
+      });
+
+      it('refuses a neutral record, because the session is closed rather than because the verdict is', () => {
+        // A neutral record is admitted on a settled verdict, but this session has
+        // resolved: a record that does not reopen it would mutate a completed
+        // investigation without re-running closure.
+        expect(() => tm.addEvidence(closedOnA(), 'neutral', 'extra'))
+          .toThrow(/session/i);
+      });
+
+      it('still admits the refutation that reopens it', () => {
+        const id = closedOnA();
+        tm.addEvidence(id, 'refutes', 'a counter-instance');
+        expect(tm.getHypothesis(id)!.status).toBe('exploring');
+      });
     });
 
     it('does not resolve when a pending grandchild hides under an eliminated intermediate of a corroborated branch', () => {
